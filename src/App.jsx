@@ -492,13 +492,72 @@ export default function App(){
   };
 
   // ── PAYMENTS ───────────────────────────────────────────────────────────────
-  const markPaid=async sid=>{
+  // ── PAYMENT STATE ──────────────────────────────────────────────────────────
+  const[paymentsLog,setPaymentsLog]=useState([]);
+  const[pmModal,setPmModal]=useState(false);
+  const[pmForm,setPmForm]=useState({method:"cash",amount:"",check_number:"",bank_name:"",note:"",cust_id:"",truck_id:"",invoice_ids:[]});
+  const[pmTab,setPmTab]=useState("log"); // "log" | "collect"
+
+  // Load payments log
+  useEffect(()=>{
+    if(authReady&&session&&profile){
+      supabase.from("payments_log").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data)setPaymentsLog(data);});
+    }
+  },[authReady,session,profile]);
+
+  const markPaid=async(sid,method="cash",amount=0,checkNum="",note="",collectedBy="")=>{
     const ex=pmtFor(sid);
-    if(ex)await supabase.from("payments").update({status:"paid"}).eq("sale_id",sid);
-    else await supabase.from("payments").insert({sale_id:sid,status:"paid"});
-    setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"paid"}:p));showToast("Marked paid");
+    const sale=sales.find(s=>s.id===sid);
+    const gt=sale?sale.total*(1+taxRate/100):0;
+    const paidAmt=amount||gt;
+    if(ex)await supabase.from("payments").update({status:"paid",method,amount:paidAmt,check_number:checkNum,note,collected_by:collectedBy,paid_at:new Date().toISOString()}).eq("sale_id",sid);
+    else await supabase.from("payments").insert({sale_id:sid,status:"paid",method,amount:paidAmt,check_number:checkNum,note,collected_by:collectedBy,paid_at:new Date().toISOString()});
+    setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"paid",method,amount:paidAmt}:p));
+    showToast("Payment recorded ✓");
   };
-  const markUnpaid=async sid=>{await supabase.from("payments").update({status:"unpaid"}).eq("sale_id",sid);setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"unpaid"}:p));showToast("Marked unpaid");};
+  const markUnpaid=async sid=>{await supabase.from("payments").update({status:"unpaid",paid_at:null}).eq("sale_id",sid);setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"unpaid"}:p));showToast("Marked unpaid");};
+
+  const recordPayment=async()=>{
+    if(!pmForm.amount||!pmForm.cust_id)return showToast("Amount and customer required","error");
+    if((pmForm.method==="check"||pmForm.method==="money_order")&&!pmForm.check_number)return showToast("Check/MO number required","error");
+    setSaving(true);
+    try{
+      const truck=trucks.find(t=>t.id===pmForm.truck_id);
+      const rec={
+        id:"PMT-"+uid(),
+        truck_id:pmForm.truck_id||null,
+        cust_id:pmForm.cust_id,
+        collected_by:truck?.driver||profile?.full_name||"Admin",
+        method:pmForm.method,
+        amount:parseFloat(pmForm.amount),
+        check_number:pmForm.check_number||"",
+        bank_name:pmForm.bank_name||"",
+        note:pmForm.note||"",
+        invoice_ids:pmForm.invoice_ids,
+        date:nowStr(),
+        created_at:new Date().toISOString(),
+      };
+      await supabase.from("payments_log").insert(rec);
+      // Mark selected invoices as paid
+      for(const sid of pmForm.invoice_ids){
+        await markPaid(sid,pmForm.method,0,pmForm.check_number,pmForm.note,rec.collected_by);
+      }
+      setPaymentsLog(prev=>[rec,...prev]);
+      showToast(`${pmForm.method==="cash"?"💵":"💳"} Payment of $${parseFloat(pmForm.amount).toFixed(2)} recorded!`);
+      setPmModal(false);
+      setPmForm({method:"cash",amount:"",check_number:"",bank_name:"",note:"",cust_id:"",truck_id:"",invoice_ids:[]});
+    }catch(e){showToast(e.message,"error");}
+    setSaving(false);
+  };
+
+  const methodIcon=m=>({cash:"💵",check:"🏦",money_order:"📋",credit_card:"💳",debit_card:"🏧",zelle:"📱"}[m]||"💳");
+  const methodLabel=m=>({cash:"Cash",check:"Check",money_order:"Money Order",credit_card:"Credit Card",debit_card:"Debit Card",zelle:"Zelle/Transfer"}[m]||m);
+
+  const exportPayments=()=>{
+    const rows=[["ID","Date","Customer","Driver","Method","Amount","Check#","Bank","Invoices","Note"]];
+    paymentsLog.forEach(p=>{rows.push([p.id,p.date,getC(p.cust_id)?.name,p.collected_by,methodLabel(p.method),p.amount.toFixed(2),p.check_number,p.bank_name,(p.invoice_ids||[]).join(";"),p.note]);});
+    downloadCSV(rows,"payments.csv");
+  };
 
   // ── ORDERS ─────────────────────────────────────────────────────────────────
   const approveOrder=async order=>{
@@ -548,6 +607,7 @@ export default function App(){
     {id:"orders",label:"Incoming Orders",icon:ic.orders,badge:orders.filter(o=>o.status==="pending").length},
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
     {id:"ar",label:"Accounts Receivable",icon:ic.ar},
+    {id:"payments",label:"Payments",icon:ic.settle,badge:visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length||0},
     {id:"settlement",label:"Daily Settlement",icon:ic.settle},
     ...(isAdmin?[{id:"pl",label:"P&L Report",icon:ic.pl}]:[]),
     {id:"customers",label:"Customers",icon:ic.users},
@@ -871,7 +931,206 @@ export default function App(){
             </div>
           </div>}
 
-          {/* ══ SETTLEMENT ══ */}
+          {/* ══ PAYMENTS ══ */}
+          {tab==="payments"&&<div className="fu">
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
+              {[
+                {l:"Total Collected",   v:`$${paymentsLog.reduce((a,p)=>a+p.amount,0).toFixed(2)}`,         c:"#059669"},
+                {l:"💵 Cash",           v:`$${paymentsLog.filter(p=>p.method==="cash").reduce((a,p)=>a+p.amount,0).toFixed(2)}`,          c:"#059669"},
+                {l:"🏦 Checks & MO",   v:`$${paymentsLog.filter(p=>["check","money_order"].includes(p.method)).reduce((a,p)=>a+p.amount,0).toFixed(2)}`, c:"#7c3aed"},
+                {l:"💳 Cards & Zelle", v:`$${paymentsLog.filter(p=>["credit_card","debit_card","zelle"].includes(p.method)).reduce((a,p)=>a+p.amount,0).toFixed(2)}`, c:"#0ea5e9"},
+              ].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
+            </div>
+
+            {/* Action bar */}
+            <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+              <button className="btn ba" onClick={()=>setPmModal(true)}>💳 Record Payment</button>
+              <button className="btn bpr" onClick={exportPayments}>{ic.dl} Export CSV</button>
+              <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+                {["log","unpaid"].map(t=>(
+                  <button key={t} className={`btn ${pmTab===t?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>setPmTab(t)}>{t==="log"?"All Payments":"Unpaid Invoices"}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Unpaid invoices list */}
+            {pmTab==="unpaid"&&<div className="card">
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>
+                UNPAID INVOICES — {visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length}
+              </div>
+              {visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length===0
+                ?<Empty icon="✅" msg="ALL INVOICES PAID"/>
+                :<div className="tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Driver</th><th>Grand Total</th><th>Balance Due</th><th>Actions</th></tr></thead>
+                <tbody>{visSales.filter(s=>pmtFor(s.id)?.status!=="paid").map(s=>{
+                  const gt=s.total*(1+taxRate/100);
+                  const cust=getC(s.cust_id);
+                  return(
+                    <tr key={s.id}>
+                      <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td>
+                      <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
+                      <td style={{fontWeight:600}}>{cust?.name}</td>
+                      <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td>
+                      <td style={{fontWeight:700}}>${gt.toFixed(2)}</td>
+                      <td><span style={{fontWeight:700,color:"#dc2626"}}>${gt.toFixed(2)}</span></td>
+                      <td>
+                        <div style={{display:"flex",gap:4}}>
+                          <button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{
+                            setPmForm(f=>({...f,cust_id:s.cust_id,truck_id:s.truck_id,amount:gt.toFixed(2),invoice_ids:[s.id]}));
+                            setPmModal(true);
+                          }}>💵 Collect</button>
+                          <button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>View</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}</tbody></table></div>
+              }
+            </div>}
+
+            {/* Payment log */}
+            {pmTab==="log"&&<div className="card">
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>
+                PAYMENT LOG — {paymentsLog.length} ENTRIES
+              </div>
+              {paymentsLog.length===0?<Empty icon="💳" msg="NO PAYMENTS RECORDED YET"/>:(
+                <div className="tw"><table>
+                  <thead><tr><th>ID</th><th>Date</th><th>Customer</th><th>Driver</th><th>Method</th><th>Amount</th><th>Ref #</th><th>Invoices</th><th>Note</th></tr></thead>
+                  <tbody>{paymentsLog.map(p=>(
+                    <tr key={p.id}>
+                      <td><span className="tag" style={{background:"#f0fdf4",color:"#065f46"}}>{p.id}</span></td>
+                      <td style={{fontSize:11,color:"#6b7280"}}>{p.date}</td>
+                      <td style={{fontWeight:600}}>{getC(p.cust_id)?.name}</td>
+                      <td style={{color:"#6b7280"}}>{p.collected_by}</td>
+                      <td>
+                        <span className={`bdg ${p.method==="cash"?"bg2":p.method==="check"?"bb2":"ba2"}`}>
+                          {methodIcon(p.method)} {methodLabel(p.method)}
+                        </span>
+                      </td>
+                      <td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#059669"}}>${p.amount.toFixed(2)}</span></td>
+                      <td style={{fontFamily:"monospace",fontSize:11,color:"#6b7280"}}>{p.check_number||"—"}{p.bank_name&&<div style={{fontSize:9,color:"#9ca3af"}}>{p.bank_name}</div>}</td>
+                      <td style={{fontSize:11,color:"#7c3aed"}}>{(p.invoice_ids||[]).join(", ")||"—"}</td>
+                      <td style={{fontSize:11,color:"#6b7280",fontStyle:p.note?"normal":"italic"}}>{p.note||"—"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table></div>
+              )}
+            </div>}
+          </div>}
+
+          {/* ── PAYMENT MODAL ── */}
+          {pmModal&&<Modal title="💳 Record Payment" onClose={()=>setPmModal(false)} wide>
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+              {/* Method selector */}
+              <div>
+                <label>Payment Method</label>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:6}}>
+                  {[
+                    {k:"cash",       l:"💵 Cash"},
+                    {k:"check",      l:"🏦 Check"},
+                    {k:"money_order",l:"📋 Money Order"},
+                    {k:"credit_card",l:"💳 Credit Card"},
+                    {k:"debit_card", l:"🏧 Debit Card"},
+                    {k:"zelle",      l:"📱 Zelle / Transfer"},
+                  ].map(m=>(
+                    <button key={m.k} onClick={()=>setPmForm(f=>({...f,method:m.k}))}
+                      style={{padding:"10px 8px",borderRadius:8,border:`2px solid ${pmForm.method===m.k?"#7c3aed":"#e5e7eb"}`,background:pmForm.method===m.k?"#f5f3ff":"#fff",color:pmForm.method===m.k?"#7c3aed":"#6b7280",fontWeight:pmForm.method===m.k?700:400,cursor:"pointer",fontSize:12,fontFamily:"'Barlow',sans-serif",transition:"all .15s",textAlign:"center"}}>
+                      {m.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Customer + Driver */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                <div><label>Customer *</label>
+                  <select value={pmForm.cust_id} onChange={e=>setPmForm(f=>({...f,cust_id:e.target.value,invoice_ids:[]}))}>
+                    <option value="">— Select Customer —</option>
+                    {customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div><label>Collected By (Driver)</label>
+                  <select value={pmForm.truck_id} onChange={e=>setPmForm(f=>({...f,truck_id:e.target.value}))}>
+                    <option value="">— Select Driver —</option>
+                    {trucks.map(t=><option key={t.id} value={t.id}>{t.driver}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Amount + Reference fields */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                <div><label>Amount Received ($) *</label>
+                  <input type="number" min="0" step="0.01" placeholder="0.00" value={pmForm.amount} onChange={e=>setPmForm(f=>({...f,amount:e.target.value}))}/>
+                </div>
+                {(pmForm.method==="check"||pmForm.method==="money_order")&&(
+                  <div><label>{pmForm.method==="check"?"Check Number *":"Money Order Number *"}</label>
+                    <input placeholder={pmForm.method==="check"?"e.g. 1042":"e.g. MO-8821"} value={pmForm.check_number} onChange={e=>setPmForm(f=>({...f,check_number:e.target.value}))}/>
+                  </div>
+                )}
+                {(pmForm.method==="credit_card"||pmForm.method==="debit_card")&&(
+                  <div><label>Last 4 Digits (optional)</label>
+                    <input placeholder="e.g. 4242" maxLength={4} value={pmForm.check_number} onChange={e=>setPmForm(f=>({...f,check_number:e.target.value.replace(/\D/g,"").slice(0,4)}))}/>
+                  </div>
+                )}
+                {pmForm.method==="zelle"&&(
+                  <div><label>Transfer Reference / Phone</label>
+                    <input placeholder="e.g. Zelle ref #12345 or phone" value={pmForm.check_number} onChange={e=>setPmForm(f=>({...f,check_number:e.target.value}))}/>
+                  </div>
+                )}
+                {pmForm.method==="check"&&(
+                  <div><label>Bank Name</label>
+                    <input placeholder="e.g. Chase Bank" value={pmForm.bank_name} onChange={e=>setPmForm(f=>({...f,bank_name:e.target.value}))}/>
+                  </div>
+                )}
+              </div>
+
+              {/* Link to invoices */}
+              {pmForm.cust_id&&(()=>{
+                const custInvoices=visSales.filter(s=>s.cust_id===pmForm.cust_id&&pmtFor(s.id)?.status!=="paid");
+                if(!custInvoices.length)return<div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#065f46"}}>✅ All invoices for this customer are paid</div>;
+                return(
+                  <div>
+                    <label>Apply to Invoices (select all that apply)</label>
+                    <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:6,maxHeight:200,overflowY:"auto"}}>
+                      {custInvoices.map(s=>{
+                        const gt=s.total*(1+taxRate/100);
+                        const isSelected=pmForm.invoice_ids.includes(s.id);
+                        return(
+                          <div key={s.id} onClick={()=>setPmForm(f=>({...f,invoice_ids:isSelected?f.invoice_ids.filter(x=>x!==s.id):[...f.invoice_ids,s.id]}))}
+                            style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,border:`1.5px solid ${isSelected?"#7c3aed":"#e5e7eb"}`,background:isSelected?"#f5f3ff":"#fff",cursor:"pointer",transition:"all .15s"}}>
+                            <div>
+                              <div style={{fontWeight:600,fontSize:13,color:isSelected?"#7c3aed":"#111"}}>{s.id}</div>
+                              <div style={{fontSize:11,color:"#6b7280"}}>{s.date}</div>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:10}}>
+                              <span style={{fontWeight:700,color:"#dc2626"}}>${gt.toFixed(2)}</span>
+                              <div style={{width:18,height:18,borderRadius:"50%",border:`2px solid ${isSelected?"#7c3aed":"#d1d5db"}`,background:isSelected?"#7c3aed":"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11}}>{isSelected?"✓":""}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {pmForm.invoice_ids.length>0&&(
+                      <div style={{marginTop:8,fontSize:12,color:"#7c3aed",fontWeight:600}}>
+                        {pmForm.invoice_ids.length} invoice{pmForm.invoice_ids.length!==1?"s":""} selected — Total due: ${custInvoices.filter(s=>pmForm.invoice_ids.includes(s.id)).reduce((a,s)=>a+s.total*(1+taxRate/100),0).toFixed(2)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Notes */}
+              <div><label>Notes (optional)</label>
+                <input placeholder="e.g. partial payment, split between cash and check..." value={pmForm.note} onChange={e=>setPmForm(f=>({...f,note:e.target.value}))}/>
+              </div>
+
+              <div style={{height:1,background:"#f3f4f6"}}/>
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                <button className="btn bgh" onClick={()=>setPmModal(false)}>Cancel</button>
+                <button className="btn ba" onClick={recordPayment} disabled={saving}>{ic.chk} Record Payment</button>
+              </div>
+            </div>
+          </Modal>}
           {tab==="settlement"&&<div className="fu">
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:14}}>
               {visTrucks.map(t=>{const d=settlementData(t.id),load=activeLoad(t.id);return(
