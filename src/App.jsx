@@ -153,12 +153,15 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid})=>{
   if(!sale)return null;
   const cust=customers.find(c=>c.id===sale.cust_id),truck=trucks.find(t=>t.id===sale.truck_id);
   const getP=pid=>products.find(p=>p.id===pid);
+  const CARD_FEE=3;
   const tr=parseFloat(co?.tax_rate||8.25),sub=sale.total,tax=sub*(tr/100),gt=sub+tax;
+  const cardFeeAmt=parseFloat((gt*CARD_FEE/100).toFixed(2));
+  const gtCard=parseFloat((gt+cardFeeAmt).toFixed(2));
   return(
     <div className="wdoc">
       <div style={{background:"#7c3aed",padding:"20px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
-        <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:26,color:"#fff"}}>INVOICE</div><div style={{fontSize:11,color:"#5a3a00",marginTop:2}}>#{sale.id}</div></div>
-        <div style={{textAlign:"right"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#fff"}}>{co?.name}</div><div style={{fontSize:10,color:"#5a3a00",lineHeight:1.8,marginTop:2}}>{co?.address}<br/>{co?.phone} · {co?.email}</div></div>
+        <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:26,color:"#fff"}}>INVOICE</div><div style={{fontSize:11,color:"#ddd6fe",marginTop:2}}>#{sale.id}</div></div>
+        <div style={{textAlign:"right"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#fff"}}>{co?.name}</div><div style={{fontSize:10,color:"#ddd6fe",lineHeight:1.8,marginTop:2}}>{co?.address}<br/>{co?.phone} · {co?.email}</div></div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,padding:"16px 28px",background:"#f9fafb",borderBottom:"1px solid #e5e7eb"}}>
         <div>
@@ -186,13 +189,35 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid})=>{
           <tbody>{(sale.items||[]).map((item,i)=>{const p=getP(item.pid);return(<tr key={i}>{[p?.sku,p?.name,p?.unit,item.qty,fmt(p?.price||0),fmt(item.qty*(p?.price||0))].map((v,j)=><td key={j} style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:13,textAlign:j>=3?"right":"left",fontWeight:j===5||j===3?700:400,color:j===0||j===2?"#9ca3af":"#111"}}>{v}</td>)}</tr>);})}</tbody>
         </table>
         <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}>
-          <div style={{width:265}}>
-            {[["Subtotal",fmt(sub)],[`Tax (${tr}%)`,fmt(tax)]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:13,color:"#6b7280"}}>{l}</span><span style={{fontSize:13}}>{v}</span></div>)}
-            <div style={{display:"flex",justifyContent:"space-between",padding:"11px 0",borderTop:"2px solid #111",marginTop:3}}><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,textTransform:"uppercase",color:"#111"}}>Total</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#d97706"}}>{fmt(gt)}</span></div>
+          <div style={{width:300}}>
+            {[["Subtotal",fmt(sub)],[`Tax (${tr}%)`,fmt(tax)]].map(([l,v])=>(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
+                <span style={{fontSize:13,color:"#6b7280"}}>{l}</span><span style={{fontSize:13}}>{v}</span>
+              </div>
+            ))}
+            {/* Cash total */}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111",marginTop:3}}>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#111"}}>💵 CASH / CHECK TOTAL</span>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#059669"}}>{fmt(gt)}</span>
+            </div>
+            {/* Card surcharge line */}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6",background:"#faf5ff",margin:"0 -8px",padding:"6px 8px"}}>
+              <span style={{fontSize:12,color:"#7c3aed"}}>💳 Card surcharge ({CARD_FEE}%)</span>
+              <span style={{fontSize:12,color:"#7c3aed"}}>+{fmt(cardFeeAmt)}</span>
+            </div>
+            {/* Card total */}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0"}}>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#111"}}>💳 CARD TOTAL</span>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#7c3aed"}}>{fmt(gtCard)}</span>
+            </div>
             {!paid&&<div style={{display:"flex",justifyContent:"space-between",padding:"8px 12px",background:"#fef9c3",borderRadius:7,marginTop:3}}><span style={{fontWeight:700,fontSize:12,color:"#854d0e"}}>Balance Due</span><span style={{fontWeight:900,fontSize:15,color:"#854d0e"}}>{fmt(gt)}</span></div>}
           </div>
         </div>
-        <div style={{marginTop:24,paddingTop:12,borderTop:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between"}}><div style={{fontSize:10,color:"#9ca3af"}}>Thank you for your business · Payment due upon delivery</div><div style={{fontSize:10,color:"#9ca3af"}}>{co?.email}</div></div>
+        {/* Payment methods note */}
+        <div style={{marginTop:16,background:"#f9fafb",borderRadius:8,padding:"10px 14px",fontSize:11,color:"#6b7280",lineHeight:1.7}}>
+          <strong style={{color:"#212121"}}>Payment Methods:</strong> Cash · Check · Money Order · Zelle — <strong style={{color:"#059669"}}>No surcharge</strong> &nbsp;|&nbsp; Credit Card · Debit Card — <strong style={{color:"#7c3aed"}}>{CARD_FEE}% surcharge applies</strong>
+        </div>
+        <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between"}}><div style={{fontSize:10,color:"#9ca3af"}}>Thank you for your business · Payment due upon delivery</div><div style={{fontSize:10,color:"#9ca3af"}}>{co?.email}</div></div>
       </div>
     </div>
   );
@@ -517,33 +542,44 @@ export default function App(){
   };
   const markUnpaid=async sid=>{await supabase.from("payments").update({status:"unpaid",paid_at:null}).eq("sale_id",sid);setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"unpaid"}:p));showToast("Marked unpaid");};
 
+  // ── CARD SURCHARGE ─────────────────────────────────────────────────────────
+  const CARD_FEE_PCT = 3; // 3% surcharge on credit & debit cards only
+  const cardMethods = ["credit_card","debit_card"];
+  const hasSurcharge = m => cardMethods.includes(m);
+  const calcSurcharge = (amount, method) => hasSurcharge(method) ? parseFloat((parseFloat(amount||0) * CARD_FEE_PCT/100).toFixed(2)) : 0;
+  const pmSurcharge = useMemo(()=>calcSurcharge(pmForm.amount, pmForm.method),[pmForm.amount, pmForm.method]);
+  const pmTotal = useMemo(()=>(parseFloat(pmForm.amount||0) + pmSurcharge).toFixed(2),[pmForm.amount, pmSurcharge]);
+
   const recordPayment=async()=>{
     if(!pmForm.amount||!pmForm.cust_id)return showToast("Amount and customer required","error");
     if((pmForm.method==="check"||pmForm.method==="money_order")&&!pmForm.check_number)return showToast("Check/MO number required","error");
     setSaving(true);
     try{
       const truck=trucks.find(t=>t.id===pmForm.truck_id);
+      const base=parseFloat(pmForm.amount);
+      const surcharge=calcSurcharge(base,pmForm.method);
+      const totalCollected=parseFloat((base+surcharge).toFixed(2));
+      const surchargeNote=surcharge>0?` | Card surcharge $${surcharge.toFixed(2)} (${CARD_FEE_PCT}%)`:"";
       const rec={
         id:"PMT-"+uid(),
         truck_id:pmForm.truck_id||null,
         cust_id:pmForm.cust_id,
         collected_by:truck?.driver||profile?.full_name||"Admin",
         method:pmForm.method,
-        amount:parseFloat(pmForm.amount),
+        amount:totalCollected,
         check_number:pmForm.check_number||"",
         bank_name:pmForm.bank_name||"",
-        note:pmForm.note||"",
+        note:(pmForm.note||"")+surchargeNote,
         invoice_ids:pmForm.invoice_ids,
         date:nowStr(),
         created_at:new Date().toISOString(),
       };
       await supabase.from("payments_log").insert(rec);
-      // Mark selected invoices as paid
       for(const sid of pmForm.invoice_ids){
-        await markPaid(sid,pmForm.method,0,pmForm.check_number,pmForm.note,rec.collected_by);
+        await markPaid(sid,pmForm.method,totalCollected,pmForm.check_number,rec.note,rec.collected_by);
       }
       setPaymentsLog(prev=>[rec,...prev]);
-      showToast(`${pmForm.method==="cash"?"💵":"💳"} Payment of $${parseFloat(pmForm.amount).toFixed(2)} recorded!`);
+      showToast(`${methodIcon(pmForm.method)} $${totalCollected.toFixed(2)} recorded${surcharge>0?` (incl. $${surcharge.toFixed(2)} card fee)`:""}`);
       setPmModal(false);
       setPmForm({method:"cash",amount:"",check_number:"",bank_name:"",note:"",cust_id:"",truck_id:"",invoice_ids:[]});
     }catch(e){showToast(e.message,"error");}
@@ -1123,6 +1159,33 @@ export default function App(){
               <div><label>Notes (optional)</label>
                 <input placeholder="e.g. partial payment, split between cash and check..." value={pmForm.note} onChange={e=>setPmForm(f=>({...f,note:e.target.value}))}/>
               </div>
+
+              {/* Surcharge summary */}
+              {pmForm.amount&&<div style={{background:hasSurcharge(pmForm.method)?"#faf5ff":"#f0fdf4",border:`1px solid ${hasSurcharge(pmForm.method)?"#ddd6fe":"#a7f3d0"}`,borderRadius:9,padding:"12px 16px"}}>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280"}}>
+                    <span>Invoice amount</span>
+                    <span>${parseFloat(pmForm.amount||0).toFixed(2)}</span>
+                  </div>
+                  {hasSurcharge(pmForm.method)?(
+                    <>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#7c3aed"}}>
+                        <span>Card surcharge ({CARD_FEE_PCT}%) — charged to customer</span>
+                        <span>+${pmSurcharge.toFixed(2)}</span>
+                      </div>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,borderTop:"1px solid #ddd6fe",paddingTop:6,color:"#212121"}}>
+                        <span>Customer pays total</span>
+                        <span style={{color:"#7c3aed"}}>${pmTotal}</span>
+                      </div>
+                    </>
+                  ):(
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#059669"}}>
+                      <span>✓ {methodLabel(pmForm.method)} — no surcharge</span>
+                      <span>${parseFloat(pmForm.amount||0).toFixed(2)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>}
 
               <div style={{height:1,background:"#f3f4f6"}}/>
               <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
