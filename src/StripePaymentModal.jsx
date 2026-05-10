@@ -158,21 +158,34 @@ export default function StripePaymentModal({
   useEffect(() => {
     const create = async () => {
       try {
-        const { data, error } = await supabase.functions.invoke("smooth-responder", {
-          body: {
-            amount: chargeTotal,
-            currency: "usd",
-            metadata: {
-              invoice_id: sale.id,
-              customer_name: customer?.name || "",
-              driver: driver || "",
-              surcharge: surcharge.toString(),
-            },
-          },
-        });
+        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+        const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-        if (error) throw new Error(error.message);
+        const res = await fetch(
+          `${SUPABASE_URL}/functions/v1/create-payment-intent`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+              "apikey": SUPABASE_ANON_KEY,
+            },
+            body: JSON.stringify({
+              amount: chargeTotal,
+              currency: "usd",
+              metadata: {
+                invoice_id: sale.id,
+                customer_name: customer?.name || "",
+                driver: driver || "",
+                surcharge: surcharge.toString(),
+              },
+            }),
+          }
+        );
+
+        const data = await res.json();
         if (data?.error) throw new Error(data.error);
+        if (!data?.clientSecret) throw new Error("No client secret returned — check STRIPE_SECRET_KEY in Supabase secrets");
         setClientSecret(data.clientSecret);
       } catch (e) {
         setError(e.message);
