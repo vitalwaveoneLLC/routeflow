@@ -503,10 +503,10 @@ export default function OrderPortal() {
             onClick={()=>setIsNew(false)}
             onMouseEnter={e=>{e.currentTarget.style.borderColor="#0a1628";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #0a162820";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
-            <div style={{fontSize:36,marginBottom:12}}>⛽</div>
+            <div style={{fontSize:36,marginBottom:12}}>💎</div>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#0a1628",marginBottom:8}}>Existing Customer</div>
-            <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>I already have an account. Find my store and place an order.</div>
-            <div style={{marginTop:16,color:"#0a1628",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>Select my store →</div>
+            <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>Welcome back! Access your account and place your order.</div>
+            <div style={{marginTop:16,color:"#0a1628",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>Access my account →</div>
           </div>
 
           {/* New Customer */}
