@@ -1,6 +1,7 @@
 // RouteFlow WMS — Complete Edition with Edit Everywhere
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "./supabase";
+import StripePaymentModal from "./StripePaymentModal.jsx";
 
 const GS = () => (
   <>
@@ -281,6 +282,7 @@ export default function App(){
   const[ordFilter,setOrdFilter]=useState("pending");
   const[viewSale,setViewSale]=useState(null);
   const[viewTruck,setViewTruck]=useState(null);
+  const[stripeModal,setStripeModal]=useState(null);
 
   // Edit states — product
   const[editingPid,setEditingPid]=useState(null);
@@ -1013,7 +1015,8 @@ export default function App(){
                           <button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{
                             setPmForm(f=>({...f,cust_id:s.cust_id,truck_id:s.truck_id,amount:gt.toFixed(2),invoice_ids:[s.id]}));
                             setPmModal(true);
-                          }}>💵 Collect</button>
+                          }}>💵 Cash/Check</button>
+                          <button className="btn bp" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>setStripeModal({sale:s,customer:getC(s.cust_id),driver:getT(s.truck_id)?.driver})}>💳 Card</button>
                           <button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>View</button>
                         </div>
                       </td>
@@ -1477,12 +1480,44 @@ export default function App(){
         <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
           <span className={`bdg ${pmtFor(viewSale.id)?.status==="paid"?"bg2":"br2"}`}>{pmtFor(viewSale.id)?.status==="paid"?"✓ PAID":"⏳ UNPAID"}</span>
           {pmtFor(viewSale.id)?.status!=="paid"?<button className="btn bg" onClick={()=>markPaid(viewSale.id)}>{ic.chk} Mark Paid</button>:<button className="btn bgh" style={{fontSize:11}} onClick={()=>markUnpaid(viewSale.id)}>Mark Unpaid</button>}
+          {pmtFor(viewSale.id)?.status!=="paid"&&<button className="btn bp" style={{fontSize:11,padding:"7px 12px"}} onClick={()=>{setModal(null);setTimeout(()=>setStripeModal({sale:viewSale,customer:getC(viewSale.cust_id),driver:getT(viewSale.truck_id)?.driver}),100);}}>💳 Charge Card</button>}
           <div style={{marginLeft:"auto"}}><button className="btn bpr" onClick={()=>window.print()}>{ic.prt} Print / Save PDF</button></div>
         </div>
         <InvoiceDoc sale={viewSale} products={products} customers={customers} trucks={trucks} co={co} paid={pmtFor(viewSale.id)?.status==="paid"}/>
       </Modal>}
 
       {modal==="settlement"&&viewTruck&&(()=>{const t=getT(viewTruck),d=settlementData(viewTruck);return<Modal title="" onClose={()=>setModal(null)} xwide><div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button className="btn bpr" onClick={()=>window.print()}>{ic.prt} Print / Save PDF</button></div><SettleDoc truck={t} d={d} co={co} customers={customers} payments={payments}/></Modal>;})()}
+
+      {/* ── STRIPE PAYMENT MODAL ── */}
+      {stripeModal&&<StripePaymentModal
+        sale={stripeModal.sale}
+        customer={stripeModal.customer}
+        driver={stripeModal.driver}
+        taxRate={taxRate}
+        onClose={()=>setStripeModal(null)}
+        onSuccess={async(pd)=>{
+          const truck=trucks.find(t=>t.id===stripeModal.sale.truck_id);
+          const rec={
+            id:"PMT-"+uid(),
+            truck_id:stripeModal.sale.truck_id,
+            cust_id:stripeModal.sale.cust_id,
+            collected_by:truck?.driver||"Admin",
+            method:"credit_card",
+            amount:pd.amount,
+            check_number:pd.paymentIntentId,
+            bank_name:"Stripe",
+            note:`Card surcharge $${pd.surcharge.toFixed(2)} (3%) included`,
+            invoice_ids:[stripeModal.sale.id],
+            date:nowStr(),
+            created_at:new Date().toISOString(),
+          };
+          await supabase.from("payments_log").insert(rec);
+          await markPaid(stripeModal.sale.id,"credit_card",pd.amount,pd.paymentIntentId,rec.note,rec.collected_by);
+          setPaymentsLog(prev=>[rec,...prev]);
+          setStripeModal(null);
+          showToast(`💳 $${pd.amount.toFixed(2)} card payment successful!`);
+        }}
+      />}
 
     </div>
   );
