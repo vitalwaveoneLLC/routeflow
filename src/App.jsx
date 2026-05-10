@@ -661,9 +661,46 @@ export default function App(){
     setSaving(false);
   };
 
-  const handleLogout=async()=>{await supabase.auth.signOut();};
+  // ── CAMERA BARCODE SCANNER ─────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!scanning) return;
+    let scanner = null;
 
-  // ── BARCODE SCAN HANDLER ───────────────────────────────────────────────────
+    const startScanner = async () => {
+      // Load html5-qrcode from CDN if not already loaded
+      if(!window.Html5Qrcode){
+        await new Promise((resolve,reject)=>{
+          const s=document.createElement("script");
+          s.src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js";
+          s.onload=resolve; s.onerror=reject;
+          document.head.appendChild(s);
+        });
+      }
+      try{
+        scanner = new window.Html5Qrcode("qr-reader");
+        await scanner.start(
+          {facingMode:"environment"}, // use back camera
+          {fps:10, qrbox:{width:250,height:150}},
+          (decodedText)=>{
+            handleScan(decodedText);
+          },
+          ()=>{} // ignore errors during scanning
+        );
+      }catch(e){
+        setScanMsg({type:"error", text:"Camera not available — use manual SKU entry below"});
+      }
+    };
+
+    setTimeout(startScanner, 300);
+
+    return ()=>{
+      if(scanner){
+        scanner.stop().catch(()=>{});
+      }
+    };
+  },[scanning]);
+
+  const handleLogout=async()=>{await supabase.auth.signOut();};
   const handleScan = (barcode) => {
     if(!barcode.trim()) return;
     const code = barcode.trim().toLowerCase();
@@ -1495,10 +1532,10 @@ export default function App(){
 
           {/* ── SCAN / MANUAL TOGGLE ── */}
           <div style={{display:"flex",gap:6,marginBottom:12}}>
-            <button onClick={()=>setScanning(false)} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${!scanning?"#7c3aed":"#e5e7eb"}`,background:!scanning?"#f5f3ff":"#fff",color:!scanning?"#7c3aed":"#6b7280",fontWeight:!scanning?700:400,cursor:"pointer",fontSize:12,fontFamily:"'Barlow',sans-serif"}}>
+            <button onClick={()=>{setScanning(false);setScanInput("");setScanMsg(null);}} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${!scanning?"#7c3aed":"#e5e7eb"}`,background:!scanning?"#f5f3ff":"#fff",color:!scanning?"#7c3aed":"#6b7280",fontWeight:!scanning?700:400,cursor:"pointer",fontSize:12,fontFamily:"'Barlow',sans-serif"}}>
               📋 Manual Entry
             </button>
-            <button onClick={()=>{setScanning(true);setScanInput("");setScanMsg(null);setTimeout(()=>document.getElementById("scan-input")?.focus(),100);}} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${scanning?"#7c3aed":"#e5e7eb"}`,background:scanning?"#f5f3ff":"#fff",color:scanning?"#7c3aed":"#6b7280",fontWeight:scanning?700:400,cursor:"pointer",fontSize:12,fontFamily:"'Barlow',sans-serif"}}>
+            <button onClick={()=>{setScanning(true);setScanInput("");setScanMsg(null);}} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${scanning?"#7c3aed":"#e5e7eb"}`,background:scanning?"#f5f3ff":"#fff",color:scanning?"#7c3aed":"#6b7280",fontWeight:scanning?700:400,cursor:"pointer",fontSize:12,fontFamily:"'Barlow',sans-serif"}}>
               📷 Scan Barcode
             </button>
           </div>
@@ -1506,30 +1543,31 @@ export default function App(){
           {/* ── SCAN INPUT ── */}
           {scanning&&<div style={{marginBottom:12}}>
             <div style={{background:"#f5f3ff",border:"2px solid #7c3aed",borderRadius:10,padding:"12px 14px"}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#7c3aed",letterSpacing:".06em",marginBottom:8}}>SCAN PRODUCT BARCODE</div>
-              <input
-                id="scan-input"
-                type="text"
-                placeholder="Point scanner at barcode or type SKU..."
-                value={scanInput}
-                onChange={e=>setScanInput(e.target.value)}
-                onKeyDown={e=>{
-                  if(e.key==="Enter"){handleScan(scanInput);}
-                }}
-                autoFocus
-                style={{background:"#fff",border:"1.5px solid #ddd6fe",borderRadius:7,padding:"10px 13px",fontSize:14,width:"100%",outline:"none",fontFamily:"'Barlow',sans-serif"}}
-              />
-              <div style={{display:"flex",gap:8,marginTop:8}}>
-                <button onClick={()=>handleScan(scanInput)} className="btn ba" style={{fontSize:11,padding:"6px 14px"}}>Add Product</button>
-                <div style={{fontSize:11,color:"#9ca3af",alignSelf:"center"}}>or press Enter after scan</div>
+              <div style={{fontSize:11,fontWeight:700,color:"#7c3aed",letterSpacing:".06em",marginBottom:8}}>📷 POINT CAMERA AT BARCODE</div>
+
+              {/* Camera viewfinder */}
+              <div id="qr-reader" style={{width:"100%",borderRadius:8,overflow:"hidden",background:"#000",minHeight:200}}></div>
+
+              {/* Fallback manual input */}
+              <div style={{marginTop:10,borderTop:"1px solid #ddd6fe",paddingTop:10}}>
+                <div style={{fontSize:10,color:"#9ca3af",marginBottom:6}}>Or type SKU / barcode manually:</div>
+                <div style={{display:"flex",gap:8}}>
+                  <input
+                    id="scan-input"
+                    type="text"
+                    placeholder="Type SKU and press Enter..."
+                    value={scanInput}
+                    onChange={e=>setScanInput(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==="Enter"){handleScan(scanInput);} }}
+                    style={{flex:1,background:"#fff",border:"1.5px solid #ddd6fe",borderRadius:7,padding:"8px 12px",fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"}}
+                  />
+                  <button onClick={()=>handleScan(scanInput)} className="btn ba" style={{fontSize:11,padding:"8px 14px",flexShrink:0}}>Add</button>
+                </div>
               </div>
             </div>
             {scanMsg&&<div style={{marginTop:8,padding:"8px 12px",borderRadius:7,background:scanMsg.type==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${scanMsg.type==="success"?"#a7f3d0":"#fecaca"}`,fontSize:12,color:scanMsg.type==="success"?"#065f46":"#dc2626",fontWeight:600}}>
               {scanMsg.text}
             </div>}
-            <div style={{marginTop:8,fontSize:11,color:"#9ca3af",lineHeight:1.6}}>
-              💡 Tip: If using a Bluetooth scanner, just point and scan — it fills automatically. Using phone? Type the SKU manually then press Enter.
-            </div>
           </div>}
 
           {/* ── ITEMS LIST ── */}
