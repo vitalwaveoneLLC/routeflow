@@ -545,12 +545,26 @@ export default function App(){
   const markUnpaid=async sid=>{await supabase.from("payments").update({status:"unpaid",paid_at:null}).eq("sale_id",sid);setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"unpaid"}:p));showToast("Marked unpaid");};
 
   const deleteInvoice=async sid=>{
-    if(!window.confirm(`Delete invoice ${sid}? This cannot be undone.`)) return;
-    await supabase.from("payments").delete().eq("sale_id",sid);
-    await supabase.from("sales").delete().eq("id",sid);
-    setSales(prev=>prev.filter(s=>s.id!==sid));
-    setPayments(prev=>prev.filter(p=>p.sale_id!==sid));
-    showToast(`Invoice ${sid} deleted`);
+    if(!window.confirm(`Delete invoice ${sid} and all linked payments and orders? This cannot be undone.`)) return;
+    try{
+      // Delete from payments table
+      await supabase.from("payments").delete().eq("sale_id",sid);
+      // Delete from payments_log where invoice is linked
+      await supabase.from("payments_log").delete().contains("invoice_ids",[sid]);
+      // Delete linked orders (where this invoice ID was created from)
+      const orderId="ORD-"+sid.replace("INV-","");
+      await supabase.from("orders").delete().eq("id",orderId);
+      // Delete the sale itself
+      await supabase.from("sales").delete().eq("id",sid);
+      // Update local state
+      setSales(prev=>prev.filter(s=>s.id!==sid));
+      setPayments(prev=>prev.filter(p=>p.sale_id!==sid));
+      setPaymentsLog(prev=>prev.filter(p=>!(p.invoice_ids||[]).includes(sid)));
+      setOrders(prev=>prev.filter(o=>o.id!==orderId));
+      showToast(`Invoice ${sid} and linked records deleted`);
+    }catch(e){
+      showToast("Error deleting: "+e.message,"error");
+    }
   };
 
   // ── CARD SURCHARGE ─────────────────────────────────────────────────────────
