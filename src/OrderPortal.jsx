@@ -173,6 +173,14 @@ export default function OrderPortal() {
   // Flow: "home" | "register" | "order" | "review" | "confirm"
   const [step,      setStep]      = useState("home");
   const [isNew,     setIsNew]     = useState(false);
+  const [isDriver,  setIsDriver]  = useState(false);
+  const [driverEmail, setDriverEmail] = useState("");
+  const [driverPw,    setDriverPw]    = useState("");
+  const [driverUser,  setDriverUser]  = useState(null);
+  const [driverData,  setDriverData]  = useState(null);
+  const [driverError, setDriverError] = useState("");
+  const [driverLoading, setDriverLoading] = useState(false);
+  const [driverTab,   setDriverTab]   = useState("sell"); // sell | load | return | settlement
   const [payMethod, setPayMethod] = useState("delivery"); // "delivery" | "card"
   const [stripeReady, setStripeReady] = useState(false);
   const [clientSecret, setClientSecret] = useState(null);
@@ -366,9 +374,44 @@ export default function OrderPortal() {
   };
 
   const resetAll = () => {
-    setStep("home"); setIsNew(false); setSelCust(null); setCustSearch(""); setCustPhone(""); setVerifyError(""); setQuantities({}); setNotes(""); setOrder(null);
+    setStep("home"); setIsNew(false); setIsDriver(false); setSelCust(null);
+    setCustSearch(""); setCustPhone(""); setVerifyError(""); setQuantities({}); setNotes(""); setOrder(null);
     setPayMethod("delivery"); setClientSecret(null); setStripeError(null); setStripeReady(false);
+    setDriverUser(null); setDriverData(null); setDriverEmail(""); setDriverPw(""); setDriverError("");
     setReg({businessName:"",ownerName:"",email:"",phone:"",address:"",city:"",state:"TX",zip:""});
+  };
+
+  // Driver login
+  const handleDriverLogin = async () => {
+    if(!driverEmail||!driverPw) return setDriverError("Email and password required");
+    setDriverLoading(true); setDriverError("");
+    try {
+      const {data,error} = await supabase.auth.signInWithPassword({email:driverEmail,password:driverPw});
+      if(error) throw error;
+      // Get profile
+      const {data:profile} = await supabase.from("profiles").select("*").eq("id",data.user.id).single();
+      if(!profile) throw new Error("Profile not found");
+      if(profile.role==="admin") throw new Error("Please use the admin dashboard instead");
+      if(!profile.truck_id) throw new Error("No truck assigned — contact your admin");
+      // Get truck + customers + loads + sales
+      const [truckR, custsR, loadsR, salesR] = await Promise.all([
+        supabase.from("trucks").select("*").eq("id",profile.truck_id).single(),
+        supabase.from("customers").select("*").eq("truck_id",profile.truck_id),
+        supabase.from("loads").select("*").eq("truck_id",profile.truck_id).eq("status","out"),
+        supabase.from("sales").select("*").eq("truck_id",profile.truck_id),
+      ]);
+      setDriverUser(data.user);
+      setDriverData({
+        profile,
+        truck: truckR.data,
+        customers: custsR.data||[],
+        activeLoad: loadsR.data?.[0]||null,
+        sales: salesR.data||[],
+      });
+    } catch(e) {
+      setDriverError(e.message);
+    }
+    setDriverLoading(false);
   };
 
   // Verify customer by shop name + phone
@@ -497,10 +540,10 @@ export default function OrderPortal() {
           </div>
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,maxWidth:680,margin:"0 auto 40px"}} className="grid2">
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,maxWidth:900,margin:"0 auto 40px"}} className="grid2">
           {/* Existing Customer */}
           <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb"}}
-            onClick={()=>setIsNew(false)}
+            onClick={()=>{setIsNew(false);setIsDriver(false);}}
             onMouseEnter={e=>{e.currentTarget.style.borderColor="#0a1628";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #0a162820";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
             <div style={{fontSize:36,marginBottom:12}}>💎</div>
@@ -511,7 +554,7 @@ export default function OrderPortal() {
 
           {/* New Customer */}
           <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb",background:"linear-gradient(135deg,#fff,#fffbf0)"}}
-            onClick={()=>setIsNew(true)}
+            onClick={()=>{setIsNew(true);setIsDriver(false);}}
             onMouseEnter={e=>{e.currentTarget.style.borderColor="#f59e0b";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #f59e0b20";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
             <div style={{fontSize:36,marginBottom:12}}>🆕</div>
@@ -519,9 +562,151 @@ export default function OrderPortal() {
             <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>First time ordering with VitalWaveOne. Register your business.</div>
             <div style={{marginTop:16,color:"#f59e0b",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>Register & Order →</div>
           </div>
+
+          {/* Driver */}
+          <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb",background:"linear-gradient(135deg,#fff,#f0f9ff)"}}
+            onClick={()=>{setIsDriver(true);setIsNew(false);}}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor="#0ea5e9";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #0ea5e920";}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
+            <div style={{fontSize:36,marginBottom:12}}>🚚</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#0a1628",marginBottom:8}}>I'm a Driver</div>
+            <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>VitalWaveOne delivery driver. Access your route and record sales.</div>
+            <div style={{marginTop:16,color:"#0ea5e9",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>Driver login →</div>
+          </div>
         </div>
 
-        {/* ── EXISTING: private verification ── */}
+        {/* ── DRIVER: login + dashboard ── */}
+        {isDriver&&<div className="fu">
+          {!driverUser?(
+            <div style={{maxWidth:420,margin:"0 auto"}}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:6,textAlign:"center"}}>Driver Login</div>
+              <div style={{fontSize:13,color:"#6b7280",textAlign:"center",marginBottom:24}}>Sign in with your VitalWaveOne driver credentials</div>
+              <div className="card" style={{padding:28}}>
+                <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  <div className="field">
+                    <label>Email Address</label>
+                    <input type="email" placeholder="your@email.com" value={driverEmail} onChange={e=>setDriverEmail(e.target.value)}
+                      onFocus={e=>e.target.style.borderColor="#0ea5e9"} onBlur={e=>e.target.style.borderColor="#d1d5db"}/>
+                  </div>
+                  <div className="field">
+                    <label>Password</label>
+                    <input type="password" placeholder="••••••••" value={driverPw} onChange={e=>setDriverPw(e.target.value)}
+                      onKeyDown={e=>e.key==="Enter"&&handleDriverLogin()}
+                      onFocus={e=>e.target.style.borderColor="#0ea5e9"} onBlur={e=>e.target.style.borderColor="#d1d5db"}/>
+                  </div>
+                  {driverError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626"}}>⚠️ {driverError}</div>}
+                  <button onClick={handleDriverLogin} disabled={driverLoading}
+                    style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                    {driverLoading?<><span className="sp">⟳</span>Signing in…</>:<>🚚 Sign In as Driver</>}
+                  </button>
+                  <div style={{textAlign:"center",fontSize:12,color:"#9ca3af"}}>
+                    Need help? Contact your admin
+                  </div>
+                </div>
+              </div>
+            </div>
+          ):(
+            /* ── DRIVER DASHBOARD ── */
+            <div style={{maxWidth:640,margin:"0 auto"}}>
+              {/* Driver header */}
+              <div style={{background:"#0a1628",borderRadius:14,padding:"18px 22px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                <div>
+                  <div style={{fontSize:10,color:"#4b6080",letterSpacing:".08em",marginBottom:4}}>WELCOME BACK</div>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#fff"}}>{driverData.truck?.driver}</div>
+                  <div style={{fontSize:12,color:"#4b6080",marginTop:2}}>🚚 {driverData.truck?.plate} · {driverData.truck?.route||"Route"}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:10,color:"#4b6080",marginBottom:4}}>TODAY'S REVENUE</div>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0ea5e9"}}>
+                    ${driverData.sales.filter(s=>{const d=new Date(s.created_at);const today=new Date();return d.toDateString()===today.toDateString();}).reduce((a,s)=>a+s.total,0).toFixed(2)}
+                  </div>
+                  <button onClick={()=>{supabase.auth.signOut();setDriverUser(null);setDriverData(null);}}
+                    style={{marginTop:8,background:"transparent",border:"1px solid #1e3050",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#4b6080",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+
+              {/* Active load status */}
+              <div style={{background:driverData.activeLoad?"#f0fdf4":"#fef9c3",border:`1px solid ${driverData.activeLoad?"#a7f3d0":"#fde68a"}`,borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+                <div style={{fontSize:24}}>{driverData.activeLoad?"🟢":"🟡"}</div>
+                <div>
+                  <div style={{fontWeight:700,fontSize:14,color:driverData.activeLoad?"#065f46":"#92400e"}}>
+                    {driverData.activeLoad?"Truck Loaded & Active":"Truck Not Loaded"}
+                  </div>
+                  <div style={{fontSize:12,color:driverData.activeLoad?"#047857":"#92400e"}}>
+                    {driverData.activeLoad
+                      ?`Load ${driverData.activeLoad.id} · ${(driverData.activeLoad.items||[]).reduce((a,i)=>a+i.qty,0)} units on truck`
+                      :"Contact admin to load your truck before starting your route"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick stats */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+                {[
+                  {l:"Customers",v:driverData.customers.length,e:"⛽"},
+                  {l:"Invoices Today",v:driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).length,e:"📄"},
+                  {l:"Total Sales",v:driverData.sales.length,e:"💰"},
+                ].map(k=>(
+                  <div key={k.l} className="card" style={{padding:"14px",textAlign:"center"}}>
+                    <div style={{fontSize:22,marginBottom:4}}>{k.e}</div>
+                    <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628"}}>{k.v}</div>
+                    <div style={{fontSize:10,color:"#9ca3af",letterSpacing:".05em"}}>{k.l}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Customers list */}
+              <div className="card" style={{marginBottom:16}}>
+                <div style={{padding:"14px 18px",borderBottom:"1px solid #f3f4f6",fontWeight:700,fontSize:14,color:"#0a1628"}}>
+                  ⛽ My Gas Stations ({driverData.customers.length})
+                </div>
+                {driverData.customers.length===0
+                  ?<div style={{padding:24,textAlign:"center",color:"#9ca3af",fontSize:13}}>No customers assigned yet</div>
+                  :driverData.customers.map(c=>{
+                    const custSales = driverData.sales.filter(s=>s.cust_id===c.id);
+                    return(
+                      <div key={c.id} style={{padding:"14px 18px",borderBottom:"1px solid #f9fafb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div>
+                          <div style={{fontWeight:600,fontSize:14,color:"#111"}}>{c.name}</div>
+                          {c.address&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📍 {c.address}</div>}
+                          {c.phone&&<div style={{fontSize:11,color:"#9ca3af"}}>📞 {c.phone}</div>}
+                        </div>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontSize:12,color:"#0ea5e9",fontWeight:600}}>{custSales.length} invoices</div>
+                          <div style={{fontSize:12,color:"#059669",fontWeight:700}}>${custSales.reduce((a,s)=>a+s.total,0).toFixed(2)}</div>
+                        </div>
+                      </div>
+                    );
+                  })
+                }
+              </div>
+
+              {/* Instructions */}
+              <div className="card" style={{padding:"16px 18px"}}>
+                <div style={{fontWeight:700,fontSize:13,color:"#0a1628",marginBottom:12}}>📱 How to record a sale</div>
+                {[
+                  {n:"1",t:"Open RouteFlow admin app",d:"Go to routeflow-jade.vercel.app and log in"},
+                  {n:"2",t:"Click Sell on your truck",d:"Select your customer and scan or enter products"},
+                  {n:"3",t:"Confirm & Invoice",d:"Invoice is created and sent to admin instantly"},
+                  {n:"4",t:"Collect payment",d:"Cash, check, Zelle or charge card on the spot"},
+                ].map(s=>(
+                  <div key={s.n} style={{display:"flex",gap:12,marginBottom:12,alignItems:"flex-start"}}>
+                    <div style={{width:26,height:26,borderRadius:"50%",background:"#0ea5e9",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,flexShrink:0}}>{s.n}</div>
+                    <div>
+                      <div style={{fontWeight:600,fontSize:13,color:"#111"}}>{s.t}</div>
+                      <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{s.d}</div>
+                    </div>
+                  </div>
+                ))}
+                <a href="/" style={{display:"block",background:"#0ea5e9",color:"#fff",textAlign:"center",padding:"12px",borderRadius:10,fontWeight:700,fontSize:14,textDecoration:"none",marginTop:8}}>
+                  Open RouteFlow Dashboard →
+                </a>
+              </div>
+            </div>
+          )}
+        </div>}
         {!isNew&&<div className="fu">
           <div style={{maxWidth:460,margin:"0 auto"}}>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:6,textAlign:"center"}}>Access Your Account</div>
