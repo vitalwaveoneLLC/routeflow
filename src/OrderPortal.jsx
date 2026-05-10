@@ -164,6 +164,279 @@ const Invoice = ({order, products, co}) => {
 };
 
 // ── MAIN PORTAL ───────────────────────────────────────────────────────────────
+// ── DRIVER INVOICE VIEW ───────────────────────────────────────────────────────
+function DriverInvoiceView({sale, customers, products, co, driver}){
+  const cust = customers.find(c=>c.id===sale.cust_id);
+  const taxRate = parseFloat(co?.tax_rate||8.25);
+  const sub = sale.total, tax = sub*(taxRate/100), gt = sub+tax;
+  return(
+    <div style={{fontFamily:"'Inter',sans-serif"}}>
+      <div style={{background:"#7c3aed",padding:"16px 20px",borderRadius:"8px 8px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{color:"#fff",fontWeight:800,fontSize:18}}>INVOICE <span style={{fontSize:13,fontWeight:400,color:"#ddd6fe"}}>#{sale.id}</span></div>
+        <div style={{textAlign:"right",color:"#fff",fontSize:11}}>{co?.name}<br/>{co?.phone}</div>
+      </div>
+      <div style={{background:"#f9fafb",padding:"12px 20px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,borderBottom:"1px solid #e5e7eb"}}>
+        <div><div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".1em",marginBottom:3}}>BILL TO</div><div style={{fontWeight:700}}>{cust?.name}</div>{cust?.address&&<div style={{fontSize:11,color:"#6b7280"}}>{cust.address}</div>}{cust?.phone&&<div style={{fontSize:11,color:"#6b7280"}}>{cust.phone}</div>}</div>
+        <div><div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".1em",marginBottom:3}}>DETAILS</div><div style={{fontWeight:700}}>{sale.date}</div><div style={{fontSize:11,color:"#6b7280"}}>Driver: {driver}</div></div>
+      </div>
+      <div style={{padding:"12px 20px"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}>
+          <thead><tr>{["Product","Qty","Price","Total"].map(h=><th key={h} style={{textAlign:h==="Product"?"left":"right",padding:"6px 8px",fontSize:10,color:"#6b7280",fontWeight:700,borderBottom:"2px solid #111"}}>{h}</th>)}</tr></thead>
+          <tbody>{(sale.items||[]).map((item,i)=>{const p=products.find(x=>x.id===item.pid);return(<tr key={i}>{[p?.name||item.name,item.qty,`$${(p?.price||0).toFixed(2)}`,`$${(item.qty*(p?.price||0)).toFixed(2)}`].map((v,j)=><td key={j} style={{textAlign:j===0?"left":"right",padding:"8px",borderBottom:"1px solid #f3f4f6",fontSize:13,fontWeight:j===3?700:400}}>{v}</td>)}</tr>);})}</tbody>
+        </table>
+        <div style={{display:"flex",justifyContent:"flex-end"}}>
+          <div style={{width:220}}>
+            {[["Subtotal",`$${sub.toFixed(2)}`],[`Tax (${taxRate}%)`,`$${tax.toFixed(2)}`]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:12,color:"#6b7280"}}>{l}</span><span style={{fontSize:12}}>{v}</span></div>)}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${gt.toFixed(2)}</span></div>
+          </div>
+        </div>
+        <div style={{marginTop:12,background:"#f9fafb",borderRadius:7,padding:"10px 12px",fontSize:11,color:"#6b7280"}}>
+          Payment: Cash · Check · Money Order · Zelle (free) | Credit/Debit Card (+3%)
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── DRIVER LOAD TAB ───────────────────────────────────────────────────────────
+function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
+  const [items, setItems] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const uid = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
+
+  const confirmLoad = async () => {
+    const loadItems = products.filter(p=>items[p.id]>0).map(p=>({pid:p.id,qty:parseInt(items[p.id])}));
+    if(!loadItems.length) return setMsg({t:"error",m:"Add at least one product"});
+    setSaving(true);
+    try{
+      const nl = {id:"LD-"+uid(),truck_id:driverData.truck.id,date:new Date().toLocaleDateString(),items:loadItems,status:"out",created_at:new Date().toISOString()};
+      const {error} = await supabase.from("loads").insert(nl);
+      if(error) throw error;
+      setDriverData(prev=>({...prev,activeLoad:nl}));
+      setMsg({t:"success",m:"Truck loaded successfully! Ready to sell."});
+      setItems({});
+    }catch(e){setMsg({t:"error",m:e.message});}
+    setSaving(false);
+  };
+
+  return(
+    <div>
+      <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:4}}>📦 Load Your Truck</div>
+      <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>Enter quantities you're loading onto the truck today</div>
+      {driverData.activeLoad&&<div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#92400e"}}>⚠️ You already have an active load. Loading again will create a new load record.</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
+        {products.filter(p=>p.shelf>0).map(p=>(
+          <div key={p.id} className="card" style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:600,fontSize:13}}>{p.name}</div>
+              <div style={{fontSize:11,color:"#9ca3af"}}>In warehouse: <span style={{color:"#059669",fontWeight:700}}>{p.shelf}</span> · ${p.price}</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))} style={{width:28,height:28,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+              <input type="number" min="0" max={p.shelf} value={items[p.id]||""} placeholder="0"
+                onChange={e=>setItems(prev=>({...prev,[p.id]:Math.min(p.shelf,Math.max(0,parseInt(e.target.value)||0))}))}
+                style={{width:54,textAlign:"center",border:`1.5px solid ${items[p.id]>0?"#0ea5e9":"#e5e7eb"}`,borderRadius:7,padding:"5px",fontSize:13,fontWeight:700}}/>
+              <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.min(p.shelf,(prev[p.id]||0)+1)}))} style={{width:28,height:28,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {msg&&<div style={{background:msg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${msg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:12,color:msg.t==="success"?"#065f46":"#dc2626",marginBottom:12}}>{msg.m}</div>}
+      <button onClick={confirmLoad} disabled={saving} style={{width:"100%",background:"#0ea5e9",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+        {saving?"Loading…":"📦 Confirm Load"}
+      </button>
+    </div>
+  );
+}
+
+// ── DRIVER SELL TAB ───────────────────────────────────────────────────────────
+function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust}){
+  const [selCust, setSelCust] = useState(initCust||"");
+  const [items, setItems] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanInput, setScanInput] = useState("");
+  const [editInv, setEditInv] = useState(null);
+  const uid = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
+  const taxRate = parseFloat(co?.tax_rate||8.25);
+  const fmt = v=>`$${parseFloat(v||0).toFixed(2)}`;
+
+  const loadedItems = driverData.activeLoad?.items||[];
+  const availableProducts = products.filter(p=>loadedItems.find(i=>i.pid===p.id));
+
+  const sub = availableProducts.reduce((a,p)=>a+(p.price||0)*(items[p.id]||0),0);
+  const tax = sub*(taxRate/100);
+  const gt = sub+tax;
+  const profit = availableProducts.reduce((a,p)=>a+((p.price||0)-(p.cost||0))*(items[p.id]||0),0);
+
+  const handleScan = (code) => {
+    const match = availableProducts.find(p=>p.sku?.toLowerCase()===code.toLowerCase()||p.id?.toLowerCase()===code.toLowerCase());
+    if(match){setItems(prev=>({...prev,[match.id]:(prev[match.id]||0)+1}));setMsg({t:"success",m:`✓ ${match.name} added`});}
+    else setMsg({t:"error",m:`No product found: ${code}`});
+    setScanInput("");
+    setTimeout(()=>setMsg(null),2000);
+  };
+
+  const confirmSale = async () => {
+    if(!selCust) return setMsg({t:"error",m:"Select a customer"});
+    const saleItems = availableProducts.filter(p=>items[p.id]>0).map(p=>({pid:p.id,qty:items[p.id]}));
+    if(!saleItems.length) return setMsg({t:"error",m:"Add at least one product"});
+    setSaving(true);
+    try{
+      const ns = {id:"INV-"+uid(),load_id:driverData.activeLoad?.id,truck_id:driverData.truck.id,cust_id:selCust,date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,created_at:new Date().toISOString()};
+      await supabase.from("sales").insert(ns);
+      await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
+      setDriverData(prev=>({...prev,sales:[ns,...prev.sales]}));
+      setMsg({t:"success",m:`✓ Invoice ${ns.id} created!`});
+      setItems({});
+      setSelCust("");
+      if(setDriverSaleCust) setDriverSaleCust(null);
+    }catch(e){setMsg({t:"error",m:e.message});}
+    setSaving(false);
+  };
+
+  if(!driverData.activeLoad) return(
+    <div className="card" style={{padding:24,textAlign:"center"}}>
+      <div style={{fontSize:36,marginBottom:12}}>🟡</div>
+      <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Truck Not Loaded</div>
+      <div style={{fontSize:13,color:"#6b7280",marginBottom:16}}>You need to load your truck before making sales</div>
+    </div>
+  );
+
+  return(
+    <div>
+      <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:14}}>💳 Record Sale</div>
+      <div style={{marginBottom:12}}>
+        <label style={{fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:4}}>CUSTOMER</label>
+        <select value={selCust} onChange={e=>setSelCust(e.target.value)} style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}>
+          <option value="">— Select customer —</option>
+          {driverData.customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        <button onClick={()=>setScanning(false)} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${!scanning?"#0ea5e9":"#e5e7eb"}`,background:!scanning?"#f0f9ff":"#fff",color:!scanning?"#0ea5e9":"#6b7280",fontWeight:600,cursor:"pointer",fontSize:12,fontFamily:"'Inter',sans-serif"}}>📋 Manual</button>
+        <button onClick={()=>{setScanning(true);setScanInput("");}} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${scanning?"#0ea5e9":"#e5e7eb"}`,background:scanning?"#f0f9ff":"#fff",color:scanning?"#0ea5e9":"#6b7280",fontWeight:600,cursor:"pointer",fontSize:12,fontFamily:"'Inter',sans-serif"}}>📷 Scan</button>
+      </div>
+      {scanning&&<div style={{background:"#f0f9ff",border:"2px solid #0ea5e9",borderRadius:10,padding:"12px",marginBottom:12}}>
+        <div id="driver-qr-reader" style={{width:"100%",borderRadius:7,overflow:"hidden",background:"#000",minHeight:160,marginBottom:10}}></div>
+        <div style={{display:"flex",gap:8}}>
+          <input value={scanInput} onChange={e=>setScanInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleScan(scanInput)} placeholder="Type SKU or scan..." style={{flex:1,border:"1.5px solid #bae6fd",borderRadius:7,padding:"8px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}/>
+          <button onClick={()=>handleScan(scanInput)} style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:7,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Add</button>
+        </div>
+      </div>}
+      <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+        {availableProducts.map(p=>(
+          <div key={p.id} className="card" style={{padding:"10px 14px",border:`1.5px solid ${items[p.id]>0?"#0ea5e9":"#e5e7eb"}`}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:600,fontSize:13}}>{p.name}</div>
+                <div style={{fontSize:11,color:"#9ca3af"}}>SKU: {p.sku} · {fmt(p.price)}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))} style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                <input type="number" min="0" value={items[p.id]||""} placeholder="0" onChange={e=>setItems(prev=>({...prev,[p.id]:Math.max(0,parseInt(e.target.value)||0)}))} style={{width:48,textAlign:"center",border:`1.5px solid ${items[p.id]>0?"#0ea5e9":"#e5e7eb"}`,borderRadius:6,padding:"5px",fontSize:13,fontWeight:700}}/>
+                <button onClick={()=>setItems(prev=>({...prev,[p.id]:(prev[p.id]||0)+1}))} style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+              </div>
+            </div>
+            {(items[p.id]||0)>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right"}}>{fmt(items[p.id]*p.price)} + {fmt(items[p.id]*p.price*taxRate/100)} tax = <strong>{fmt(items[p.id]*p.price*(1+taxRate/100))}</strong></div>}
+          </div>
+        ))}
+      </div>
+      {gt>0&&<div style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
+        {[["Subtotal",fmt(sub),""],[`Tax (${taxRate}%)`,fmt(tax),""],["Grand Total",fmt(gt),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].map(([l,v,c])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+            <span style={{fontSize:12,color:"#6b7280"}}>{l}</span>
+            <span style={{fontWeight:700,fontSize:l==="Grand Total"?16:13,color:c||"#212121"}}>{v}</span>
+          </div>
+        ))}
+      </div>}
+      {msg&&<div style={{background:msg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${msg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:12,color:msg.t==="success"?"#065f46":"#dc2626",marginBottom:12}}>{msg.m}</div>}
+      <button onClick={confirmSale} disabled={saving} style={{width:"100%",background:"#0ea5e9",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+        {saving?"Creating Invoice…":"✓ Confirm Sale & Create Invoice"}
+      </button>
+    </div>
+  );
+}
+
+// ── DRIVER EXPENSES TAB ───────────────────────────────────────────────────────
+function DriverExpensesTab({driverData, supabase}){
+  const [form, setForm] = useState({category:"gas",amount:"",description:"",receipt_url:""});
+  const [expenses, setExpenses] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const uid = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
+  const cats = [{k:"gas",e:"⛽",l:"Gas / Fuel"},{k:"maintenance",e:"🔧",l:"Maintenance"},{k:"food",e:"🍔",l:"Food & Meals"},{k:"accommodation",e:"🏨",l:"Accommodation"},{k:"other",e:"📋",l:"Other"}];
+
+  useEffect(()=>{
+    supabase.from("expenses").select("*").eq("truck_id",driverData.truck.id).order("created_at",{ascending:false}).then(({data})=>{if(data)setExpenses(data);});
+  },[]);
+
+  const submitExpense = async () => {
+    if(!form.amount) return setMsg({t:"error",m:"Amount is required"});
+    setSaving(true);
+    try{
+      const rec = {id:"EXP-"+uid(),truck_id:driverData.truck.id,driver_name:driverData.truck.driver,category:form.category,amount:parseFloat(form.amount),description:form.description,receipt_url:form.receipt_url||"",date:new Date().toLocaleDateString(),created_at:new Date().toISOString()};
+      await supabase.from("expenses").insert(rec);
+      setExpenses(prev=>[rec,...prev]);
+      setMsg({t:"success",m:"Expense recorded!"});
+      setForm({category:"gas",amount:"",description:"",receipt_url:""});
+    }catch(e){setMsg({t:"error",m:e.message});}
+    setSaving(false);
+  };
+
+  const todayTotal = expenses.filter(e=>new Date(e.created_at).toDateString()===new Date().toDateString()).reduce((a,e)=>a+e.amount,0);
+
+  return(
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <div className="card" style={{padding:"12px",textAlign:"center"}}><div style={{fontSize:18,marginBottom:3}}>💸</div><div style={{fontWeight:800,fontSize:18,color:"#dc2626"}}>${todayTotal.toFixed(2)}</div><div style={{fontSize:10,color:"#9ca3af"}}>Today's Expenses</div></div>
+        <div className="card" style={{padding:"12px",textAlign:"center"}}><div style={{fontSize:18,marginBottom:3}}>📋</div><div style={{fontWeight:800,fontSize:18,color:"#6b7280"}}>{expenses.length}</div><div style={{fontSize:10,color:"#9ca3af"}}>Total Records</div></div>
+      </div>
+
+      <div className="card" style={{padding:"16px",marginBottom:14}}>
+        <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>+ Add Expense</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:12}}>
+          {cats.map(c=>(
+            <button key={c.k} onClick={()=>setForm(f=>({...f,category:c.k}))}
+              style={{padding:"8px 4px",borderRadius:8,border:`1.5px solid ${form.category===c.k?"#dc2626":"#e5e7eb"}`,background:form.category===c.k?"#fef2f2":"#fff",cursor:"pointer",textAlign:"center",fontFamily:"'Inter',sans-serif"}}>
+              <div style={{fontSize:18}}>{c.e}</div>
+              <div style={{fontSize:10,fontWeight:600,color:form.category===c.k?"#dc2626":"#6b7280",marginTop:2}}>{c.l}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div><label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>AMOUNT ($) *</label><input type="number" min="0" step="0.01" placeholder="0.00" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:7,padding:"9px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}/></div>
+          <div><label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>DESCRIPTION</label><input placeholder="e.g. Shell gas station" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:7,padding:"9px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}/></div>
+        </div>
+        <div style={{marginBottom:12}}><label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>RECEIPT PHOTO (optional)</label><input type="file" accept="image/*" capture="environment" onChange={e=>{const f=e.target.files[0];if(f){const url=URL.createObjectURL(f);setForm(prev=>({...prev,receipt_url:url}));setMsg({t:"success",m:"Photo attached"});}}}/></div>
+        {msg&&<div style={{background:msg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${msg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:7,padding:"8px 12px",fontSize:12,color:msg.t==="success"?"#065f46":"#dc2626",marginBottom:10}}>{msg.m}</div>}
+        <button onClick={submitExpense} disabled={saving} style={{width:"100%",background:"#dc2626",color:"#fff",border:"none",borderRadius:9,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+          {saving?"Saving…":"💸 Record Expense"}
+        </button>
+      </div>
+
+      <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>Recent Expenses</div>
+      {expenses.length===0?<div className="card" style={{padding:20,textAlign:"center",color:"#9ca3af",fontSize:12}}>No expenses recorded yet</div>:
+        expenses.map(e=>{
+          const cat=cats.find(c=>c.k===e.category);
+          return(
+            <div key={e.id} className="card" style={{padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
+              <div style={{fontSize:24,flexShrink:0}}>{cat?.e||"📋"}</div>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:600,fontSize:13}}>{cat?.l||e.category}</div>
+                <div style={{fontSize:11,color:"#9ca3af"}}>{e.date} {e.description&&`· ${e.description}`}</div>
+              </div>
+              <div style={{fontWeight:800,fontSize:16,color:"#dc2626"}}>${e.amount.toFixed(2)}</div>
+            </div>
+          );
+        })
+      }
+    </div>
+  );
+}
+
 export default function OrderPortal() {
   const [products,  setProducts]  = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -180,7 +453,9 @@ export default function OrderPortal() {
   const [driverData,  setDriverData]  = useState(null);
   const [driverError, setDriverError] = useState("");
   const [driverLoading, setDriverLoading] = useState(false);
-  const [driverTab,   setDriverTab]   = useState("sell"); // sell | load | return | settlement
+  const [driverTab,   setDriverTab]   = useState("dashboard");
+  const [driverSaleCust, setDriverSaleCust] = useState(null);
+  const [driverViewInv, setDriverViewInv] = useState(null);
   const [payMethod, setPayMethod] = useState("delivery"); // "delivery" | "card"
   const [stripeReady, setStripeReady] = useState(false);
   const [clientSecret, setClientSecret] = useState(null);
@@ -441,7 +716,43 @@ export default function OrderPortal() {
     setStep("order");
   };
 
-  // Load Stripe when card selected
+  // Send invoice email
+  const sendInvoiceEmail = async (sale, cust) => {
+    if(!cust?.email) return alert("Customer has no email address on file");
+    try{
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+      const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const taxRate = parseFloat(co?.tax_rate||8.25);
+      const items = (sale.items||[]).map(i=>{
+        const p = products.find(x=>x.id===i.pid);
+        return {name:p?.name||"Product",qty:i.qty,price:p?.price||0,unit:p?.unit||""};
+      });
+      const sub = sale.total;
+      const tax = sub*(taxRate/100);
+      const gt = sub+tax;
+      await fetch(`${SUPABASE_URL}/functions/v1/send-invoice-email`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${SUPABASE_ANON_KEY}`,"apikey":SUPABASE_ANON_KEY},
+        body:JSON.stringify({
+          to: cust.email,
+          invoiceId: sale.id,
+          customerName: cust.name,
+          driverName: driverData?.truck?.driver||"",
+          date: sale.date,
+          items, subtotal:sub, tax, taxRate, grandTotal:gt,
+          companyName: co?.name, companyEmail: co?.email,
+          companyPhone: co?.phone, companyAddress: co?.address,
+          paidStatus: "unpaid",
+        }),
+      });
+      // Mark as email sent
+      await supabase.from("sales").update({email_sent:true,email_sent_at:new Date().toISOString()}).eq("id",sale.id);
+      setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,email_sent:true}:s)}));
+      alert(`✓ Invoice emailed to ${cust.email}`);
+    }catch(e){
+      alert("Email error: "+e.message);
+    }
+  };
   const loadStripeIntent = async () => {
     setStripeError(null);
     setStripeReady(false);
@@ -620,90 +931,134 @@ export default function OrderPortal() {
                   <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0ea5e9"}}>
                     ${driverData.sales.filter(s=>{const d=new Date(s.created_at);const today=new Date();return d.toDateString()===today.toDateString();}).reduce((a,s)=>a+s.total,0).toFixed(2)}
                   </div>
-                  <button onClick={()=>{supabase.auth.signOut();setDriverUser(null);setDriverData(null);}}
+                  <button onClick={()=>{supabase.auth.signOut();setDriverUser(null);setDriverData(null);setDriverTab("dashboard");}}
                     style={{marginTop:8,background:"transparent",border:"1px solid #1e3050",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#4b6080",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
                     Sign Out
                   </button>
                 </div>
               </div>
 
-              {/* Active load status */}
-              <div style={{background:driverData.activeLoad?"#f0fdf4":"#fef9c3",border:`1px solid ${driverData.activeLoad?"#a7f3d0":"#fde68a"}`,borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
-                <div style={{fontSize:24}}>{driverData.activeLoad?"🟢":"🟡"}</div>
-                <div>
-                  <div style={{fontWeight:700,fontSize:14,color:driverData.activeLoad?"#065f46":"#92400e"}}>
-                    {driverData.activeLoad?"Truck Loaded & Active":"Truck Not Loaded"}
-                  </div>
-                  <div style={{fontSize:12,color:driverData.activeLoad?"#047857":"#92400e"}}>
-                    {driverData.activeLoad
-                      ?`Load ${driverData.activeLoad.id} · ${(driverData.activeLoad.items||[]).reduce((a,i)=>a+i.qty,0)} units on truck`
-                      :"Contact admin to load your truck before starting your route"}
-                  </div>
-                </div>
-              </div>
-
-              {/* Quick stats */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+              {/* Tab navigation */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:6,marginBottom:16}}>
                 {[
-                  {l:"Customers",v:driverData.customers.length,e:"⛽"},
-                  {l:"Invoices Today",v:driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).length,e:"📄"},
-                  {l:"Total Sales",v:driverData.sales.length,e:"💰"},
-                ].map(k=>(
-                  <div key={k.l} className="card" style={{padding:"14px",textAlign:"center"}}>
-                    <div style={{fontSize:22,marginBottom:4}}>{k.e}</div>
-                    <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628"}}>{k.v}</div>
-                    <div style={{fontSize:10,color:"#9ca3af",letterSpacing:".05em"}}>{k.l}</div>
-                  </div>
+                  {k:"dashboard",e:"🏠",l:"Home"},
+                  {k:"load",e:"📦",l:"Load"},
+                  {k:"sell",e:"💳",l:"Sell"},
+                  {k:"expenses",e:"💸",l:"Expenses"},
+                  {k:"history",e:"📄",l:"History"},
+                ].map(t=>(
+                  <button key={t.k} onClick={()=>setDriverTab(t.k)}
+                    style={{padding:"10px 6px",borderRadius:9,border:`1.5px solid ${driverTab===t.k?"#0ea5e9":"#e5e7eb"}`,background:driverTab===t.k?"#f0f9ff":"#fff",cursor:"pointer",textAlign:"center",fontFamily:"'Inter',sans-serif",transition:"all .15s"}}>
+                    <div style={{fontSize:18}}>{t.e}</div>
+                    <div style={{fontSize:10,fontWeight:600,color:driverTab===t.k?"#0ea5e9":"#6b7280",marginTop:3}}>{t.l}</div>
+                  </button>
                 ))}
               </div>
 
-              {/* Customers list */}
-              <div className="card" style={{marginBottom:16}}>
-                <div style={{padding:"14px 18px",borderBottom:"1px solid #f3f4f6",fontWeight:700,fontSize:14,color:"#0a1628"}}>
-                  ⛽ My Gas Stations ({driverData.customers.length})
+              {/* ── HOME TAB ── */}
+              {driverTab==="dashboard"&&<div>
+                <div style={{background:driverData.activeLoad?"#f0fdf4":"#fef9c3",border:`1px solid ${driverData.activeLoad?"#a7f3d0":"#fde68a"}`,borderRadius:10,padding:"12px 16px",marginBottom:14,display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{fontSize:24}}>{driverData.activeLoad?"🟢":"🟡"}</div>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14,color:driverData.activeLoad?"#065f46":"#92400e"}}>{driverData.activeLoad?"Truck Loaded & Active":"Truck Not Loaded"}</div>
+                    <div style={{fontSize:12,color:driverData.activeLoad?"#047857":"#92400e"}}>{driverData.activeLoad?`Load ${driverData.activeLoad.id} · ${(driverData.activeLoad.items||[]).reduce((a,i)=>a+i.qty,0)} units`:"Tap Load to load your truck"}</div>
+                  </div>
                 </div>
-                {driverData.customers.length===0
-                  ?<div style={{padding:24,textAlign:"center",color:"#9ca3af",fontSize:13}}>No customers assigned yet</div>
-                  :driverData.customers.map(c=>{
-                    const custSales = driverData.sales.filter(s=>s.cust_id===c.id);
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
+                  {[
+                    {l:"Customers",v:driverData.customers.length,e:"⛽",c:"#0ea5e9"},
+                    {l:"Today's Sales",v:driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).length,e:"📄",c:"#7c3aed"},
+                    {l:"Today Revenue",v:`$${driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>a+s.total,0).toFixed(2)}`,e:"💰",c:"#059669"},
+                  ].map(k=>(
+                    <div key={k.l} className="card" style={{padding:"12px",textAlign:"center"}}>
+                      <div style={{fontSize:20,marginBottom:3}}>{k.e}</div>
+                      <div style={{fontWeight:800,fontSize:18,color:k.c}}>{k.v}</div>
+                      <div style={{fontSize:10,color:"#9ca3af",marginTop:2}}>{k.l}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="card" style={{marginBottom:14}}>
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",fontWeight:700,fontSize:13,color:"#0a1628"}}>⛽ My Customers</div>
+                  {driverData.customers.map(c=>(
+                    <div key={c.id} style={{padding:"12px 16px",borderBottom:"1px solid #f9fafb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div>
+                        <div style={{fontWeight:600,fontSize:13}}>{c.name}</div>
+                        {c.address&&<div style={{fontSize:11,color:"#9ca3af"}}>📍 {c.address}</div>}
+                        {c.phone&&<div style={{fontSize:11,color:"#9ca3af"}}>📞 {c.phone}</div>}
+                      </div>
+                      <button onClick={()=>{setDriverSaleCust(c.id);setDriverTab("sell");}}
+                        style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:7,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                        Sell →
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>}
+
+              {/* ── LOAD TAB ── */}
+              {driverTab==="load"&&<DriverLoadTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co}/>}
+
+              {/* ── SELL TAB ── */}
+              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust}/>}
+
+              {/* ── EXPENSES TAB ── */}
+              {driverTab==="expenses"&&<DriverExpensesTab driverData={driverData} supabase={supabase}/>}
+
+              {/* ── HISTORY TAB ── */}
+              {driverTab==="history"&&<div>
+                <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:12}}>📄 Invoice History</div>
+                {driverData.sales.length===0
+                  ?<div className="card" style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No invoices yet</div>
+                  :driverData.sales.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(s=>{
+                    const cust=driverData.customers.find(c=>c.id===s.cust_id);
                     return(
-                      <div key={c.id} style={{padding:"14px 18px",borderBottom:"1px solid #f9fafb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <div>
-                          <div style={{fontWeight:600,fontSize:14,color:"#111"}}>{c.name}</div>
-                          {c.address&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📍 {c.address}</div>}
-                          {c.phone&&<div style={{fontSize:11,color:"#9ca3af"}}>📞 {c.phone}</div>}
+                      <div key={s.id} className="card" style={{padding:"14px 16px",marginBottom:10,borderLeft:`4px solid ${s.email_sent?"#059669":"#e5e7eb"}`}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                          <div>
+                            <span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700}}>{s.id}</span>
+                            <div style={{fontWeight:600,fontSize:13,marginTop:4}}>{cust?.name||"Unknown"}</div>
+                            <div style={{fontSize:11,color:"#9ca3af"}}>{s.date}</div>
+                          </div>
+                          <div style={{textAlign:"right"}}>
+                            <div style={{fontWeight:800,fontSize:18,color:"#7c3aed"}}>${(s.total*(1+(parseFloat(co?.tax_rate||8.25)/100))).toFixed(2)}</div>
+                            {s.email_sent&&<div style={{fontSize:10,color:"#059669"}}>✓ Email sent</div>}
+                          </div>
                         </div>
-                        <div style={{textAlign:"right"}}>
-                          <div style={{fontSize:12,color:"#0ea5e9",fontWeight:600}}>{custSales.length} invoices</div>
-                          <div style={{fontSize:12,color:"#059669",fontWeight:700}}>${custSales.reduce((a,s)=>a+s.total,0).toFixed(2)}</div>
+                        <div style={{display:"flex",gap:6}}>
+                          <button onClick={()=>setDriverViewInv(s)} style={{flex:1,padding:"8px",background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:7,fontSize:12,fontWeight:600,color:"#7c3aed",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                            👁 View Invoice
+                          </button>
+                          {cust?.email&&!s.email_sent&&<button onClick={()=>sendInvoiceEmail(s,cust)} style={{flex:1,padding:"8px",background:"#0ea5e9",border:"none",borderRadius:7,fontSize:12,fontWeight:600,color:"#fff",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                            📧 Email Customer
+                          </button>}
+                          {s.email_sent&&<div style={{flex:1,padding:"8px",background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,fontSize:12,color:"#059669",textAlign:"center"}}>✓ Sent</div>}
                         </div>
                       </div>
                     );
                   })
                 }
-              </div>
+              </div>}
 
-              {/* Instructions */}
-              <div className="card" style={{padding:"16px 18px"}}>
-                <div style={{fontWeight:700,fontSize:13,color:"#0a1628",marginBottom:12}}>📱 How to record a sale</div>
-                {[
-                  {n:"1",t:"Open RouteFlow admin app",d:"Go to routeflow-jade.vercel.app and log in"},
-                  {n:"2",t:"Click Sell on your truck",d:"Select your customer and scan or enter products"},
-                  {n:"3",t:"Confirm & Invoice",d:"Invoice is created and sent to admin instantly"},
-                  {n:"4",t:"Collect payment",d:"Cash, check, Zelle or charge card on the spot"},
-                ].map(s=>(
-                  <div key={s.n} style={{display:"flex",gap:12,marginBottom:12,alignItems:"flex-start"}}>
-                    <div style={{width:26,height:26,borderRadius:"50%",background:"#0ea5e9",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,flexShrink:0}}>{s.n}</div>
-                    <div>
-                      <div style={{fontWeight:600,fontSize:13,color:"#111"}}>{s.t}</div>
-                      <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{s.d}</div>
+              {/* Invoice viewer modal */}
+              {driverViewInv&&<div style={{position:"fixed",inset:0,background:"#00000060",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+                <div style={{background:"#fff",borderRadius:16,padding:24,maxWidth:560,width:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                    <div style={{fontWeight:700,fontSize:16}}>Invoice {driverViewInv.id}</div>
+                    <div style={{display:"flex",gap:8}}>
+                      {driverData.customers.find(c=>c.id===driverViewInv.cust_id)?.email&&
+                        <button onClick={()=>{sendInvoiceEmail(driverViewInv,driverData.customers.find(c=>c.id===driverViewInv.cust_id));setDriverViewInv(null);}}
+                          style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:7,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                          📧 Email
+                        </button>
+                      }
+                      <button onClick={()=>window.print()} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>🖨 Print</button>
+                      <button onClick={()=>setDriverViewInv(null)} style={{background:"#f3f4f6",border:"none",borderRadius:7,padding:"8px 14px",fontSize:12,cursor:"pointer"}}>✕ Close</button>
                     </div>
                   </div>
-                ))}
-                <a href="/" style={{display:"block",background:"#0ea5e9",color:"#fff",textAlign:"center",padding:"12px",borderRadius:10,fontWeight:700,fontSize:14,textDecoration:"none",marginTop:8}}>
-                  Open RouteFlow Dashboard →
-                </a>
-              </div>
+                  <DriverInvoiceView sale={driverViewInv} customers={driverData.customers} products={products} co={co} driver={driverData.truck?.driver}/>
+                </div>
+              </div>}
+
             </div>
           )}
         </div>}
