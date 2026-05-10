@@ -283,6 +283,9 @@ export default function App(){
   const[viewSale,setViewSale]=useState(null);
   const[viewTruck,setViewTruck]=useState(null);
   const[stripeModal,setStripeModal]=useState(null);
+  const[scanning,setScanning]=useState(false);
+  const[scanInput,setScanInput]=useState("");
+  const[scanMsg,setScanMsg]=useState(null);
 
   // Edit states — product
   const[editingPid,setEditingPid]=useState(null);
@@ -659,6 +662,33 @@ export default function App(){
   };
 
   const handleLogout=async()=>{await supabase.auth.signOut();};
+
+  // ── BARCODE SCAN HANDLER ───────────────────────────────────────────────────
+  const handleScan = (barcode) => {
+    if(!barcode.trim()) return;
+    const code = barcode.trim().toLowerCase();
+    // Match against SKU or product ID on truck
+    const match = formItems.find(fi=>{
+      const p = getP(fi.pid);
+      return p && (
+        p.sku?.toLowerCase()===code ||
+        p.id?.toLowerCase()===code ||
+        p.sku?.toLowerCase().includes(code) ||
+        code.includes(p.sku?.toLowerCase()||"___")
+      );
+    });
+    if(match){
+      const p = getP(match.pid);
+      setFormItems(prev=>prev.map(fi=>
+        fi.pid===match.pid ? {...fi, qty:Math.min(fi.max, fi.qty+1)} : fi
+      ));
+      setScanMsg({type:"success", text:`✓ ${p.name} — qty updated`});
+    } else {
+      setScanMsg({type:"error", text:`❌ No product found for: ${barcode}`});
+    }
+    setScanInput("");
+    setTimeout(()=>setScanMsg(null), 2500);
+  };
 
   // CSV
   const exportInvoices=()=>{const rows=[["Invoice","Date","Customer","Driver","Subtotal","Tax","Total","Profit","Status"]];visSales.forEach(s=>{const gt=s.total*(1+taxRate/100);rows.push([s.id,s.date,getC(s.cust_id)?.name,getT(s.truck_id)?.driver,s.total.toFixed(2),(s.total*taxRate/100).toFixed(2),gt.toFixed(2),s.profit.toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);});downloadCSV(rows,"invoices.csv");};
@@ -1458,26 +1488,78 @@ export default function App(){
         </div>
       </Modal>}
 
-      {modal==="sale"&&<Modal title={`💳 Record Sale — ${getT(selTruck)?.driver}`} onClose={()=>setModal(null)}>
+      {modal==="sale"&&<Modal title={`💳 Record Sale — ${getT(selTruck)?.driver}`} onClose={()=>{setModal(null);setScanning(false);setScanInput("");setScanMsg(null);}}>
         <div>
           <div style={{marginBottom:12}}><label>Customer</label><select value={selCust} onChange={e=>setSelCust(e.target.value)}>{customers.filter(c=>c.truck_id===selTruck).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
           {selCust&&(()=>{const c=getC(selCust);return c&&(c.phone||c.address)&&<div style={{background:"#f9fafb",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:11,color:"#6b7280"}}>{c.address&&<div>📍 {c.address}</div>}{c.phone&&<div>📞 {c.phone}</div>}</div>;})()}
-          <div style={{fontSize:10,color:"#6b7280",letterSpacing:".07em",fontWeight:700,marginBottom:8}}>ITEMS TO SELL</div>
+
+          {/* ── SCAN / MANUAL TOGGLE ── */}
+          <div style={{display:"flex",gap:6,marginBottom:12}}>
+            <button onClick={()=>setScanning(false)} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${!scanning?"#7c3aed":"#e5e7eb"}`,background:!scanning?"#f5f3ff":"#fff",color:!scanning?"#7c3aed":"#6b7280",fontWeight:!scanning?700:400,cursor:"pointer",fontSize:12,fontFamily:"'Barlow',sans-serif"}}>
+              📋 Manual Entry
+            </button>
+            <button onClick={()=>{setScanning(true);setScanInput("");setScanMsg(null);setTimeout(()=>document.getElementById("scan-input")?.focus(),100);}} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${scanning?"#7c3aed":"#e5e7eb"}`,background:scanning?"#f5f3ff":"#fff",color:scanning?"#7c3aed":"#6b7280",fontWeight:scanning?700:400,cursor:"pointer",fontSize:12,fontFamily:"'Barlow',sans-serif"}}>
+              📷 Scan Barcode
+            </button>
+          </div>
+
+          {/* ── SCAN INPUT ── */}
+          {scanning&&<div style={{marginBottom:12}}>
+            <div style={{background:"#f5f3ff",border:"2px solid #7c3aed",borderRadius:10,padding:"12px 14px"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#7c3aed",letterSpacing:".06em",marginBottom:8}}>SCAN PRODUCT BARCODE</div>
+              <input
+                id="scan-input"
+                type="text"
+                placeholder="Point scanner at barcode or type SKU..."
+                value={scanInput}
+                onChange={e=>setScanInput(e.target.value)}
+                onKeyDown={e=>{
+                  if(e.key==="Enter"){handleScan(scanInput);}
+                }}
+                autoFocus
+                style={{background:"#fff",border:"1.5px solid #ddd6fe",borderRadius:7,padding:"10px 13px",fontSize:14,width:"100%",outline:"none",fontFamily:"'Barlow',sans-serif"}}
+              />
+              <div style={{display:"flex",gap:8,marginTop:8}}>
+                <button onClick={()=>handleScan(scanInput)} className="btn ba" style={{fontSize:11,padding:"6px 14px"}}>Add Product</button>
+                <div style={{fontSize:11,color:"#9ca3af",alignSelf:"center"}}>or press Enter after scan</div>
+              </div>
+            </div>
+            {scanMsg&&<div style={{marginTop:8,padding:"8px 12px",borderRadius:7,background:scanMsg.type==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${scanMsg.type==="success"?"#a7f3d0":"#fecaca"}`,fontSize:12,color:scanMsg.type==="success"?"#065f46":"#dc2626",fontWeight:600}}>
+              {scanMsg.text}
+            </div>}
+            <div style={{marginTop:8,fontSize:11,color:"#9ca3af",lineHeight:1.6}}>
+              💡 Tip: If using a Bluetooth scanner, just point and scan — it fills automatically. Using phone? Type the SKU manually then press Enter.
+            </div>
+          </div>}
+
+          {/* ── ITEMS LIST ── */}
+          <div style={{fontSize:10,color:"#6b7280",letterSpacing:".07em",fontWeight:700,marginBottom:8}}>
+            ITEMS TO SELL {formItems.filter(fi=>fi.qty>0).length>0&&<span style={{color:"#7c3aed"}}>— {formItems.filter(fi=>fi.qty>0).length} selected</span>}
+          </div>
           <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:270,overflowY:"auto",paddingRight:3}}>
             {formItems.map((fi,idx)=>{const p=getP(fi.pid);if(!p||fi.max===0)return null;return(
-              <div key={fi.pid} style={{background:"#f9fafb",borderRadius:7,padding:"8px 11px"}}>
+              <div key={fi.pid} style={{background:fi.qty>0?"#f5f3ff":"#f9fafb",borderRadius:7,padding:"8px 11px",border:fi.qty>0?"1.5px solid #ddd6fe":"1px solid transparent"}}>
                 <div style={{display:"flex",alignItems:"center",gap:9}}>
-                  <div style={{flex:1}}><div style={{fontSize:12,color:"#212121",fontWeight:600}}>{p.name}</div><div style={{fontSize:10,color:"#9ca3af"}}>On truck: <span style={{color:"#7c3aed"}}>{fi.max}</span> · <span style={{color:"#059669"}}>{fmt(p.price)}</span></div></div>
-                  <input type="number" min="0" max={fi.max} value={fi.qty} onChange={e=>{const v=Math.min(fi.max,Math.max(0,parseInt(e.target.value)||0));setFormItems(prev=>prev.map((x,i)=>i===idx?{...x,qty:v}:x));}} style={{width:70,textAlign:"center"}}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,color:"#212121",fontWeight:600}}>{p.name}</div>
+                    <div style={{fontSize:10,color:"#9ca3af"}}>
+                      SKU: <span style={{fontFamily:"monospace"}}>{p.sku}</span> · On truck: <span style={{color:"#7c3aed"}}>{fi.max}</span> · <span style={{color:"#059669"}}>{fmt(p.price)}</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                    <button onClick={()=>setFormItems(prev=>prev.map((x,i)=>i===idx?{...x,qty:Math.max(0,x.qty-1)}:x))} style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                    <input type="number" min="0" max={fi.max} value={fi.qty} onChange={e=>{const v=Math.min(fi.max,Math.max(0,parseInt(e.target.value)||0));setFormItems(prev=>prev.map((x,i)=>i===idx?{...x,qty:v}:x));}} style={{width:54,textAlign:"center"}}/>
+                    <button onClick={()=>setFormItems(prev=>prev.map((x,i)=>i===idx?{...x,qty:Math.min(x.max,x.qty+1)}:x))} style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                  </div>
                 </div>
                 {fi.qty>0&&<div style={{fontSize:10,color:"#059669",marginTop:3,textAlign:"right"}}>{fmt(fi.qty*p.price)} + {fmt(fi.qty*p.price*taxRate/100)} tax = <strong>{fmt(fi.qty*p.price*(1+taxRate/100))}</strong></div>}
               </div>
             );})}
           </div>
           <Divider/>
-          {(()=>{const sub=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+(p?.price||0)*fi.qty;},0);const tax=sub*taxRate/100,gt=sub+tax,prof=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+((p?.price||0)-(p?.cost||0))*fi.qty;},0);return<div style={{background:"#f9fafb",borderRadius:7,padding:"11px 13px",marginBottom:12}}>{[{l:"Subtotal",v:fmt(sub),c:"#6b7280"},{l:`Tax (${taxRate}%)`,v:fmt(tax),c:"#7c3aed"},{l:"Grand Total",v:fmt(gt),c:"#7c3aed"},{l:"Your Profit",v:fmt(prof),c:"#7c3aed"}].map(k=><div key={k.l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:k.l==="Grand Total"?16:13,color:k.c}}>{k.v}</span></div>)}</div>;})()}
+          {(()=>{const sub=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+(p?.price||0)*fi.qty;},0);const tax=sub*taxRate/100,gt=sub+tax,prof=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+((p?.price||0)-(p?.cost||0))*fi.qty;},0);return<div style={{background:"#f9fafb",borderRadius:7,padding:"11px 13px",marginBottom:12}}>{[{l:"Subtotal",v:fmt(sub),c:"#6b7280"},{l:`Tax (${taxRate}%)`,v:fmt(tax),c:"#7c3aed"},{l:"Grand Total",v:fmt(gt),c:"#7c3aed"},{l:"Your Profit",v:fmt(prof),c:"#059669"}].map(k=><div key={k.l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:k.l==="Grand Total"?16:13,color:k.c}}>{k.v}</span></div>)}</div>;})()}
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-            <button className="btn bgh" onClick={()=>setModal(null)}>Cancel</button>
+            <button className="btn bgh" onClick={()=>{setModal(null);setScanning(false);setScanInput("");}}>Cancel</button>
             <button className="btn bg" onClick={confirmSale} disabled={saving}>{ic.inv} Confirm & Invoice</button>
           </div>
         </div>
