@@ -445,6 +445,14 @@ export default function OrderPortal() {
         </div>
 
         {selCust&&step!=="home"&&<div style={{fontSize:11,color:"#4b6080"}}>⛽ <span style={{color:"#fff",fontWeight:600}}>{selCust.name}</span></div>}
+        {step!=="home"&&step!=="confirm"&&(
+          <button onClick={()=>{
+            if(step==="order") {setStep("home");setQuantities({});}
+            else if(step==="review") setStep("order");
+          }} style={{background:"#1e3050",border:"1px solid #2e4060",borderRadius:8,padding:"7px 14px",color:"#b0c8e0",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6,fontFamily:"'Inter',sans-serif"}}>
+            ← Back
+          </button>
+        )}
       </div>
 
       <div style={{maxWidth:1060,margin:"0 auto",padding:"28px 16px"}}>
@@ -568,7 +576,7 @@ export default function OrderPortal() {
                 </div>
               </div>
               <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
-                <button className="btn-ghost" onClick={()=>setIsNew(false)}>← Back</button>
+                <button className="btn-ghost" style={{padding:"10px 20px",fontSize:13}} onClick={()=>setIsNew(false)}>← Back</button>
                 <button className="btn-amber" onClick={handleRegister} disabled={submitting}>
                   {submitting?<><span className="sp">⟳</span> Registering…</>:<>Register & Continue →</>}
                 </button>
@@ -582,7 +590,7 @@ export default function OrderPortal() {
       {step==="order"&&<div className="fu">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:12}}>
           <div>
-            <button onClick={()=>{setStep("home");setQuantities({});}} style={{background:"none",border:"none",cursor:"pointer",color:"#9ca3af",fontSize:12,display:"flex",alignItems:"center",gap:5,marginBottom:6,padding:0}}>← Back</button>
+            <button onClick={()=>{setStep("home");setQuantities({});}} style={{background:"#f5f5f5",border:"1px solid #e5e7eb",borderRadius:8,padding:"8px 16px",color:"#374151",fontSize:13,fontWeight:600,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6,marginBottom:10,fontFamily:"'Inter',sans-serif"}}>← Back to Store Selection</button>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:26,color:"#0a1628"}}>Product Catalog</div>
             <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{products.length} products available · select quantities</div>
           </div>
@@ -672,7 +680,7 @@ export default function OrderPortal() {
 
       {/* ══ REVIEW ══ */}
       {step==="review"&&<div className="fu">
-        <button onClick={()=>setStep("order")} style={{background:"none",border:"none",cursor:"pointer",color:"#9ca3af",fontSize:12,display:"flex",alignItems:"center",gap:5,marginBottom:18,padding:0}}>← Back to Catalog</button>
+        <button onClick={()=>setStep("order")} style={{background:"#f5f5f5",border:"1px solid #e5e7eb",borderRadius:8,padding:"8px 16px",color:"#374151",fontSize:13,fontWeight:600,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6,marginBottom:18,fontFamily:"'Inter',sans-serif"}}>← Back to Catalog</button>
         <div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:16,alignItems:"start"}} className="grid2">
           <div>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:26,color:"#0a1628",marginBottom:16}}>Review Your Order</div>
