@@ -173,6 +173,11 @@ export default function OrderPortal() {
   // Flow: "home" | "register" | "order" | "review" | "confirm"
   const [step,      setStep]      = useState("home");
   const [isNew,     setIsNew]     = useState(false);
+  const [payMethod, setPayMethod] = useState("delivery"); // "delivery" | "card"
+  const [stripeReady, setStripeReady] = useState(false);
+  const [clientSecret, setClientSecret] = useState(null);
+  const [stripeError, setStripeError] = useState(null);
+  const [stripeInst, setStripeInst] = useState(null);
 
   // Customer state
   const [selCust,   setSelCust]   = useState(null);
@@ -195,20 +200,60 @@ export default function OrderPortal() {
   // Load data
   useEffect(()=>{
     (async()=>{
-      const [pr, cu, co] = await Promise.all([
-        supabase.from("products").select("*").gt("shelf",0).order("cat").order("name"),
+      const [pr, cu, co, ld, sa, rt] = await Promise.all([
+        supabase.from("products").select("*").order("cat").order("name"),
         supabase.from("customers").select("*").order("name"),
         supabase.from("company").select("*").single(),
+        supabase.from("loads").select("*").eq("status","out"),
+        supabase.from("sales").select("*"),
+        supabase.from("returns").select("*"),
       ]);
-      if(pr.data) setProducts(pr.data);
       if(cu.data) setCustomers(cu.data);
       if(co.data) setCo(co.data);
+
+      if(pr.data){
+        const loads = ld.data||[];
+        const sales = sa.data||[];
+        const returns = rt.data||[];
+
+        // Calculate units on trucks per product
+        const onTrucks = {};
+        loads.forEach(load=>{
+          // Units loaded
+          (load.items||[]).forEach(i=>{
+            onTrucks[i.pid] = (onTrucks[i.pid]||0) + i.qty;
+          });
+          // Minus sold from this load
+          sales.filter(s=>s.load_id===load.id).forEach(s=>{
+            (s.items||[]).forEach(i=>{
+              onTrucks[i.pid] = (onTrucks[i.pid]||0) - i.qty;
+            });
+          });
+          // Minus returned from this load
+          returns.filter(r=>r.load_id===load.id).forEach(r=>{
+            (r.items||[]).forEach(i=>{
+              onTrucks[i.pid] = (onTrucks[i.pid]||0) - i.qty;
+            });
+          });
+        });
+
+        // Total available = warehouse shelf + on trucks (remaining)
+        const enriched = pr.data.map(p=>({
+          ...p,
+          onTruck: Math.max(0, onTrucks[p.id]||0),
+          totalStock: p.shelf + Math.max(0, onTrucks[p.id]||0),
+        }));
+        setProducts(enriched.filter(p=>p.totalStock>0));
+      }
       setLoading(false);
     })();
   },[]);
 
   const cats = useMemo(()=>["All",...new Set(products.map(p=>p.cat))],[products]);
   const taxRate = parseFloat(co?.tax_rate||8.25);
+  const CARD_FEE = 3;
+  const cardSurcharge = payMethod==="card" ? parseFloat((total*CARD_FEE/100).toFixed(2)) : 0;
+  const grandTotal = parseFloat((total+cardSurcharge).toFixed(2));
 
   const filtered = useMemo(()=>products.filter(p=>{
     if(catFilter!=="All"&&p.cat!==catFilter) return false;
@@ -271,6 +316,19 @@ export default function OrderPortal() {
     setSubmitting(true);
     try {
       const id = "ORD-"+uid();
+      // If paying by card — confirm Stripe payment first
+      if(payMethod==="card" && stripeInst && clientSecret){
+        const elements = document.querySelector("#stripe-card-element");
+        // Confirm card payment via Stripe
+        const result = await stripeInst.confirmCardPayment(clientSecret, {
+          payment_method: { card: elements }
+        });
+        if(result.error) {
+          setStripeError(result.error.message);
+          setSubmitting(false);
+          return;
+        }
+      }
       const rec = {
         id,
         cust_id: selCust.id,
@@ -281,9 +339,10 @@ export default function OrderPortal() {
         items: orderItems,
         subtotal,
         tax,
-        total,
-        notes,
-        status: "pending",
+        total: grandTotal,
+        notes: notes+(payMethod==="card"?` | Paid by card online (incl. ${CARD_FEE}% surcharge $${cardSurcharge.toFixed(2)})`:" | Payment on delivery"),
+        status: "approved",
+        payment_method: payMethod,
         created_at: new Date().toISOString(),
       };
       const {error} = await supabase.from("orders").insert(rec);
@@ -295,6 +354,7 @@ export default function OrderPortal() {
         address: selCust.address,
         phone: selCust.phone,
         email: selCust.email,
+        paidOnline: payMethod==="card",
       });
       setStep("confirm");
     } catch(e) {
@@ -305,7 +365,40 @@ export default function OrderPortal() {
 
   const resetAll = () => {
     setStep("home"); setIsNew(false); setSelCust(null); setCustSearch(""); setQuantities({}); setNotes(""); setOrder(null);
+    setPayMethod("delivery"); setClientSecret(null); setStripeError(null); setStripeReady(false);
     setReg({businessName:"",ownerName:"",email:"",phone:"",address:"",city:"",state:"TX",zip:""});
+  };
+
+  // Load Stripe when card selected
+  const loadStripeIntent = async () => {
+    setStripeError(null);
+    setStripeReady(false);
+    try {
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+      const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment-intent`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${SUPABASE_ANON_KEY}`,"apikey":SUPABASE_ANON_KEY},
+        body:JSON.stringify({amount:grandTotal,currency:"usd",metadata:{customer_name:selCust?.name||"",order_portal:"true"}}),
+      });
+      const data = await res.json();
+      if(data?.error) throw new Error(data.error);
+      setClientSecret(data.clientSecret);
+      // Dynamically load Stripe
+      if(!window.Stripe){
+        await new Promise((resolve,reject)=>{
+          const s=document.createElement("script");
+          s.src="https://js.stripe.com/v3/";
+          s.onload=resolve; s.onerror=reject;
+          document.head.appendChild(s);
+        });
+      }
+      const stripe = window.Stripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+      setStripeInst(stripe);
+      setStripeReady(true);
+    } catch(e) {
+      setStripeError(e.message);
+    }
   };
 
   // ── LOADING ────────────────────────────────────────────────────────────────
@@ -522,7 +615,7 @@ export default function OrderPortal() {
         <div className="card" style={{overflow:"hidden"}}>
           {/* Header */}
           <div style={{display:"grid",gridTemplateColumns:"70px 90px 1fr 90px 110px 80px 90px 130px",background:"#0a1628",padding:"11px 18px",gap:8}} className="prod-grid">
-            {["Stock #","SKU","Description","Type","Unit","Price","In Stock","Order Qty"].map(h=>(
+            {["Stock #","SKU","Description","Type","Unit","Price","Available","Order Qty"].map(h=>(
               <div key={h} style={{fontSize:9,fontWeight:700,color:"#4b6080",letterSpacing:".1em",textTransform:"uppercase",textAlign:["Price","In Stock","Order Qty"].includes(h)?"center":"left"}} className={["Stock #","SKU","Type","Unit"].includes(h)?"hide-sm":""}>{h}</div>
             ))}
           </div>
@@ -543,15 +636,16 @@ export default function OrderPortal() {
                   <div style={{fontSize:11,color:"#6b7280"}} className="hide-sm">{p.unit}</div>
                   <div style={{textAlign:"center",fontWeight:700,fontSize:14,color:"#0a1628"}}>{fmt(p.price)}</div>
                   <div style={{textAlign:"center"}}>
-                    <span style={{fontWeight:700,fontSize:13,color:p.shelf<10?"#ef4444":p.shelf<20?"#f59e0b":"#10b981"}}>{p.shelf}</span>
-                    {p.shelf<10&&<div style={{fontSize:9,color:"#ef4444",fontWeight:700}}>LOW</div>}
+                    <span style={{fontWeight:700,fontSize:13,color:p.totalStock<10?"#ef4444":p.totalStock<20?"#f59e0b":"#10b981"}}>{p.totalStock}</span>
+                    {p.onTruck>0&&<div style={{fontSize:9,color:"#6b7280"}}>🏭{p.shelf}+🚚{p.onTruck}</div>}
+                    {p.totalStock<10&&<div style={{fontSize:9,color:"#ef4444",fontWeight:700}}>LOW</div>}
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"center"}}>
-                    <button className="qty-btn" onClick={()=>setQty(p.id,qty-1,p.shelf)}>−</button>
-                    <input type="number" min="0" max={p.shelf} value={quantities[p.id]||""} placeholder="0"
-                      onChange={e=>setQty(p.id,e.target.value,p.shelf)}
+                    <button className="qty-btn" onClick={()=>setQty(p.id,qty-1,p.totalStock)}>−</button>
+                    <input type="number" min="0" max={p.totalStock} value={quantities[p.id]||""} placeholder="0"
+                      onChange={e=>setQty(p.id,e.target.value,p.totalStock)}
                       style={{width:44,textAlign:"center",border:"1.5px solid",borderColor:sel?"#f59e0b":"#e5e7eb",borderRadius:7,padding:"5px 4px",fontSize:14,fontWeight:700,color:"#111",background:sel?"#fffbeb":"#fff"}}/>
-                    <button className="qty-btn" style={{background:qty>0?"#0a1628":"#fff",color:qty>0?"#fff":"#374151",borderColor:qty>0?"#0a1628":"#e5e7eb"}} onClick={()=>setQty(p.id,qty+1,p.shelf)}>+</button>
+                    <button className="qty-btn" style={{background:qty>0?"#0a1628":"#fff",color:qty>0?"#fff":"#374151",borderColor:qty>0?"#0a1628":"#e5e7eb"}} onClick={()=>setQty(p.id,qty+1,p.totalStock)}>+</button>
                   </div>
                 </div>
               );
@@ -620,23 +714,82 @@ export default function OrderPortal() {
             </div>
           </div>
 
-          {/* Summary */}
+          {/* Summary + Payment */}
           <div style={{position:"sticky",top:76}}>
             <div style={{background:"#0a1628",borderRadius:14,padding:"22px",color:"#fff"}}>
-              <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,marginBottom:18}}>Order Summary</div>
-              {[{l:"Subtotal",v:fmt(subtotal)},{l:`Tax (${taxRate}%)`,v:fmt(tax)}].map(k=>(
-                <div key={k.l} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #ffffff10"}}>
-                  <span style={{fontSize:12,color:"#4b6080"}}>{k.l}</span><span style={{fontSize:12,color:"#9ca3af"}}>{k.v}</span>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,marginBottom:14}}>Order Summary</div>
+              {[{l:"Subtotal",v:fmt(subtotal)},{l:`Tax (${taxRate}%)`,v:fmt(tax)},{l:"Order Total",v:fmt(total)}].map(k=>(
+                <div key={k.l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #ffffff10"}}>
+                  <span style={{fontSize:12,color:"#4b6080"}}>{k.l}</span>
+                  <span style={{fontSize:12,color:"#9ca3af"}}>{k.v}</span>
                 </div>
               ))}
+              {payMethod==="card"&&<div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #ffffff10"}}>
+                <span style={{fontSize:12,color:"#a78bfa"}}>Card surcharge ({CARD_FEE}%)</span>
+                <span style={{fontSize:12,color:"#a78bfa"}}>+{fmt(cardSurcharge)}</span>
+              </div>}
               <div style={{display:"flex",justifyContent:"space-between",padding:"14px 0",borderTop:"1px solid #ffffff20",marginTop:3}}>
-                <span style={{fontFamily:"'Playfair Display',serif",fontSize:17}}>Total</span>
-                <span style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#f59e0b"}}>{fmt(total)}</span>
+                <span style={{fontFamily:"'Playfair Display',serif",fontSize:17}}>Total Due</span>
+                <span style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#f59e0b"}}>{fmt(grandTotal)}</span>
               </div>
-              <div style={{fontSize:11,color:"#374151",lineHeight:1.7,marginBottom:16}}>Payment due on delivery. This order requires admin approval before dispatch. A proforma invoice PDF will be generated instantly.</div>
-              <button className="btn-amber" style={{width:"100%",justifyContent:"center",padding:"13px"}} onClick={handleSubmit} disabled={submitting}>
-                {submitting?<><span className="sp">⟳</span>Submitting…</>:<>✓ Submit Order</>}
+
+              {/* Payment method selector */}
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,color:"#4b6080",letterSpacing:".08em",marginBottom:10}}>HOW WOULD YOU LIKE TO PAY?</div>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {/* Pay on delivery */}
+                  <div onClick={()=>{setPayMethod("delivery");setClientSecret(null);setStripeReady(false);setStripeError(null);}}
+                    style={{padding:"12px 14px",borderRadius:9,border:`2px solid ${payMethod==="delivery"?"#f59e0b":"#1e3050"}`,background:payMethod==="delivery"?"#f59e0b14":"transparent",cursor:"pointer",transition:"all .15s"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:18,height:18,borderRadius:"50%",border:`2px solid ${payMethod==="delivery"?"#f59e0b":"#4b6080"}`,background:payMethod==="delivery"?"#f59e0b":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                        {payMethod==="delivery"&&<div style={{width:8,height:8,borderRadius:"50%",background:"#0a1628"}}/>}
+                      </div>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:600,color:payMethod==="delivery"?"#f59e0b":"#fff"}}>💵 Pay on Delivery</div>
+                        <div style={{fontSize:11,color:"#4b6080",marginTop:1}}>Cash · Check · Money Order · Zelle — No fee</div>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Pay by card */}
+                  <div onClick={()=>{setPayMethod("card");loadStripeIntent();}}
+                    style={{padding:"12px 14px",borderRadius:9,border:`2px solid ${payMethod==="card"?"#a78bfa":"#1e3050"}`,background:payMethod==="card"?"#a78bfa14":"transparent",cursor:"pointer",transition:"all .15s"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:18,height:18,borderRadius:"50%",border:`2px solid ${payMethod==="card"?"#a78bfa":"#4b6080"}`,background:payMethod==="card"?"#a78bfa":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                        {payMethod==="card"&&<div style={{width:8,height:8,borderRadius:"50%",background:"#0a1628"}}/>}
+                      </div>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:600,color:payMethod==="card"?"#a78bfa":"#fff"}}>💳 Pay by Card Now</div>
+                        <div style={{fontSize:11,color:"#4b6080",marginTop:1}}>Credit or Debit · {CARD_FEE}% surcharge applies</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Stripe card form */}
+              {payMethod==="card"&&<div style={{marginBottom:14}}>
+                {!stripeReady&&!stripeError&&<div style={{textAlign:"center",padding:"16px",color:"#4b6080",fontSize:12}}>
+                  <span style={{display:"inline-block",animation:"spin .8s linear infinite"}}>⟳</span> Loading secure payment form…
+                </div>}
+                {stripeError&&<div style={{background:"#1a0a0a",border:"1px solid #4a1010",borderRadius:8,padding:"10px 12px",fontSize:12,color:"#f87171",marginBottom:10}}>
+                  ⚠️ {stripeError}
+                </div>}
+                {stripeReady&&clientSecret&&<div>
+                  <div id="stripe-payment-element" style={{marginBottom:12}}></div>
+                  <div style={{fontSize:10,color:"#374151",textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+                    🔒 Secured by Stripe · PCI compliant
+                  </div>
+                </div>}
+              </div>}
+
+              {stripeError&&payMethod==="card"&&<button onClick={loadStripeIntent} style={{width:"100%",background:"transparent",border:"1px solid #4b6080",borderRadius:8,padding:"8px",fontSize:11,color:"#4b6080",cursor:"pointer",marginBottom:10,fontFamily:"'Inter',sans-serif"}}>↻ Retry</button>}
+
+              <button className="btn-amber" style={{width:"100%",justifyContent:"center",padding:"13px",opacity:(payMethod==="card"&&!stripeReady)?0.5:1}} onClick={handleSubmit} disabled={submitting||(payMethod==="card"&&!stripeReady)}>
+                {submitting?<><span className="sp">⟳</span>Processing…</>:payMethod==="card"?`💳 Pay ${fmt(grandTotal)} Now`:`✓ Submit Order — Pay on Delivery`}
               </button>
+              <div style={{fontSize:10,color:"#374151",textAlign:"center",marginTop:8,lineHeight:1.6}}>
+                {payMethod==="delivery"?"Driver will collect payment upon delivery":"Your card will be charged immediately"}
+              </div>
             </div>
           </div>
         </div>
@@ -644,15 +797,19 @@ export default function OrderPortal() {
 
       {/* ══ CONFIRMED ══ */}
       {step==="confirm"&&order&&<div className="fu">
-        <div className="no-print" style={{background:"#d1fae5",border:"1px solid #a7f3d0",borderRadius:12,padding:"18px 22px",marginBottom:22,display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-          <div style={{width:46,height:46,background:"#10b981",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>✓</div>
+        <div className="no-print" style={{background:order.paidOnline?"#ede9fe":"#d1fae5",border:`1px solid ${order.paidOnline?"#c4b5fd":"#a7f3d0"}`,borderRadius:12,padding:"18px 22px",marginBottom:22,display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+          <div style={{width:46,height:46,background:order.paidOnline?"#7c3aed":"#10b981",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>✓</div>
           <div style={{flex:1}}>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#065f46"}}>Order Submitted Successfully!</div>
-            <div style={{fontSize:12,color:"#047857",marginTop:3}}>Order <strong>{order.id}</strong> is pending admin approval. Save or print your proforma invoice below.</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:order.paidOnline?"#4c1d95":"#065f46"}}>
+              {order.paidOnline?"Order Placed & Payment Confirmed!":"Order Submitted Successfully!"}
+            </div>
+            <div style={{fontSize:12,color:order.paidOnline?"#6d28d9":"#047857",marginTop:3}}>
+              Order <strong>{order.id}</strong> — {order.paidOnline?`💳 $${grandTotal.toFixed(2)} charged to your card`:"💵 Driver will collect payment on delivery"}
+            </div>
           </div>
           <div style={{display:"flex",gap:8,flexShrink:0}}>
-            <button onClick={()=>window.print()} style={{background:"#fff",border:"1.5px solid #10b981",borderRadius:8,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer",color:"#065f46",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:6}}>🖨️ Print / Save PDF</button>
-            <button onClick={resetAll} style={{background:"#10b981",border:"none",borderRadius:8,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer",color:"#fff",fontFamily:"'Inter',sans-serif"}}>New Order</button>
+            <button onClick={()=>window.print()} style={{background:"#fff",border:`1.5px solid ${order.paidOnline?"#7c3aed":"#10b981"}`,borderRadius:8,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer",color:order.paidOnline?"#4c1d95":"#065f46",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:6}}>🖨️ Print / Save PDF</button>
+            <button onClick={resetAll} style={{background:order.paidOnline?"#7c3aed":"#10b981",border:"none",borderRadius:8,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer",color:"#fff",fontFamily:"'Inter',sans-serif"}}>New Order</button>
           </div>
         </div>
         <Invoice order={order} products={products} co={co}/>

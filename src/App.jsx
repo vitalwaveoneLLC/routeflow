@@ -598,28 +598,33 @@ export default function App(){
   };
 
   // ── ORDERS ─────────────────────────────────────────────────────────────────
-  const approveOrder=async order=>{
-    setSaving(true);
-    try{
-      const truckId=customers.find(c=>c.id===order.cust_id)?.truck_id||trucks[0]?.id;
-      if(!truckId)throw new Error("No truck assigned to this customer");
-      let loadId=activeLoad(truckId)?.id;
-      if(!loadId){
-        const nl={id:"LD-"+uid(),truck_id:truckId,date:nowStr(),items:order.items,status:"out"};
-        await supabase.from("loads").insert(nl);setLoads(prev=>[nl,...prev]);loadId=nl.id;
+  // Auto-process new approved orders into invoices
+  useEffect(()=>{
+    const autoProcess = async () => {
+      const newOrders = orders.filter(o=>o.status==="approved"&&!sales.some(s=>s.id==="INV-"+o.id.replace("ORD-","")));
+      for(const order of newOrders){
+        try{
+          const truckId=customers.find(c=>c.id===order.cust_id)?.truck_id||trucks[0]?.id;
+          if(!truckId) continue;
+          let loadId=activeLoad(truckId)?.id;
+          if(!loadId){
+            const nl={id:"LD-"+uid(),truck_id:truckId,date:nowStr(),items:order.items,status:"out"};
+            await supabase.from("loads").insert(nl);
+            setLoads(prev=>[nl,...prev]);
+            loadId=nl.id;
+          }
+          const profit=order.items.reduce((a,i)=>{const p=getP(i.pid);return a+((p?.price||0)-(p?.cost||0))*i.qty;},0);
+          const ns={id:"INV-"+order.id.replace("ORD-",""),load_id:loadId,truck_id:truckId,cust_id:order.cust_id,date:nowStr(),items:order.items,total:order.subtotal,profit};
+          const pmtStatus=order.payment_method==="card"?"paid":"unpaid";
+          await supabase.from("sales").insert(ns);
+          await supabase.from("payments").insert({sale_id:ns.id,status:pmtStatus,method:order.payment_method||"cash"});
+          setSales(prev=>[ns,...prev]);
+          setPayments(prev=>[...prev,{sale_id:ns.id,status:pmtStatus}]);
+        }catch(e){console.error("Auto-process error:",e);}
       }
-      const profit=order.items.reduce((a,i)=>{const p=getP(i.pid);return a+((p?.price||0)-(p?.cost||0))*i.qty;},0);
-      const ns={id:"INV-"+uid(),load_id:loadId,truck_id:truckId,cust_id:order.cust_id,date:nowStr(),items:order.items,total:order.subtotal,profit};
-      await supabase.from("sales").insert(ns);
-      await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
-      await supabase.from("orders").update({status:"approved",approved_at:new Date().toISOString()}).eq("id",order.id);
-      setSales(prev=>[ns,...prev]);setPayments(prev=>[...prev,{sale_id:ns.id,status:"unpaid"}]);
-      setOrders(prev=>prev.map(o=>o.id===order.id?{...o,status:"approved"}:o));
-      showToast(`Order ${order.id} approved → Invoice ${ns.id} created`);
-    }catch(e){showToast(e.message,"error");}
-    setSaving(false);
-  };
-  const rejectOrder=async id=>{await supabase.from("orders").update({status:"rejected"}).eq("id",id);setOrders(prev=>prev.map(o=>o.id===id?{...o,status:"rejected"}:o));showToast("Order rejected");};
+    };
+    if(orders.length&&customers.length&&trucks.length) autoProcess();
+  },[orders]);
 
   // ── SETTINGS ───────────────────────────────────────────────────────────────
   const saveSettings=async()=>{
@@ -642,7 +647,7 @@ export default function App(){
     {id:"dashboard",label:"Dashboard",icon:ic.dash},
     {id:"warehouse",label:"Warehouse",icon:ic.box},
     {id:"trucks",label:"Trucks",icon:ic.truck},
-    {id:"orders",label:"Incoming Orders",icon:ic.orders,badge:orders.filter(o=>o.status==="pending").length},
+    {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
     {id:"ar",label:"Accounts Receivable",icon:ic.ar},
     {id:"payments",label:"Payments",icon:ic.settle,badge:visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length||0},
@@ -861,69 +866,71 @@ export default function App(){
             </div>
           </div>}
 
-          {/* ══ INCOMING ORDERS ══ */}
+          {/* ══ ORDERS ══ */}
           {tab==="orders"&&<div className="fu">
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
-              {[{l:"Pending Approval",v:orders.filter(o=>o.status==="pending").length,c:"#7c3aed"},{l:"Approved",v:orders.filter(o=>o.status==="approved").length,c:"#059669"},{l:"Total Orders",v:orders.length,c:"#7c3aed"}].map(k=>(
+              {[{l:"Total Orders",v:orders.length,c:"#7c3aed"},{l:"💳 Paid Online",v:orders.filter(o=>o.payment_method==="card").length,c:"#059669"},{l:"💵 Pay on Delivery",v:orders.filter(o=>o.payment_method!=="card").length,c:"#f59e0b"}].map(k=>(
                 <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>
               ))}
             </div>
-            <div style={{display:"flex",gap:7,marginBottom:14}}>
-              {["pending","approved","rejected","all"].map(f=><button key={f} className={`btn ${ordFilter===f?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>setOrdFilter(f)}>{f}</button>)}
+            <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#065f46",display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:18}}>✅</span>
+              <span><strong>Auto-approved:</strong> All orders are processed instantly. Invoices created automatically.</span>
             </div>
-            {orders.filter(o=>ordFilter==="all"||o.status===ordFilter).length===0?<Empty icon="📦" msg="NO ORDERS MATCH"/>:(
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                {orders.filter(o=>ordFilter==="all"||o.status===ordFilter).map(o=>{
-                  const cust=getC(o.cust_id);
+            <div style={{display:"flex",gap:7,marginBottom:14}}>
+              {[{k:"all",l:"All Orders"},{k:"card",l:"💳 Paid Online"},{k:"delivery",l:"💵 Pay on Delivery"}].map(f=>(
+                <button key={f.k} className={`btn ${ordFilter===f.k?"ba":"bgh"}`} style={{padding:"6px 14px"}} onClick={()=>setOrdFilter(f.k)}>{f.l}</button>
+              ))}
+            </div>
+            {orders.filter(o=>ordFilter==="all"||(ordFilter==="card"&&o.payment_method==="card")||(ordFilter==="delivery"&&o.payment_method!=="card")).length===0
+              ?<Empty icon="📦" msg="NO ORDERS YET"/>
+              :<div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {orders.filter(o=>ordFilter==="all"||(ordFilter==="card"&&o.payment_method==="card")||(ordFilter==="delivery"&&o.payment_method!=="card")).map(o=>{
+                  const isPaid=o.payment_method==="card";
                   return(
-                    <div key={o.id} className="card" style={{padding:18,borderLeft:`4px solid ${o.status==="pending"?"#7c3aed":o.status==="approved"?"#059669":"#dc2626"}`}}>
+                    <div key={o.id} className="card" style={{padding:18,borderLeft:`4px solid ${isPaid?"#7c3aed":"#f59e0b"}`}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12,flexWrap:"wrap",gap:8}}>
                         <div>
-                          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
                             <span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{o.id}</span>
-                            <span className={`bdg ${o.status==="pending"?"ba2":o.status==="approved"?"bg2":"br2"}`}>{o.status.toUpperCase()}</span>
+                            <span className={`bdg ${isPaid?"bg2":"ba2"}`}>{isPaid?"💳 PAID ONLINE":"💵 PAY ON DELIVERY"}</span>
+                            <span className="bdg bg2">✓ AUTO-APPROVED</span>
                           </div>
-                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,color:"#212121"}}>{o.customer_name}</div>
-                          {o.customer_address&&<div style={{fontSize:11,color:"#6b7280",marginTop:2}}>{o.customer_address}</div>}
-                          {o.customer_phone&&<div style={{fontSize:11,color:"#6b7280"}}>{o.customer_phone}</div>}
-                          <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>{o.date} · {(o.items||[]).length} product{(o.items||[]).length!==1?"s":""}</div>
+                          <div style={{fontWeight:700,fontSize:15,color:"#212121"}}>{o.customer_name}</div>
+                          {o.customer_address&&<div style={{fontSize:11,color:"#6b7280",marginTop:2}}>📍 {o.customer_address}</div>}
+                          {o.customer_phone&&<div style={{fontSize:11,color:"#6b7280"}}>📞 {o.customer_phone}</div>}
+                          <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>{o.date} · {(o.items||[]).length} item{(o.items||[]).length!==1?"s":""}</div>
                         </div>
                         <div style={{textAlign:"right"}}>
                           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#7c3aed"}}>{fmt(o.total)}</div>
-                          <div style={{fontSize:11,color:"#6b7280"}}>incl. {taxRate}% tax</div>
-                          {o.status==="pending"&&(
-                            <div style={{display:"flex",gap:7,marginTop:10,justifyContent:"flex-end"}}>
-                              <button className="btn bg" onClick={()=>approveOrder(o)} disabled={saving}>{ic.chk} Approve & Create Invoice</button>
-                              <button className="btn br" onClick={()=>rejectOrder(o.id)}>{ic.X} Reject</button>
-                            </div>
-                          )}
+                          <div style={{fontSize:11,color:"#6b7280"}}>{isPaid?"Charged to card":"Due on delivery"}</div>
                         </div>
                       </div>
                       <div className="cin" style={{padding:12}}>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:".08em",marginBottom:8}}>ORDER ITEMS</div>
+                        <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",marginBottom:8}}>ORDER ITEMS</div>
                         <div style={{display:"grid",gridTemplateColumns:"70px 90px 1fr 80px 70px 90px",gap:6,marginBottom:6}}>
-                          {["Stock #","SKU","Product","Unit","Qty","Amount"].map(h=><div key={h} style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".08em"}}>{h}</div>)}
+                          {["Stock #","SKU","Product","Unit","Qty","Amount"].map(h=><div key={h} style={{fontSize:9,color:"#9ca3af",fontWeight:700}}>{h}</div>)}
                         </div>
                         {(o.items||[]).map((item,i)=>{
                           const p=getP(item.pid);
                           return(
                             <div key={i} style={{display:"grid",gridTemplateColumns:"70px 90px 1fr 80px 70px 90px",gap:6,padding:"6px 0",borderTop:"1px solid #e5e7eb"}}>
-                              <div style={{fontSize:10,color:"#6b7280",fontFamily:"monospace"}}>{p?.id||item.pid}</div>
-                              <div style={{fontSize:10,color:"#6b7280",fontFamily:"monospace"}}>{p?.sku||"—"}</div>
+                              <div style={{fontSize:10,color:"#9ca3af",fontFamily:"monospace"}}>{p?.id||"—"}</div>
+                              <div style={{fontSize:10,color:"#9ca3af",fontFamily:"monospace"}}>{p?.sku||"—"}</div>
                               <div style={{fontSize:12,color:"#212121",fontWeight:600}}>{p?.name||item.name}</div>
                               <div style={{fontSize:11,color:"#6b7280"}}>{p?.unit||"—"}</div>
-                              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#7c3aed"}}>{item.qty}</div>
-                              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#059669"}}>{fmt(item.qty*(p?.price||0))}</div>
+                              <div style={{fontWeight:700,fontSize:14,color:"#7c3aed"}}>{item.qty}</div>
+                              <div style={{fontWeight:700,fontSize:13,color:"#059669"}}>{fmt(item.qty*(p?.price||0))}</div>
                             </div>
                           );
                         })}
                       </div>
-                      {o.notes&&<div style={{marginTop:10,fontSize:12,color:"#6b7280",fontStyle:"italic"}}>📝 {o.notes}</div>}
+                      {o.notes&&<div style={{marginTop:8,fontSize:11,color:"#6b7280",fontStyle:"italic"}}>📝 {o.notes}</div>}
                     </div>
                   );
                 })}
               </div>
-            )}
+            }
           </div>}
 
           {/* ══ SALES & INVOICES ══ */}
