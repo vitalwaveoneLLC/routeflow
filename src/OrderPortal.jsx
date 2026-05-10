@@ -252,8 +252,6 @@ export default function OrderPortal() {
   const cats = useMemo(()=>["All",...new Set(products.map(p=>p.cat))],[products]);
   const taxRate = parseFloat(co?.tax_rate||8.25);
   const CARD_FEE = 3;
-  const cardSurcharge = payMethod==="card" ? parseFloat((total*CARD_FEE/100).toFixed(2)) : 0;
-  const grandTotal = parseFloat((total+cardSurcharge).toFixed(2));
 
   const filtered = useMemo(()=>products.filter(p=>{
     if(catFilter!=="All"&&p.cat!==catFilter) return false;
@@ -268,6 +266,8 @@ export default function OrderPortal() {
   const subtotal = useMemo(()=>orderItems.reduce((a,i)=>a+(products.find(p=>p.id===i.pid)?.price||0)*i.qty,0),[orderItems,products]);
   const tax = subtotal*(taxRate/100);
   const total = subtotal+tax;
+  const cardSurcharge = payMethod==="card" ? parseFloat((total*CARD_FEE/100).toFixed(2)) : 0;
+  const grandTotal = parseFloat((total+cardSurcharge).toFixed(2));
 
   const setQty=(pid,val,max)=>setQuantities(prev=>({...prev,[pid]:Math.min(max,Math.max(0,parseInt(val)||0))}));
 
