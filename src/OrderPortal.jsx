@@ -182,6 +182,8 @@ export default function OrderPortal() {
   // Customer state
   const [selCust,   setSelCust]   = useState(null);
   const [custSearch,setCustSearch]= useState("");
+  const [custPhone, setCustPhone] = useState("");
+  const [verifyError,setVerifyError] = useState("");
 
   // Registration form
   const [reg, setReg] = useState({
@@ -364,9 +366,36 @@ export default function OrderPortal() {
   };
 
   const resetAll = () => {
-    setStep("home"); setIsNew(false); setSelCust(null); setCustSearch(""); setQuantities({}); setNotes(""); setOrder(null);
+    setStep("home"); setIsNew(false); setSelCust(null); setCustSearch(""); setCustPhone(""); setVerifyError(""); setQuantities({}); setNotes(""); setOrder(null);
     setPayMethod("delivery"); setClientSecret(null); setStripeError(null); setStripeReady(false);
     setReg({businessName:"",ownerName:"",email:"",phone:"",address:"",city:"",state:"TX",zip:""});
+  };
+
+  // Verify customer by shop name + phone
+  const verifyCustomer = () => {
+    setVerifyError("");
+    if(!custSearch.trim()) return setVerifyError("Please enter your business name");
+    if(!custPhone.trim()) return setVerifyError("Please enter your phone number");
+
+    // Normalize phone — strip spaces, dashes, brackets for comparison
+    const normalize = p => p.replace(/[\s\-\(\)\+\.]/g,"");
+    const inputPhone = normalize(custPhone);
+    const inputName = custSearch.trim().toLowerCase();
+
+    // Find matching customer
+    const match = customers.find(c => {
+      const nameMatch = c.name.toLowerCase().includes(inputName) || inputName.includes(c.name.toLowerCase());
+      const phoneMatch = normalize(c.phone||"") === inputPhone || normalize(c.phone||"").endsWith(inputPhone) || inputPhone.endsWith(normalize(c.phone||"").slice(-7));
+      return nameMatch && phoneMatch;
+    });
+
+    if(!match){
+      setVerifyError("No account found with that name and phone number. Please check your details or register below.");
+      return;
+    }
+
+    setSelCust(match);
+    setStep("order");
   };
 
   // Load Stripe when card selected
@@ -461,10 +490,10 @@ export default function OrderPortal() {
       {step==="home"&&<div className="fu">
         <div style={{textAlign:"center",marginBottom:36}}>
           <div style={{fontFamily:"'Playfair Display',serif",fontSize:42,color:"#0a1628",lineHeight:1.15,marginBottom:10}}>
-            Place Your Order
+            Welcome to VitalWaveOne
           </div>
           <div style={{fontSize:15,color:"#6b7280",maxWidth:480,margin:"0 auto"}}>
-            Are you an existing customer or ordering with us for the first time?
+            Place your wholesale order securely and privately
           </div>
         </div>
 
@@ -492,32 +521,44 @@ export default function OrderPortal() {
           </div>
         </div>
 
-        {/* ── EXISTING: search and pick ── */}
+        {/* ── EXISTING: private verification ── */}
         {!isNew&&<div className="fu">
-          <div style={{maxWidth:560,margin:"0 auto"}}>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:16,textAlign:"center"}}>Find Your Store</div>
-            <input placeholder="🔍  Search your business name..." value={custSearch} onChange={e=>setCustSearch(e.target.value)}
-              style={{width:"100%",padding:"13px 18px",border:"2px solid #e5e7eb",borderRadius:11,fontSize:14,background:"#fff",marginBottom:14,transition:"border .15s"}}
-              onFocus={e=>e.target.style.borderColor="#0a1628"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
-            <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:340,overflowY:"auto"}}>
-              {customers.filter(c=>!custSearch||c.name.toLowerCase().includes(custSearch.toLowerCase())).map(c=>(
-                <div key={c.id} onClick={()=>{setSelCust(c);setStep("order");}}
-                  style={{background:"#fff",border:"1.5px solid #e5e7eb",borderRadius:11,padding:"14px 18px",cursor:"pointer",transition:"all .15s",display:"flex",justifyContent:"space-between",alignItems:"center"}}
-                  onMouseEnter={e=>{e.currentTarget.style.borderColor="#0a1628";e.currentTarget.style.background="#f8fafc";}}
-                  onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.background="#fff";}}>
-                  <div>
-                    <div style={{fontWeight:600,fontSize:14,color:"#111"}}>{c.name}</div>
-                    {c.address&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{c.address}</div>}
-                    {c.phone&&<div style={{fontSize:11,color:"#9ca3af"}}>📞 {c.phone}</div>}
-                  </div>
-                  <div style={{color:"#0a1628",fontSize:18}}>→</div>
+          <div style={{maxWidth:460,margin:"0 auto"}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:6,textAlign:"center"}}>Access Your Account</div>
+            <div style={{fontSize:13,color:"#6b7280",textAlign:"center",marginBottom:24}}>Enter your shop name and phone number to continue</div>
+            <div className="card" style={{padding:28}}>
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                <div className="field">
+                  <label>Business / Shop Name *</label>
+                  <input
+                    placeholder="e.g. Speedy Gas & Mart"
+                    value={custSearch}
+                    onChange={e=>setCustSearch(e.target.value)}
+                    onFocus={e=>e.target.style.borderColor="#0a1628"}
+                    onBlur={e=>e.target.style.borderColor="#d1d5db"}
+                  />
                 </div>
-              ))}
-              {customers.filter(c=>!custSearch||c.name.toLowerCase().includes(custSearch.toLowerCase())).length===0&&(
-                <div style={{textAlign:"center",padding:"24px",color:"#9ca3af",fontSize:13}}>
-                  No stores found. <span style={{color:"#f59e0b",cursor:"pointer",fontWeight:600}} onClick={()=>setIsNew(true)}>Register as new customer →</span>
+                <div className="field">
+                  <label>Phone Number *</label>
+                  <input
+                    placeholder="e.g. (713) 555-0100"
+                    value={custPhone}
+                    onChange={e=>setCustPhone(e.target.value)}
+                    onFocus={e=>e.target.style.borderColor="#0a1628"}
+                    onBlur={e=>e.target.style.borderColor="#d1d5db"}
+                    onKeyDown={e=>e.key==="Enter"&&verifyCustomer()}
+                  />
                 </div>
-              )}
+                {verifyError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626"}}>
+                  ⚠️ {verifyError}
+                </div>}
+                <button className="btn-primary" style={{width:"100%",justifyContent:"center",padding:"13px",marginTop:4}} onClick={verifyCustomer} disabled={submitting}>
+                  {submitting?<><span className="sp">⟳</span> Verifying…</>:<>Access My Account →</>}
+                </button>
+                <div style={{textAlign:"center",fontSize:12,color:"#9ca3af"}}>
+                  Not registered yet? <span style={{color:"#0a1628",fontWeight:600,cursor:"pointer"}} onClick={()=>setIsNew(true)}>Register here →</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>}
