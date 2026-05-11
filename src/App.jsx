@@ -956,7 +956,23 @@ export default function App(){
   };
 
   // ── LOAD / SALE / RETURN ───────────────────────────────────────────────────
-  const openLoad=tid=>{if(activeLoad(tid))return showToast("Truck already has active load","error");setSelTruck(tid);setFormItems(products.map(p=>({pid:p.id,qty:0})));setModal("load");};
+  const lockTruck=async(tid)=>{
+    await supabase.from("trucks").update({locked:true}).eq("id",tid);
+    setTrucks(prev=>prev.map(t=>t.id===tid?{...t,locked:true}:t));
+    showToast("🔒 Truck locked — no more loads allowed");
+  };
+
+  const unlockTruck=async(tid)=>{
+    await supabase.from("trucks").update({locked:false}).eq("id",tid);
+    setTrucks(prev=>prev.map(t=>t.id===tid?{...t,locked:false}:t));
+    showToast("🔓 Truck unlocked — loading enabled");
+  };
+    const truck=trucks.find(t=>t.id===tid);
+    if(truck?.locked)return showToast("Truck is locked — admin must unlock it first","error");
+    setSelTruck(tid);
+    setFormItems(products.map(p=>({pid:p.id,qty:0})));
+    setModal("load");
+  };
   const confirmLoad=async()=>{
     const items=formItems.filter(i=>i.qty>0);if(!items.length)return;
     for(const i of items){const p=getP(i.pid);if(i.qty>p.shelf)return showToast(`Not enough: ${p.name}`,"error");}
@@ -1393,7 +1409,7 @@ export default function App(){
                 const rem=inv.reduce((a,i)=>a+i.remaining,0),loaded=inv.reduce((a,i)=>a+i.loaded,0);
                 const pct=loaded>0?Math.round(rem/loaded*100):0;
                 const ts=visSales.filter(s=>s.truck_id===t.id);
-                return(<div key={t.id} className="card" style={{padding:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}><div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#212121"}}>{t.driver}</div><div style={{fontSize:10,color:"#9ca3af"}}>{t.plate}{t.route&&` · ${t.route}`}</div></div><span className={`bdg ${load?"ba2":"bgr"}`}>{load?"ACTIVE":"IDLE"}</span></div>{load&&<><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:10,color:"#6b7280"}}>Inventory</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#7c3aed"}}>{rem}/{loaded}</span></div><div className="pb"><div className="pf" style={{width:`${pct}%`,background:"#7c3aed"}}/></div></>}<div style={{display:"flex",justifyContent:"space-between",marginTop:8}}><span style={{fontSize:10,color:"#6b7280"}}>Revenue</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#059669"}}>{fmt(ts.reduce((a,s)=>a+s.total,0))}</span></div><div style={{display:"flex",gap:5,marginTop:8}}>{!load?<button className="btn bb" style={{flex:1,justifyContent:"center"}} onClick={()=>openLoad(t.id)}>{ic.truck} Load</button>:<><button className="btn bg" style={{flex:1,justifyContent:"center"}} onClick={()=>openSale(t.id)}>{ic.inv} Sell</button><button className="btn bgh" style={{flex:1,justifyContent:"center"}} onClick={()=>openReturn(t.id)}>{ic.undo} Rtn</button></>}</div></div>);
+                return(<div key={t.id} className="card" style={{padding:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}><div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#212121"}}>{t.driver}</div><div style={{fontSize:10,color:"#9ca3af"}}>{t.plate}{t.route&&` · ${t.route}`}</div></div><span className={`bdg ${t.locked?"br2":load?"ba2":"bgr"}`}>{t.locked?"🔒 LOCKED":load?"ACTIVE":"IDLE"}</span></div>{load&&<><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:10,color:"#6b7280"}}>Inventory</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#7c3aed"}}>{rem}/{loaded}</span></div><div className="pb"><div className="pf" style={{width:`${pct}%`,background:"#7c3aed"}}/></div></>}<div style={{display:"flex",justifyContent:"space-between",marginTop:8}}><span style={{fontSize:10,color:"#6b7280"}}>Revenue</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#059669"}}>{fmt(ts.reduce((a,s)=>a+s.total,0))}</span></div><div style={{display:"flex",gap:5,marginTop:8}}>{!t.locked&&<button className="btn bb" style={{flex:1,justifyContent:"center"}} onClick={()=>openLoad(t.id)}>{ic.truck} {load?"Reload":"Load"}</button>}<><button className="btn bg" style={{flex:1,justifyContent:"center"}} onClick={()=>openSale(t.id)}>{ic.inv} Sell</button><button className="btn bgh" style={{flex:1,justifyContent:"center"}} onClick={()=>openReturn(t.id)}>{ic.undo} Rtn</button></>}</div></div>);
               })}
             </div>
             <div className="card">
@@ -1515,13 +1531,17 @@ export default function App(){
                         )}
                       </div>
                       <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-                        <span className={`bdg ${load?"ba2 pu":"bgr"}`}>{load?"ON ROUTE":"IDLE"}</span>
-                        {!load
-                          ?<button className="btn ba" onClick={()=>openLoad(t.id)}>{ic.truck} Load</button>
-                          :<><button className="btn bg" onClick={()=>openSale(t.id)}>{ic.inv} Sell</button><button className="btn bgh" onClick={()=>openReturn(t.id)}>{ic.undo} Return</button></>
-                        }
+                        <span className={`bdg ${t.locked?"br2":load?"ba2 pu":"bgr"}`}>{t.locked?"🔒 LOCKED":load?"ON ROUTE":"IDLE"}</span>
+                        {!t.locked&&<button className="btn ba" onClick={()=>openLoad(t.id)}>{ic.truck} {load?"Reload":"Load"}</button>}
+                        {load&&!t.locked&&<><button className="btn bg" onClick={()=>openSale(t.id)}>{ic.inv} Sell</button><button className="btn bgh" onClick={()=>openReturn(t.id)}>{ic.undo} Return</button></>}
                         <button className="btn bp" onClick={()=>{setViewTruck(t.id);setModal("settlement");}}>{ic.settle} Settlement</button>
-                        {isAdmin&&!isEditingT&&<button className="btn bgh" onClick={()=>startEditTruck(t)}>{ic.edit} Edit</button>}
+                        {isAdmin&&!isEditingT&&<>
+                          <button className="btn bgh" onClick={()=>startEditTruck(t)}>{ic.edit} Edit</button>
+                          {t.locked
+                            ?<button className="btn bg" style={{fontSize:11}} onClick={()=>unlockTruck(t.id)}>🔓 Unlock</button>
+                            :<button className="btn br" style={{fontSize:11}} onClick={()=>lockTruck(t.id)}>🔒 Lock</button>
+                          }
+                        </>}
                       </div>
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
@@ -2110,7 +2130,7 @@ export default function App(){
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:14}}>
               {visTrucks.map(t=>{const d=settlementData(t.id),load=activeLoad(t.id);return(
                 <div key={t.id} className="card" style={{padding:16}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#212121"}}>{t.driver}</div><div style={{fontSize:10,color:"#6b7280"}}>{t.route||t.plate}</div></div><span className={`bdg ${load?"ba2":"bgr"}`}>{load?"ACTIVE":"IDLE"}</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#212121"}}>{t.driver}</div><div style={{fontSize:10,color:"#6b7280"}}>{t.route||t.plate}</div></div><span className={`bdg ${t.locked?"br2":load?"ba2":"bgr"}`}>{t.locked?"🔒 LOCKED":load?"ACTIVE":"IDLE"}</span></div>
                   {[{l:"Loaded",v:d.loadedUnits,c:"#7c3aed"},{l:"Sold",v:d.soldUnits,c:"#059669"},{l:"Returned",v:d.retUnits,c:"#dc2626"},{l:"Variance",v:d.loadedUnits-d.soldUnits-d.retUnits,c:"#7c3aed"}].map(k=><div key={k.l} style={{display:"flex",justifyContent:"space-between",padding:"5px 9px",background:"#f9fafb",borderRadius:5,marginBottom:4}}><span style={{fontSize:10,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:k.c}}>{k.v}</span></div>)}
                   <Divider/>
                   {[{l:"Revenue",v:fmt(d.rev),c:"#059669"},{l:"Tax",v:fmt(d.tax),c:"#7c3aed"},{l:"Profit",v:fmt(d.prof),c:"#7c3aed"},{l:"Collected",v:fmt(d.collected),c:"#059669"},{l:"Outstanding",v:fmt(d.outstanding),c:"#dc2626"}].map(k=><div key={k.l} style={{display:"flex",justifyContent:"space-between",padding:"5px 9px",background:"#f9fafb",borderRadius:5,marginBottom:4}}><span style={{fontSize:10,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:k.c}}>{k.v}</span></div>)}
