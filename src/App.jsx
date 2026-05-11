@@ -616,6 +616,9 @@ export default function App(){
   const[arFilter,setArFilter]=useState("all");
   const[ordFilter,setOrdFilter]=useState("all");
   const[selState,setSelState]=useState("ALL");
+  // Separate filters for summary and invoices tables
+  const[sumFilter,setSumFilter]=useState({type:"all",date:"",month:"",year:""});
+  const[invFilter,setInvFilter]=useState({type:"all",date:"",month:"",year:""});
   const[viewSale,setViewSale]=useState(null);
   const[viewTruck,setViewTruck]=useState(null);
   const[stripeModal,setStripeModal]=useState(null);
@@ -1543,44 +1546,79 @@ export default function App(){
 
           {/* ══ TAX INVOICES ══ */}
           {tab==="taxinvoices"&&(()=>{
-            // Get all unique states from sales
-            const allStates = ["ALL",...new Set(visSales.map(s=>getSaleState(s)).filter(Boolean))];
-            const filteredSales = selState==="ALL" ? visSales : visSales.filter(s=>getSaleState(s)===selState);
-            const totalSub = filteredSales.reduce((a,s)=>a+s.total,0);
-            const totalTaxAmt = filteredSales.reduce((a,s)=>a+calcSaleTax(s),0);
-            const totalGT = filteredSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+            // Helper to filter sales by date filter object
+            const applyDateFilter=(sales,f)=>{
+              if(f.type==="all") return sales;
+              return sales.filter(s=>{
+                const d=new Date(s.created_at||s.date);
+                if(f.type==="day")   return s.date===f.date||s.created_at?.startsWith(f.date);
+                if(f.type==="month") return d.getMonth()===parseInt(f.month)-1&&d.getFullYear()===parseInt(f.year||new Date().getFullYear());
+                if(f.type==="year")  return d.getFullYear()===parseInt(f.year);
+                return true;
+              });
+            };
+
+            const stateFiltered = selState==="ALL" ? visSales : visSales.filter(s=>getSaleState(s)===selState);
+            const sumSales = applyDateFilter(stateFiltered, sumFilter);
+            const invSales = applyDateFilter(stateFiltered, invFilter);
+
+            const totalSub = sumSales.reduce((a,s)=>a+s.total,0);
+            const totalTaxAmt = sumSales.reduce((a,s)=>a+calcSaleTax(s),0);
+            const totalGT = sumSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
             const curStateTax = selState!=="ALL" ? getStateTaxRate(selState) : null;
             const curStateExempt = selState!=="ALL" ? stateTaxes.find(s=>s.id===selState)?.exempt : false;
+
+            // Date filter UI component
+            const DateFilter=({f,setF,label})=>(
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:12,padding:"10px 14px",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:9}}>
+                <span style={{fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:".06em"}}>{label}:</span>
+                {["all","day","month","year"].map(t=>(
+                  <button key={t} onClick={()=>setF(x=>({...x,type:t}))}
+                    style={{padding:"4px 12px",borderRadius:6,border:`1px solid ${f.type===t?"#7c3aed":"#e5e7eb"}`,background:f.type===t?"#f5f3ff":"#fff",color:f.type===t?"#7c3aed":"#6b7280",fontSize:11,fontWeight:f.type===t?700:400,cursor:"pointer",fontFamily:"'Barlow',sans-serif",textTransform:"capitalize"}}>
+                    {t==="all"?"All Time":t==="day"?"By Date":t==="month"?"By Month":"By Year"}
+                  </button>
+                ))}
+                {f.type==="day"&&<input type="date" value={f.date} onChange={e=>setF(x=>({...x,date:e.target.value}))} style={{border:"1px solid #e5e7eb",borderRadius:6,padding:"4px 8px",fontSize:11,fontFamily:"'Barlow',sans-serif"}}/>}
+                {f.type==="month"&&<>
+                  <select value={f.month} onChange={e=>setF(x=>({...x,month:e.target.value}))} style={{border:"1px solid #e5e7eb",borderRadius:6,padding:"4px 8px",fontSize:11,fontFamily:"'Barlow',sans-serif"}}>
+                    <option value="">Month</option>
+                    {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m,i)=><option key={i} value={i+1}>{m}</option>)}
+                  </select>
+                  <select value={f.year} onChange={e=>setF(x=>({...x,year:e.target.value}))} style={{border:"1px solid #e5e7eb",borderRadius:6,padding:"4px 8px",fontSize:11,fontFamily:"'Barlow',sans-serif"}}>
+                    <option value="">Year</option>
+                    {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
+                  </select>
+                </>}
+                {f.type==="year"&&<select value={f.year} onChange={e=>setF(x=>({...x,year:e.target.value}))} style={{border:"1px solid #e5e7eb",borderRadius:6,padding:"4px 8px",fontSize:11,fontFamily:"'Barlow',sans-serif"}}>
+                  <option value="">Year</option>
+                  {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
+                </select>}
+                {f.type!=="all"&&<button onClick={()=>setF({type:"all",date:"",month:"",year:""})} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #fecaca",background:"#fef2f2",color:"#dc2626",fontSize:11,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>✕ Clear</button>}
+              </div>
+            );
+
             return(
             <div className="fu">
               {/* State tabs */}
               <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
-                {allStates.map(st=>{
-                  const stData = stateTaxes.find(s=>s.id===st);
+                {["ALL",...new Set(visSales.map(s=>getSaleState(s)).filter(Boolean))].map(st=>{
+                  const stData=stateTaxes.find(s=>s.id===st);
                   return(
                     <button key={st} onClick={()=>setSelState(st)}
                       style={{padding:"7px 14px",borderRadius:8,border:`1.5px solid ${selState===st?"#7c3aed":"#e5e7eb"}`,background:selState===st?"#f5f3ff":"#fff",color:selState===st?"#7c3aed":"#6b7280",fontWeight:selState===st?700:400,cursor:"pointer",fontSize:12,fontFamily:"'Barlow',sans-serif",display:"flex",alignItems:"center",gap:6}}>
                       {st==="ALL"?"🌐 All States":`🏛 ${st}`}
-                      {stData&&<span style={{fontSize:10,background:stData.exempt?"#dcfce7":"#f5f3ff",color:stData.exempt?"#059669":"#7c3aed",padding:"1px 5px",borderRadius:3,fontWeight:700}}>
-                        {stData.exempt?"EXEMPT":`${stData.rate}%`}
-                      </span>}
+                      {stData&&<span style={{fontSize:10,background:stData.exempt?"#dcfce7":"#f5f3ff",color:stData.exempt?"#059669":"#7c3aed",padding:"1px 5px",borderRadius:3,fontWeight:700}}>{stData.exempt?"EXEMPT":`${stData.rate}%`}</span>}
                     </button>
                   );
                 })}
               </div>
 
-              {/* State info banner */}
+              {/* State exempt banner */}
               {selState!=="ALL"&&<div style={{background:curStateExempt?"#f0fdf4":"#f5f3ff",border:`1px solid ${curStateExempt?"#a7f3d0":"#ddd6fe"}`,borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
                 <div style={{fontSize:24}}>{curStateExempt?"✅":"🏛"}</div>
                 <div>
-                  <div style={{fontWeight:700,fontSize:14,color:curStateExempt?"#059669":"#7c3aed"}}>
-                    {stateTaxes.find(s=>s.id===selState)?.name||selState} — {curStateExempt?"TAX EXEMPT":"TAXABLE"}
-                  </div>
-                  <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>
-                    {curStateExempt
-                      ?"Tobacco/Nicotine sales are NOT taxable in this state"
-                      :`Tobacco/Nicotine taxed at ${curStateTax}% · Other products not taxed`}
-                  </div>
+                  <div style={{fontWeight:700,fontSize:14,color:curStateExempt?"#059669":"#7c3aed"}}>{stateTaxes.find(s=>s.id===selState)?.name||selState} — {curStateExempt?"TAX EXEMPT":"TAXABLE"}</div>
+                  <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{curStateExempt?"Tobacco/Nicotine sales are NOT taxable in this state":`Tobacco/Nicotine taxed at ${curStateTax}% · Other products not taxed`}</div>
                 </div>
               </div>}
 
@@ -1590,34 +1628,27 @@ export default function App(){
                   {l:"Subtotal Sales",v:fmt(totalSub),c:"#212121"},
                   {l:"Tax (Tobacco Only)",v:fmt(totalTaxAmt),c:"#059669"},
                   {l:"Grand Total",v:fmt(totalGT),c:"#7c3aed"},
-                  {l:"Invoices",v:filteredSales.length,c:"#0ea5e9"},
+                  {l:"Invoices",v:sumSales.length,c:"#0ea5e9"},
                 ].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
               </div>
 
-              {/* Summary by customer */}
+              {/* SUMMARY TABLE with its own date filter */}
               <div className="card" style={{marginBottom:16}}>
-                <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>
-                  📊 SALES SUMMARY {selState!=="ALL"?`— ${selState}`:"— ALL STATES"}
+                <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>
+                    📊 SALES SUMMARY {selState!=="ALL"?`— ${selState}`:"— ALL STATES"}
+                    <span style={{fontWeight:400,fontSize:11,color:"#9ca3af",marginLeft:8}}>{sumSales.length} invoices</span>
+                  </div>
+                </div>
+                <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
+                  <DateFilter f={sumFilter} setF={setSumFilter} label="Filter Summary"/>
                 </div>
                 <div className="tw">
                   <table>
-                    <thead>
-                      <tr>
-                        <th>Customer</th>
-                        <th>State</th>
-                        <th>Tax Rate</th>
-                        <th>Driver</th>
-                        <th>Invoices</th>
-                        <th>Subtotal</th>
-                        <th>Tax (Tobacco)</th>
-                        <th>Grand Total</th>
-                        <th>Paid</th>
-                        <th>Outstanding</th>
-                      </tr>
-                    </thead>
+                    <thead><tr><th>Customer</th><th>State</th><th>Tax Rate</th><th>Driver</th><th>Invoices</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Paid</th><th>Outstanding</th></tr></thead>
                     <tbody>
                       {customers.map(c=>{
-                        const custSales=filteredSales.filter(s=>s.cust_id===c.id);
+                        const custSales=sumSales.filter(s=>s.cust_id===c.id);
                         if(!custSales.length)return null;
                         const sub=custSales.reduce((a,s)=>a+s.total,0);
                         const tax=custSales.reduce((a,s)=>a+calcSaleTax(s),0);
@@ -1642,25 +1673,27 @@ export default function App(){
                       }).filter(Boolean)}
                       <tr style={{background:"#f9fafb"}}>
                         <td colSpan={4} style={{fontWeight:800,color:"#212121"}}>TOTAL</td>
-                        <td style={{fontWeight:700,color:"#7c3aed"}}>{filteredSales.length}</td>
+                        <td style={{fontWeight:700,color:"#7c3aed"}}>{sumSales.length}</td>
                         <td style={{fontWeight:700}}>{fmt(totalSub)}</td>
                         <td style={{color:"#059669",fontWeight:700}}>{fmt(totalTaxAmt)}</td>
                         <td style={{fontWeight:800,fontSize:14,color:"#7c3aed"}}>{fmt(totalGT)}</td>
-                        <td style={{color:"#059669",fontWeight:700}}>{fmt(filteredSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0))}</td>
-                        <td style={{color:"#dc2626",fontWeight:700}}>{fmt(filteredSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0))}</td>
+                        <td style={{color:"#059669",fontWeight:700}}>{fmt(sumSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0))}</td>
+                        <td style={{color:"#dc2626",fontWeight:700}}>{fmt(sumSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0))}</td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              {/* Invoice list */}
+              {/* INVOICES TABLE with its own date filter */}
               <div className="card">
                 <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>🧾 INVOICES — {filteredSales.length} TOTAL</div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>
+                    🧾 INVOICES — {invSales.length} TOTAL
+                  </div>
                   <button className="btn bpr" onClick={()=>{
                     const rows=[["Invoice","Date","Customer","State","Tax Rate","Driver","Subtotal","Tax (Tobacco)","Grand Total","Status"]];
-                    filteredSales.forEach(s=>{
+                    invSales.forEach(s=>{
                       const cust=getC(s.cust_id);
                       const st=cust?.state||"TX";
                       const stData=stateTaxes.find(x=>x.id===st);
@@ -1669,11 +1702,14 @@ export default function App(){
                     downloadCSV(rows,`tax-invoices-${selState}.csv`);
                   }}>{ic.dl} Export</button>
                 </div>
+                <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
+                  <DateFilter f={invFilter} setF={setInvFilter} label="Filter Invoices"/>
+                </div>
                 <div className="tw">
                   <table>
                     <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>State</th><th>Tax Rate</th><th>Driver</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Status</th></tr></thead>
                     <tbody>
-                      {filteredSales.map(s=>{
+                      {invSales.map(s=>{
                         const cust=getC(s.cust_id);
                         const st=cust?.state||"TX";
                         const stData=stateTaxes.find(x=>x.id===st);
