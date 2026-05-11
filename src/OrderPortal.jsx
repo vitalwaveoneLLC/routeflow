@@ -813,8 +813,8 @@ export default function OrderPortal() {
           </div>
         </div>
 
-        {/* Step indicators */}
-        <div style={{display:"flex",alignItems:"center",gap:6}}>
+        {/* Step indicators — only for customer ordering flow */}
+        {!isDriver&&!driverUser&&<div style={{display:"flex",alignItems:"center",gap:6}}>
           {[{k:"home",l:"Start"},{k:"order",l:"Order"},{k:"review",l:"Review"},{k:"confirm",l:"Done"}].map((s,i,arr)=>{
             const steps=["home","order","review","confirm"];
             const cur=steps.indexOf(step);
@@ -829,14 +829,27 @@ export default function OrderPortal() {
               </div>
             );
           })}
-        </div>
+        </div>}
 
-        {selCust&&step!=="home"&&<div style={{fontSize:11,color:"#4b6080"}}>⛽ <span style={{color:"#fff",fontWeight:600}}>{selCust.name}</span></div>}
-        {step!=="home"&&step!=="confirm"&&(
+        {/* Customer name tag */}
+        {selCust&&step!=="home"&&!isDriver&&<div style={{fontSize:11,color:"#4b6080"}}>⛽ <span style={{color:"#fff",fontWeight:600}}>{selCust.name}</span></div>}
+
+        {/* Driver name tag when logged in */}
+        {driverUser&&driverData&&<div style={{fontSize:11,color:"#4b6080"}}>🚚 <span style={{color:"#fff",fontWeight:600}}>{driverData.truck?.driver}</span></div>}
+
+        {/* Back button — only for customer ordering flow, not driver dashboard */}
+        {!isDriver&&!driverUser&&step!=="home"&&step!=="confirm"&&(
           <button onClick={()=>{
-            if(step==="order") {setStep("home");setQuantities({});}
+            if(step==="order"){setStep("home");setQuantities({});}
             else if(step==="review") setStep("order");
           }} style={{background:"#1e3050",border:"1px solid #2e4060",borderRadius:8,padding:"7px 14px",color:"#b0c8e0",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6,fontFamily:"'Inter',sans-serif"}}>
+            ← Back
+          </button>
+        )}
+
+        {/* Back to home — only for non-logged-in customer selection screens */}
+        {!driverUser&&(isNew||(isDriver&&!driverUser))&&step==="home"&&(
+          <button onClick={()=>{setIsNew(false);setIsDriver(false);}} style={{background:"#1e3050",border:"1px solid #2e4060",borderRadius:8,padding:"7px 14px",color:"#b0c8e0",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6,fontFamily:"'Inter',sans-serif"}}>
             ← Back
           </button>
         )}
@@ -846,6 +859,8 @@ export default function OrderPortal() {
 
       {/* ══ HOME — New or Existing ══ */}
       {step==="home"&&<div className="fu">
+        {/* Only show welcome + cards if no role selected yet */}
+        {!isNew&&!isDriver&&<>
         <div style={{textAlign:"center",marginBottom:36}}>
           <div style={{fontFamily:"'Playfair Display',serif",fontSize:42,color:"#0a1628",lineHeight:1.15,marginBottom:10}}>
             Welcome to VitalWaveOne
@@ -889,6 +904,7 @@ export default function OrderPortal() {
             <div style={{marginTop:16,color:"#0ea5e9",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>Driver login →</div>
           </div>
         </div>
+        </>}
 
         {/* ── DRIVER: login + dashboard ── */}
         {isDriver&&<div className="fu">
