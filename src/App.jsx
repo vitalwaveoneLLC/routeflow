@@ -755,6 +755,32 @@ export default function App(){
   if(!session)return<div className="app"><GS/><Login/></div>;
   if(loading)return<div className="app"><GS/><Spinner msg="LOADING YOUR DATA…"/></div>;
 
+  // ── ACCESS CONTROL ─────────────────────────────────────────────────────────
+  // Only admins can access this dashboard — drivers & others go to order portal
+  if(profile&&profile.role!=="admin"){
+    return(
+      <div className="app" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5",padding:20}}>
+        <GS/>
+        <div style={{maxWidth:420,width:"100%",textAlign:"center"}}>
+          <div style={{width:70,height:70,background:"#fef2f2",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,margin:"0 auto 20px"}}>🚫</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,color:"#212121",marginBottom:8}}>ACCESS RESTRICTED</div>
+          <div style={{fontSize:13,color:"#6b7280",lineHeight:1.7,marginBottom:24}}>
+            This dashboard is for administrators only.<br/>
+            Drivers and customers please use the order portal.
+          </div>
+          <a href="/order" style={{display:"inline-block",background:"#7c3aed",color:"#fff",padding:"12px 28px",borderRadius:10,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,textDecoration:"none",letterSpacing:".05em",marginBottom:12}}>
+            🚚 Go to Driver / Customer Portal →
+          </a>
+          <div style={{marginTop:12}}>
+            <button onClick={()=>supabase.auth.signOut()} style={{background:"none",border:"1px solid #e5e7eb",borderRadius:8,padding:"8px 16px",fontSize:12,color:"#6b7280",cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ── INLINE EDIT HELPERS ────────────────────────────────────────────────────
   const EI=({val,onChange,type="text",style={}})=><input className="ei" type={type} value={val} onChange={e=>onChange(e.target.value)} style={style}/>;
   const ES=({val,onChange,options})=><select className="ei" value={val} onChange={e=>onChange(e.target.value)}>{options.map(o=><option key={o}>{o}</option>)}</select>;
