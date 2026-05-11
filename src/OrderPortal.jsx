@@ -204,8 +204,10 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const uid = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
+  const isLocked = driverData.truck?.locked;
 
   const confirmLoad = async () => {
+    if(isLocked) return setMsg({t:"error",m:"Your truck is locked by admin. Contact your manager."});
     const loadItems = products.filter(p=>items[p.id]>0).map(p=>({pid:p.id,qty:parseInt(items[p.id])}));
     if(!loadItems.length) return setMsg({t:"error",m:"Add at least one product"});
     setSaving(true);
@@ -213,18 +215,32 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
       const nl = {id:"LD-"+uid(),truck_id:driverData.truck.id,date:new Date().toLocaleDateString(),items:loadItems,status:"out",created_at:new Date().toISOString()};
       const {error} = await supabase.from("loads").insert(nl);
       if(error) throw error;
+      for(const item of loadItems){
+        const p = products.find(x=>x.id===item.pid);
+        if(p) await supabase.from("products").update({shelf:Math.max(0,p.shelf-item.qty)}).eq("id",p.id);
+      }
       setDriverData(prev=>({...prev,activeLoad:nl}));
-      setMsg({t:"success",m:"Truck loaded successfully! Ready to sell."});
+      setMsg({t:"success",m:`✅ Loaded ${loadItems.reduce((a,i)=>a+i.qty,0)} units! Ready to sell.`});
       setItems({});
     }catch(e){setMsg({t:"error",m:e.message});}
     setSaving(false);
   };
 
+  if(isLocked) return(
+    <div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:12,padding:"24px",textAlign:"center"}}>
+      <div style={{fontSize:36,marginBottom:10}}>🔒</div>
+      <div style={{fontWeight:700,fontSize:16,color:"#dc2626",marginBottom:8}}>Truck Locked</div>
+      <div style={{fontSize:13,color:"#6b7280"}}>Your truck has been locked by admin. Contact your manager to unlock.</div>
+    </div>
+  );
+
   return(
     <div>
       <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:4}}>📦 Load Your Truck</div>
-      <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>Enter quantities you're loading onto the truck today</div>
-      {driverData.activeLoad&&<div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#92400e"}}>⚠️ You already have an active load. Loading again will create a new load record.</div>}
+      <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>Enter quantities you are loading onto the truck</div>
+      {driverData.activeLoad&&<div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#0369a1"}}>
+        ✅ Active load exists. You can reload additional products below.
+      </div>}
       <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
         {products.filter(p=>p.shelf>0).map(p=>(
           <div key={p.id} className="card" style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
@@ -233,7 +249,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
               <div style={{fontSize:11,color:"#9ca3af"}}>In warehouse: <span style={{color:"#059669",fontWeight:700}}>{p.shelf}</span> · ${p.price}</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))} style={{width:28,height:28,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+              <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))} style={{width:28,height:28,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>-</button>
               <input type="number" min="0" max={p.shelf} value={items[p.id]||""} placeholder="0"
                 onChange={e=>setItems(prev=>({...prev,[p.id]:Math.min(p.shelf,Math.max(0,parseInt(e.target.value)||0))}))}
                 style={{width:54,textAlign:"center",border:`1.5px solid ${items[p.id]>0?"#0ea5e9":"#e5e7eb"}`,borderRadius:7,padding:"5px",fontSize:13,fontWeight:700}}/>
@@ -241,14 +257,16 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
             </div>
           </div>
         ))}
+        {products.filter(p=>p.shelf>0).length===0&&<div style={{textAlign:"center",padding:"20px",color:"#9ca3af",fontSize:13}}>No products in warehouse</div>}
       </div>
       {msg&&<div style={{background:msg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${msg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:12,color:msg.t==="success"?"#065f46":"#dc2626",marginBottom:12}}>{msg.m}</div>}
       <button onClick={confirmLoad} disabled={saving} style={{width:"100%",background:"#0ea5e9",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-        {saving?"Loading…":"📦 Confirm Load"}
+        {saving?"Loading...":"📦 Confirm Load"}
       </button>
     </div>
   );
 }
+
 
 // ── DRIVER SELL TAB ───────────────────────────────────────────────────────────
 function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust}){
