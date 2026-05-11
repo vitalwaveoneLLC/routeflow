@@ -1231,8 +1231,7 @@ export default function App(){
   // NAV
   const navItems=[
     {id:"dashboard",label:"Dashboard",icon:ic.dash},
-    {id:"warehouse",label:"Warehouse",icon:ic.box},
-    {id:"trucks",label:"Trucks",icon:ic.truck},
+    {id:"inventory",label:"Inventory",icon:ic.box},
     {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
     {id:"taxinvoices",label:"Tax Invoices",icon:ic.inv},
@@ -1316,51 +1315,6 @@ export default function App(){
             ))}
           </div>
           <div style={{padding:"8px 8px 14px",overflowY:"auto",flex:1}}>
-            <div style={{height:1,background:"#d1d5db",marginBottom:8}}/>
-
-            {/* ── LIVE INVENTORY ── */}
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:9,color:"#9ca3af",letterSpacing:".1em",marginBottom:6,paddingLeft:3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span>📦 LIVE INVENTORY</span>
-                <button onClick={()=>setTab("warehouse")} style={{background:"none",border:"none",color:"#7c3aed",fontSize:9,cursor:"pointer",fontFamily:"'Barlow',sans-serif",padding:0}}>view all →</button>
-              </div>
-              {products.map(p=>{
-                // Units loaded on all active trucks for this product
-                const onTrucks = loads
-                  .filter(l=>l.status==="out")
-                  .reduce((a,l)=>{
-                    const loaded=(l.items||[]).find(i=>i.pid===p.id)?.qty||0;
-                    const sold=sales.filter(s=>s.load_id===l.id).reduce((b,s)=>{
-                      return b+(s.items||[]).find(i=>i.pid===p.id)?.qty||0;
-                    },0);
-                    const ret=returns.filter(r=>r.load_id===l.id).reduce((b,r)=>{
-                      return b+(r.items||[]).find(i=>i.pid===p.id)?.qty||0;
-                    },0);
-                    return a+Math.max(0,loaded-sold-ret);
-                  },0);
-                const shelf=p.shelf;
-                const total=shelf+onTrucks;
-                const pct=total>0?(shelf/total)*100:0;
-                const low=shelf<5;
-                return(
-                  <div key={p.id} style={{marginBottom:7,padding:"5px 6px",background:"#f9fafb",borderRadius:6,border:`1px solid ${low?"#fecaca":"#e5e7eb"}`}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                      <span style={{fontSize:10,color:"#212121",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:110}}>{p.name}</span>
-                      {low&&<span style={{fontSize:8,background:"#fef2f2",color:"#dc2626",padding:"1px 4px",borderRadius:3,fontWeight:700,flexShrink:0}}>LOW</span>}
-                    </div>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                      <span style={{fontSize:9,color:"#9ca3af"}}>🏭 {shelf} shelf</span>
-                      <span style={{fontSize:9,color:"#9ca3af"}}>🚚 {onTrucks} trucks</span>
-                      <span style={{fontSize:9,fontWeight:700,color:low?"#dc2626":total===0?"#9ca3af":"#212121"}}>={total}</span>
-                    </div>
-                    <div style={{height:3,background:"#e5e7eb",borderRadius:2,overflow:"hidden"}}>
-                      <div style={{height:"100%",width:`${pct}%`,background:shelf===0?"#e5e7eb":low?"#dc2626":shelf<20?"#f59e0b":"#059669",borderRadius:2,transition:"width .3s"}}/>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
             <div style={{height:1,background:"#d1d5db",marginBottom:8}}/>
 
             {/* State Tax Rates in sidebar */}
@@ -1453,8 +1407,171 @@ export default function App(){
             </div>
           </div>}
 
-          {/* ══ WAREHOUSE ══ */}
-          {tab==="warehouse"&&<div className="fu">
+          {/* ══ INVENTORY ══ */}
+          {tab==="inventory"&&<div className="fu">
+            {/* Header actions */}
+            <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+              {isAdmin&&<>
+                <button className="btn ba" onClick={()=>setModal("addProduct")}>{ic.plus} Add Product</button>
+                <button className="btn bb" onClick={()=>{setRsPid(products[0]?.id||"");setRsQty("");setModal("restock");}}>{ic.box} Restock</button>
+                <button className="btn bp" onClick={()=>setModal("csvImport")}>📥 Import CSV</button>
+                <button className="btn ba" onClick={()=>openLoad(trucks[0]?.id)}>{ic.truck} Load Truck</button>
+              </>}
+              <div style={{marginLeft:"auto",fontSize:11,color:"#6b7280"}}>{editingPid?<span style={{color:"#7c3aed"}}>✏️ Editing — click Save or Cancel</span>:isAdmin?"Click ✏️ on any row to edit":""}</div>
+            </div>
+
+            {/* KPI Summary */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
+              {[
+                {l:"Total Products",v:products.length,c:"#7c3aed"},
+                {l:"Total Shelf Units",v:products.reduce((a,p)=>a+p.shelf,0),c:"#059669"},
+                {l:"Total On Trucks",v:trucks.reduce((a,t)=>a+truckInv(t.id).reduce((b,i)=>b+i.remaining,0),0),c:"#0ea5e9"},
+                {l:"Low Stock",v:products.filter(p=>p.shelf<5).length,c:"#dc2626"},
+              ].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
+            </div>
+
+            {/* WAREHOUSE SECTION */}
+            <div className="card" style={{marginBottom:16}}>
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#212121"}}>🏭 WAREHOUSE — Shelf Stock</div>
+                <div style={{fontSize:11,color:"#6b7280"}}>{products.length} products · {products.reduce((a,p)=>a+p.shelf,0)} total units</div>
+              </div>
+              <div className="tw"><table>
+                <thead><tr>
+                  <th>Product</th><th>SKU</th><th>Category</th><th>Unit</th>
+                  <th>Cost</th><th>Price</th><th>Margin</th><th>Shelf</th><th>Status</th>
+                  {isAdmin&&<th>Actions</th>}
+                </tr></thead>
+                <tbody>{products.map(p=>{
+                  const isE=editingPid===p.id;
+                  const margin=p.price>0?((p.price-p.cost)/p.price*100).toFixed(0):0;
+                  const low=p.shelf<5;
+                  return(
+                    <tr key={p.id} style={{background:isE?"#f5f3ff":low&&p.shelf>0?"#fff7ed":p.shelf===0?"#fef2f2":"#fff"}}>
+                      {isE?(
+                        <>
+                          <td><input className="ei" value={editProd.name} onChange={e=>setEditProd(x=>({...x,name:e.target.value}))}/></td>
+                          <td><input className="ei" value={editProd.sku} onChange={e=>setEditProd(x=>({...x,sku:e.target.value}))}/></td>
+                          <td><input className="ei" value={editProd.cat} onChange={e=>setEditProd(x=>({...x,cat:e.target.value}))}/></td>
+                          <td><input className="ei" value={editProd.unit} onChange={e=>setEditProd(x=>({...x,unit:e.target.value}))}/></td>
+                          <td><input className="ei" type="number" value={editProd.cost} onChange={e=>setEditProd(x=>({...x,cost:e.target.value}))}/></td>
+                          <td><input className="ei" type="number" value={editProd.price} onChange={e=>setEditProd(x=>({...x,price:e.target.value}))}/></td>
+                          <td>—</td>
+                          <td><input className="ei" type="number" value={editProd.shelf} onChange={e=>setEditProd(x=>({...x,shelf:e.target.value}))}/></td>
+                          <td>—</td>
+                          <td><div style={{display:"flex",gap:4}}><button className="btn bg" onClick={saveEditProduct} disabled={saving}>{ic.save}</button><button className="btn bgh" onClick={()=>setEditingPid(null)}>{ic.X}</button></div></td>
+                        </>
+                      ):(
+                        <>
+                          <td style={{fontWeight:600,color:"#212121"}}>{p.name}</td>
+                          <td style={{fontFamily:"monospace",fontSize:11,color:"#6b7280"}}>{p.sku}</td>
+                          <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{p.cat}</span></td>
+                          <td style={{color:"#6b7280",fontSize:11}}>{p.unit}</td>
+                          <td style={{color:"#6b7280"}}>{fmt(p.cost)}</td>
+                          <td style={{fontWeight:600,color:"#059669"}}>{fmt(p.price)}</td>
+                          <td><span style={{fontSize:11,color:margin>30?"#059669":margin>15?"#f59e0b":"#dc2626",fontWeight:600}}>{margin}%</span></td>
+                          <td>
+                            <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:p.shelf===0?"#dc2626":low?"#f59e0b":"#059669"}}>{p.shelf}</span>
+                          </td>
+                          <td>
+                            {p.shelf===0?<span className="bdg br2">OUT</span>:low?<span className="bdg ba2">LOW</span>:<span className="bdg bg2">OK</span>}
+                          </td>
+                          {isAdmin&&<td><div style={{display:"flex",gap:4}}>
+                            <button className="btn bgh" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>startEditProduct(p)}>{ic.edit}</button>
+                            <button className="btn bb" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>{setRsPid(p.id);setRsQty("");setModal("restock");}}>{ic.plus}</button>
+                          </div></td>}
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}</tbody>
+              </table></div>
+            </div>
+
+            {/* TRUCKS SECTION */}
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#212121",marginBottom:12}}>🚚 TRUCKS — Route Inventory</div>
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              {trucks.map(t=>{
+                const load=activeLoad(t.id),inv=truckInv(t.id);
+                const ts=visSales.filter(s=>s.truck_id===t.id),tr=returns.filter(r=>r.truck_id===t.id);
+                const isEditingT=editingTid===t.id;
+                return(
+                  <div key={t.id} className="card" style={{padding:18}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                      <div style={{display:"flex",alignItems:"center",gap:11}}>
+                        <div style={{width:42,height:42,background:"#f5f3ff",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>🚚</div>
+                        {isEditingT?(
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                            <div><label>Driver</label><EI val={editTruck.driver} onChange={v=>setEditTruck(x=>({...x,driver:v}))}/></div>
+                            <div><label>Plate</label><EI val={editTruck.plate} onChange={v=>setEditTruck(x=>({...x,plate:v}))}/></div>
+                            <div><label>Route</label><EI val={editTruck.route} onChange={v=>setEditTruck(x=>({...x,route:v}))}/></div>
+                            <div style={{display:"flex",gap:6,marginTop:16}}><button className="btn bg" onClick={saveEditTruck} disabled={saving}>{ic.save} Save</button><button className="btn bgh" onClick={()=>setEditingTid(null)}>{ic.X}</button></div>
+                          </div>
+                        ):(
+                          <div>
+                            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,color:"#212121"}}>{t.driver}</div>
+                            <div style={{fontSize:11,color:"#6b7280"}}>{t.plate}{t.route&&<> · <span style={{color:"#7c3aed"}}>{t.route}</span></>}</div>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                        <span className={`bdg ${load?"ba2 pu":"bgr"}`}>{load?"ON ROUTE":"IDLE"}</span>
+                        {!load
+                          ?<button className="btn ba" onClick={()=>openLoad(t.id)}>{ic.truck} Load</button>
+                          :<><button className="btn bg" onClick={()=>openSale(t.id)}>{ic.inv} Sell</button><button className="btn bgh" onClick={()=>openReturn(t.id)}>{ic.undo} Return</button></>
+                        }
+                        <button className="btn bp" onClick={()=>{setViewTruck(t.id);setModal("settlement");}}>{ic.settle} Settlement</button>
+                        {isAdmin&&!isEditingT&&<button className="btn bgh" onClick={()=>startEditTruck(t)}>{ic.edit} Edit</button>}
+                      </div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                      <div className="cin" style={{padding:12}}>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#7c3aed",letterSpacing:".08em",marginBottom:8}}>
+                          TRUCK INVENTORY {load?<span style={{color:"#f59e0b"}}>● ACTIVE</span>:<span style={{color:"#9ca3af"}}>● NOT LOADED</span>}
+                        </div>
+                        {products.map(p=>{
+                          const invItem=inv.find(i=>i.pid===p.id);
+                          const loaded=invItem?.loaded||0;
+                          const remaining=invItem?.remaining||0;
+                          const pct=loaded>0?Math.round(remaining/loaded*100):0;
+                          return(
+                            <div key={p.id} style={{marginBottom:8,opacity:loaded===0?0.4:1}}>
+                              <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                                <span style={{fontSize:11,color:"#212121"}}>{p.name}</span>
+                                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,color:loaded===0?"#9ca3af":remaining===0?"#dc2626":"#212121"}}>
+                                  {remaining}<span style={{color:"#9ca3af",fontWeight:400}}>/{loaded}</span>
+                                </span>
+                              </div>
+                              {loaded>0?(
+                                <div className="pb"><div className="pf" style={{width:`${pct}%`,background:pct<25?"#dc2626":pct<60?"#7c3aed":"#059669"}}/></div>
+                              ):(
+                                <div style={{height:4,background:"#f3f4f6",borderRadius:2}}/>
+                              )}
+                              {loaded>0&&<div style={{fontSize:9,color:"#9ca3af",marginTop:1}}>{loaded-remaining} sold · {remaining} remaining</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                        {[
+                          {l:"Revenue",v:fmt(ts.reduce((a,s)=>a+s.total,0)),c:"#059669"},
+                          {l:"Profit",v:fmt(ts.reduce((a,s)=>a+s.profit,0)),c:"#7c3aed"},
+                          {l:"Tax",v:fmt(ts.reduce((a,s)=>a+calcSaleTax(s),0)),c:"#7c3aed"},
+                          {l:"Invoices",v:ts.length,c:"#7c3aed"},
+                          {l:"Returns",v:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0)+" units",c:"#dc2626"},
+                        ].map(k=>(
+                          <div key={k.l} className="cin" style={{padding:"7px 11px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <span style={{fontSize:10,color:"#6b7280"}}>{k.l}</span>
+                            <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:k.c}}>{k.v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>}
             <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
               {isAdmin&&<><button className="btn ba" onClick={()=>setModal("addProduct")}>{ic.plus} Add Product</button><button className="btn bb" onClick={()=>{setRsPid(products[0]?.id||"");setRsQty("");setModal("restock");}}>{ic.box} Restock</button><button className="btn bp" onClick={()=>setModal("csvImport")}>📥 Import CSV</button></>}
               {!isAdmin&&<div style={{fontSize:12,color:"#6b7280",padding:"8px 0"}}>📦 View only — contact admin to edit</div>}
@@ -1504,90 +1621,6 @@ export default function App(){
                 <div><span style={{fontSize:11,color:"#6b7280"}}>{products.length} products · Cost: </span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:"#7c3aed"}}>{fmt(products.reduce((a,p)=>a+p.shelf*p.cost,0))}</span></div>
                 <div><span style={{fontSize:11,color:"#6b7280"}}>Retail: </span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:"#059669"}}>{fmt(products.reduce((a,p)=>a+p.shelf*p.price,0))}</span></div>
               </div>
-            </div>
-          </div>}
-
-          {/* ══ TRUCKS ══ */}
-          {tab==="trucks"&&<div className="fu">
-            {isAdmin&&<div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button className="btn ba" onClick={()=>setModal("addTruck")}>{ic.plus} Add Driver & Truck</button></div>}
-            <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              {trucks.map(t=>{
-                const load=activeLoad(t.id),inv=truckInv(t.id);
-                const ts=visSales.filter(s=>s.truck_id===t.id),tr=returns.filter(r=>r.truck_id===t.id);
-                const isEditingT=editingTid===t.id;
-                // Show all products with their truck quantity (0 if not loaded)
-                const allProductsOnTruck = products.map(p=>{
-                  const invItem = inv.find(i=>i.pid===p.id);
-                  return {
-                    pid: p.id,
-                    name: p.name,
-                    loaded: invItem?.loaded||0,
-                    remaining: invItem?.remaining||0,
-                    sold: invItem?(invItem.loaded-invItem.remaining):0,
-                  };
-                }).filter(p=>p.loaded>0||load); // show loaded items, or all if on route
-                return(
-                  <div key={t.id} className="card" style={{padding:18}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
-                      <div style={{display:"flex",alignItems:"center",gap:11}}>
-                        <div style={{width:42,height:42,background:"#f5f3ff",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>🚚</div>
-                        {isEditingT?(
-                          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                            <div><label>Driver</label><EI val={editTruck.driver} onChange={v=>setEditTruck(x=>({...x,driver:v}))}/></div>
-                            <div><label>Plate</label><EI val={editTruck.plate} onChange={v=>setEditTruck(x=>({...x,plate:v}))}/></div>
-                            <div><label>Route</label><EI val={editTruck.route} onChange={v=>setEditTruck(x=>({...x,route:v}))}/></div>
-                            <div style={{display:"flex",gap:6,marginTop:16}}><button className="btn bg" onClick={saveEditTruck} disabled={saving}>{ic.save} Save</button><button className="btn bgh" onClick={()=>setEditingTid(null)}>{ic.X}</button></div>
-                          </div>
-                        ):(
-                          <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,color:"#212121"}}>{t.driver}</div><div style={{fontSize:11,color:"#6b7280"}}>{t.plate}{t.route&&<> · <span style={{color:"#7c3aed"}}>{t.route}</span></>}</div></div>
-                        )}
-                      </div>
-                      <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-                        <span className={`bdg ${load?"ba2 pu":"bgr"}`}>{load?"ON ROUTE":"IDLE"}</span>
-                        {!load?<button className="btn ba" onClick={()=>openLoad(t.id)}>{ic.truck} Load</button>:<><button className="btn bg" onClick={()=>openSale(t.id)}>{ic.inv} Sell</button><button className="btn bgh" onClick={()=>openReturn(t.id)}>{ic.undo} Return</button></>}
-                        <button className="btn bp" onClick={()=>{setViewTruck(t.id);setModal("settlement");}}>{ic.settle} Settlement</button>
-                        {isAdmin&&!isEditingT&&<button className="btn bgh" onClick={()=>startEditTruck(t)}>{ic.edit} Edit</button>}
-                      </div>
-                    </div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                      {/* Inventory */}
-                      <div className="cin" style={{padding:12}}>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#7c3aed",letterSpacing:".08em",marginBottom:8}}>
-                          TRUCK INVENTORY {load?<span style={{color:"#f59e0b"}}>● ACTIVE</span>:<span style={{color:"#9ca3af"}}>● NOT LOADED</span>}
-                        </div>
-                        {products.map(p=>{
-                          const invItem=inv.find(i=>i.pid===p.id);
-                          const loaded=invItem?.loaded||0;
-                          const remaining=invItem?.remaining||0;
-                          const pct=loaded>0?Math.round(remaining/loaded*100):0;
-                          return(
-                            <div key={p.id} style={{marginBottom:8,opacity:loaded===0?0.5:1}}>
-                              <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-                                <span style={{fontSize:11,color:"#6b7280"}}>{p.name}</span>
-                                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,color:loaded===0?"#9ca3af":remaining===0?"#dc2626":"#212121"}}>
-                                  {remaining}<span style={{color:"#9ca3af",fontWeight:400}}>/{loaded}</span>
-                                </span>
-                              </div>
-                              {loaded>0?(
-                                <div className="pb"><div className="pf" style={{width:`${pct}%`,background:pct<25?"#dc2626":pct<60?"#7c3aed":"#059669"}}/></div>
-                              ):(
-                                <div style={{height:4,background:"#f3f4f6",borderRadius:2}}/>
-                              )}
-                              {loaded>0&&<div style={{fontSize:9,color:"#9ca3af",marginTop:1}}>{invItem?.loaded-invItem?.remaining||0} sold · {remaining} remaining</div>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {/* Stats */}
-                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                        {[{l:"Revenue",v:fmt(ts.reduce((a,s)=>a+s.total,0)),c:"#059669"},{l:"Profit",v:fmt(ts.reduce((a,s)=>a+s.profit,0)),c:"#7c3aed"},{l:"Tax",v:fmt(ts.reduce((a,s)=>a+s.total*taxRate/100,0)),c:"#7c3aed"},{l:"Invoices",v:ts.length,c:"#7c3aed"},{l:"Returns",v:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0)+" units",c:"#dc2626"}].map(k=>(
-                          <div key={k.l} className="cin" style={{padding:"7px 11px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:10,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:k.c}}>{k.v}</span></div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           </div>}
 
