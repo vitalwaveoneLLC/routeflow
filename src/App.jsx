@@ -141,7 +141,7 @@ const MFAGate=({onVerified})=>{
     return result;
   };
 
-  const[qrCode,setQrCode]=useState("");
+  const[otpauth,setOtpauth]=useState("");
   const[secret,setSecret]=useState("");
 
   useEffect(()=>{
@@ -151,9 +151,9 @@ const MFAGate=({onVerified})=>{
         if(hasTotp){
           setStage("verify");
         } else {
-          const{qrCode:qr,secret:sec}=await callMfa("enroll");
-          setQrCode(qr);
+          const{secret:sec,otpauthUrl}=await callMfa("enroll");
           setSecret(sec);
+          setOtpauth(otpauthUrl);
           setStage("enroll");
         }
       }catch(e){
@@ -163,6 +163,31 @@ const MFAGate=({onVerified})=>{
     };
     init();
   },[]);
+
+  // Render QR code using qrcodejs library
+  useEffect(()=>{
+    if(!otpauth||stage!=="enroll")return;
+    const renderQR=async()=>{
+      if(!window.QRCode){
+        await new Promise((resolve,reject)=>{
+          const s=document.createElement("script");
+          s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+          s.onload=resolve;s.onerror=reject;
+          document.head.appendChild(s);
+        });
+      }
+      const el=document.getElementById("mfa-qr");
+      if(el){
+        el.innerHTML="";
+        new window.QRCode(el,{
+          text:otpauth,width:200,height:200,
+          colorDark:"#000000",colorLight:"#ffffff",
+          correctLevel:window.QRCode?.CorrectLevel?.M||1,
+        });
+      }
+    };
+    setTimeout(renderQR,200);
+  },[otpauth,stage]);
 
   const verifyEnroll=async()=>{
     setLoading(true);setErr("");
@@ -201,7 +226,7 @@ const MFAGate=({onVerified})=>{
             <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>One-time setup — scan this QR code with your authenticator app</div>
           </div>
           <div style={{textAlign:"center",marginBottom:16}}>
-            <img src={qrCode} alt="QR Code" style={{width:200,height:200,borderRadius:10,border:"1px solid #e5e7eb"}}/>
+            <div id="mfa-qr" style={{display:"inline-block",padding:10,background:"#fff",borderRadius:10,border:"1px solid #e5e7eb"}}></div>
           </div>
           <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:16}}>
             <div style={{fontSize:10,color:"#9ca3af",marginBottom:4,fontWeight:700,letterSpacing:".08em"}}>MANUAL ENTRY CODE</div>
@@ -273,7 +298,7 @@ const Login=({})=>{
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState("");
   const[stage,setStage]=useState("login"); // login | enroll | verify
-  const[qrCode,setQrCode]=useState("");
+  const[otpauth,setOtpauth]=useState("");
   const[secret,setSecret]=useState("");
   const[otp,setOtp]=useState("");
 
@@ -291,22 +316,44 @@ const Login=({})=>{
     return result;
   };
 
+  // Render QR code when otpauth changes
+  useEffect(()=>{
+    if(!otpauth||stage!=="enroll")return;
+    const renderQR=async()=>{
+      if(!window.QRCode){
+        await new Promise((resolve,reject)=>{
+          const s=document.createElement("script");
+          s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+          s.onload=resolve;s.onerror=reject;
+          document.head.appendChild(s);
+        });
+      }
+      const el=document.getElementById("login-qr");
+      if(el){
+        el.innerHTML="";
+        new window.QRCode(el,{
+          text:otpauth,width:200,height:200,
+          colorDark:"#000000",colorLight:"#ffffff",
+          correctLevel:window.QRCode?.CorrectLevel?.M||1,
+        });
+      }
+    };
+    setTimeout(renderQR,200);
+  },[otpauth,stage]);
+
   const go=async e=>{
     e.preventDefault();
     setLoading(true);setErr("");
     try{
-      // Sign in with password
       const{error}=await supabase.auth.signInWithPassword({email,password:pw});
       if(error)throw error;
-      // Check if TOTP is set up
       const{hasTotp}=await callMfa("check");
       if(hasTotp){
         setStage("verify");
       } else {
-        // First time — enroll
-        const{qrCode:qr,secret:sec}=await callMfa("enroll");
-        setQrCode(qr);
+        const{secret:sec,otpauthUrl}=await callMfa("enroll");
         setSecret(sec);
+        setOtpauth(otpauthUrl);
         setStage("enroll");
       }
     }catch(e){
@@ -348,7 +395,7 @@ const Login=({})=>{
             <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>One-time setup — scan this QR code with your authenticator app</div>
           </div>
           <div style={{textAlign:"center",marginBottom:16}}>
-            <img src={qrCode} alt="QR Code" style={{width:200,height:200,borderRadius:10,border:"1px solid #e5e7eb"}}/>
+            <div id="login-qr" style={{display:"inline-block",padding:10,background:"#fff",borderRadius:10,border:"1px solid #e5e7eb"}}></div>
           </div>
           <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:16}}>
             <div style={{fontSize:10,color:"#9ca3af",marginBottom:4,fontWeight:700,letterSpacing:".08em"}}>OR ENTER CODE MANUALLY</div>
