@@ -491,10 +491,9 @@ export default function App(){
     try{
       const total=items.reduce((a,i)=>a+(getP(i.pid).price*i.qty),0);
       const profit=items.reduce((a,i)=>{const p=getP(i.pid);return a+(p.price-p.cost)*i.qty;},0);
-      const nextNum = sales.length > 0
-        ? Math.max(...sales.map(s => parseInt(s.id.replace("INV-",""))||0)) + 1
-        : 1;
-      const invId = "INV-" + String(nextNum).padStart(4,"0");
+      // Get next invoice number from Supabase sequence
+      const {data:seqData} = await supabase.rpc("next_invoice_number");
+      const invId = "INV-" + String(seqData||1).padStart(4,"0");
       const ns={id:invId,load_id:selLoad.id,truck_id:selTruck,cust_id:selCust,date:nowStr(),items,total,profit};
       await supabase.from("sales").insert(ns);
       await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});

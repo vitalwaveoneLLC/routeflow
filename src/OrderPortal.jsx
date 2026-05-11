@@ -285,10 +285,8 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     if(!saleItems.length) return setMsg({t:"error",m:"Add at least one product"});
     setSaving(true);
     try{
-      const nextNum = driverData.sales.length > 0
-        ? Math.max(...driverData.sales.map(s => parseInt(s.id.replace("INV-",""))||0)) + 1
-        : 1;
-      const invId = "INV-" + String(nextNum).padStart(4,"0");
+      const {data:seqData} = await supabase.rpc("next_invoice_number");
+      const invId = "INV-" + String(seqData||1).padStart(4,"0");
       const ns = {id:invId,load_id:driverData.activeLoad?.id,truck_id:driverData.truck.id,cust_id:selCust,date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
@@ -982,9 +980,55 @@ export default function OrderPortal() {
                   <div style={{fontSize:24}}>{driverData.activeLoad?"🟢":"🟡"}</div>
                   <div>
                     <div style={{fontWeight:700,fontSize:14,color:driverData.activeLoad?"#065f46":"#92400e"}}>{driverData.activeLoad?"Truck Loaded & Active":"Truck Not Loaded"}</div>
-                    <div style={{fontSize:12,color:driverData.activeLoad?"#047857":"#92400e"}}>{driverData.activeLoad?`Load ${driverData.activeLoad.id} · ${(driverData.activeLoad.items||[]).reduce((a,i)=>a+i.qty,0)} units`:"Tap Load to load your truck"}</div>
+                    <div style={{fontSize:12,color:driverData.activeLoad?"#047857":"#92400e"}}>{driverData.activeLoad?`Load ${driverData.activeLoad.id} · ${(driverData.activeLoad.items||[]).reduce((a,i)=>a+i.qty,0)} units loaded`:"Tap Load to load your truck"}</div>
                   </div>
                 </div>
+
+                {/* ── TRUCK INVENTORY ── */}
+                {driverData.activeLoad&&(()=>{
+                  const loadedItems=driverData.activeLoad.items||[];
+                  const soldMap=driverData.sales.reduce((acc,s)=>{(s.items||[]).forEach(i=>{acc[i.pid]=(acc[i.pid]||0)+i.qty;});return acc;},{});
+                  const totalLoaded=loadedItems.reduce((a,i)=>a+i.qty,0);
+                  const totalSold=loadedItems.reduce((a,i)=>a+(soldMap[i.pid]||0),0);
+                  const totalRemaining=totalLoaded-totalSold;
+                  return(
+                    <div className="card" style={{marginBottom:14}}>
+                      <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div style={{fontWeight:700,fontSize:13,color:"#0a1628"}}>📦 Truck Inventory</div>
+                        <div style={{display:"flex",gap:12,fontSize:11}}>
+                          <span style={{color:"#6b7280"}}>Loaded: <strong style={{color:"#0ea5e9"}}>{totalLoaded}</strong></span>
+                          <span style={{color:"#6b7280"}}>Sold: <strong style={{color:"#059669"}}>{totalSold}</strong></span>
+                          <span style={{color:"#6b7280"}}>Left: <strong style={{color:totalRemaining<5?"#dc2626":"#212121"}}>{totalRemaining}</strong></span>
+                        </div>
+                      </div>
+                      {loadedItems.map(item=>{
+                        const p=products.find(x=>x.id===item.pid);
+                        const sold=soldMap[item.pid]||0;
+                        const remaining=Math.max(0,item.qty-sold);
+                        const pct=item.qty>0?(remaining/item.qty)*100:0;
+                        return(
+                          <div key={item.pid} style={{padding:"10px 16px",borderBottom:"1px solid #f9fafb"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                              <div>
+                                <div style={{fontWeight:600,fontSize:13}}>{p?.name||item.pid}</div>
+                                <div style={{fontSize:10,color:"#9ca3af"}}>SKU: {p?.sku} · ${p?.price}/unit</div>
+                              </div>
+                              <div style={{textAlign:"right"}}>
+                                <div style={{fontWeight:800,fontSize:18,color:remaining===0?"#dc2626":remaining<=3?"#f59e0b":"#059669"}}>{remaining}</div>
+                                <div style={{fontSize:10,color:"#9ca3af"}}>of {item.qty} left</div>
+                              </div>
+                            </div>
+                            <div style={{height:5,background:"#f3f4f6",borderRadius:3,overflow:"hidden",marginBottom:3}}>
+                              <div style={{height:"100%",width:`${pct}%`,background:pct>50?"#059669":pct>20?"#f59e0b":"#dc2626",borderRadius:3,transition:"width .3s"}}/>
+                            </div>
+                            {sold>0&&<div style={{fontSize:10,color:"#6b7280"}}>✓ {sold} sold · <span style={{color:"#059669",fontWeight:600}}>${(sold*(p?.price||0)).toFixed(2)}</span></div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
                   {[
                     {l:"Customers",v:driverData.customers.length,e:"⛽",c:"#0ea5e9"},
