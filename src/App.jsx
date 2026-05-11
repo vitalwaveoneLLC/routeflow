@@ -1293,7 +1293,7 @@ export default function App(){
       <div style={{display:"flex",minHeight:"100vh"}}>
 
         {/* SIDEBAR */}
-        <div className="no-print" style={{width:222,background:"#ebebeb",borderRight:"1px solid #d1d5db",display:"flex",flexDirection:"column",padding:"0 8px",flexShrink:0}}>
+        <div className="no-print" style={{width:222,background:"#ebebeb",borderRight:"1px solid #d1d5db",display:"flex",flexDirection:"column",padding:"0 8px",flexShrink:0,overflowY:"auto",height:"100vh",position:"sticky",top:0}}>
           <div style={{padding:"10px 8px 6px"}}>
             <div style={{background:"#fff",borderRadius:12,padding:6}}>
               <img src="/logo-sidebar.png" style={{width:"100%",display:"block",borderRadius:8}}/>
@@ -1315,8 +1315,54 @@ export default function App(){
               </button>
             ))}
           </div>
-          <div style={{padding:"8px 8px 14px"}}>
+          <div style={{padding:"8px 8px 14px",overflowY:"auto",flex:1}}>
             <div style={{height:1,background:"#d1d5db",marginBottom:8}}/>
+
+            {/* ── LIVE INVENTORY ── */}
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:9,color:"#9ca3af",letterSpacing:".1em",marginBottom:6,paddingLeft:3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span>📦 LIVE INVENTORY</span>
+                <button onClick={()=>setTab("warehouse")} style={{background:"none",border:"none",color:"#7c3aed",fontSize:9,cursor:"pointer",fontFamily:"'Barlow',sans-serif",padding:0}}>view all →</button>
+              </div>
+              {products.map(p=>{
+                // Units loaded on all active trucks for this product
+                const onTrucks = loads
+                  .filter(l=>l.status==="out")
+                  .reduce((a,l)=>{
+                    const loaded=(l.items||[]).find(i=>i.pid===p.id)?.qty||0;
+                    const sold=sales.filter(s=>s.load_id===l.id).reduce((b,s)=>{
+                      return b+(s.items||[]).find(i=>i.pid===p.id)?.qty||0;
+                    },0);
+                    const ret=returns.filter(r=>r.load_id===l.id).reduce((b,r)=>{
+                      return b+(r.items||[]).find(i=>i.pid===p.id)?.qty||0;
+                    },0);
+                    return a+Math.max(0,loaded-sold-ret);
+                  },0);
+                const shelf=p.shelf;
+                const total=shelf+onTrucks;
+                const pct=total>0?(shelf/total)*100:0;
+                const low=shelf<5;
+                return(
+                  <div key={p.id} style={{marginBottom:7,padding:"5px 6px",background:"#f9fafb",borderRadius:6,border:`1px solid ${low?"#fecaca":"#e5e7eb"}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                      <span style={{fontSize:10,color:"#212121",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:110}}>{p.name}</span>
+                      {low&&<span style={{fontSize:8,background:"#fef2f2",color:"#dc2626",padding:"1px 4px",borderRadius:3,fontWeight:700,flexShrink:0}}>LOW</span>}
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                      <span style={{fontSize:9,color:"#9ca3af"}}>🏭 {shelf} shelf</span>
+                      <span style={{fontSize:9,color:"#9ca3af"}}>🚚 {onTrucks} trucks</span>
+                      <span style={{fontSize:9,fontWeight:700,color:low?"#dc2626":total===0?"#9ca3af":"#212121"}}>={total}</span>
+                    </div>
+                    <div style={{height:3,background:"#e5e7eb",borderRadius:2,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${pct}%`,background:shelf===0?"#e5e7eb":low?"#dc2626":shelf<20?"#f59e0b":"#059669",borderRadius:2,transition:"width .3s"}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{height:1,background:"#d1d5db",marginBottom:8}}/>
+
             {/* State Tax Rates in sidebar */}
             {isAdmin&&<div style={{marginBottom:10}}>
               <div style={{fontSize:9,color:"#9ca3af",letterSpacing:".1em",marginBottom:6,paddingLeft:3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
