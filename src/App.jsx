@@ -749,8 +749,8 @@ export default function App(){
 
   const totalRevenue=useMemo(()=>visSales.reduce((a,s)=>a+s.total,0),[visSales]);
   const totalProfit=useMemo(()=>visSales.reduce((a,s)=>a+s.profit,0),[visSales]);
-  const totalTax=useMemo(()=>visSales.reduce((a,s)=>a+s.total*(taxRate/100),0),[visSales,taxRate]);
-  const totalAR=useMemo(()=>visSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0),[visSales,payments,taxRate]);
+  const totalTax=useMemo(()=>visSales.reduce((a,s)=>a+calcSaleTax(s),0),[visSales,stateTaxes,products]);
+  const totalAR=useMemo(()=>visSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+s.total+calcSaleTax(s),0),[visSales,payments,stateTaxes,products]);
 
   const settlementData=tid=>{
     const ts=sales.filter(s=>s.truck_id===tid),tr=returns.filter(r=>r.truck_id===tid),al=loads.filter(l=>l.truck_id===tid);
@@ -1281,7 +1281,7 @@ export default function App(){
           {/* ══ DASHBOARD ══ */}
           {tab==="dashboard"&&<div className="fu">
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:18}}>
-              {[{l:"Revenue",v:fmt(totalRevenue),c:"#059669",s:`${visSales.length} invoices`},{l:"Gross Profit",v:fmt(totalProfit),c:"#7c3aed",s:totalRevenue>0?`${((totalProfit/totalRevenue)*100).toFixed(1)}% margin`:"—"},{l:"Tax Collected",v:fmt(totalTax),c:"#7c3aed",s:`${taxRate}%`},{l:"AR Outstanding",v:fmt(totalAR),c:"#dc2626",s:"unpaid"}].map(k=>(
+              {[{l:"Revenue",v:fmt(totalRevenue),c:"#059669",s:`${visSales.length} invoices`},{l:"Gross Profit",v:fmt(totalProfit),c:"#7c3aed",s:totalRevenue>0?`${((totalProfit/totalRevenue)*100).toFixed(1)}% margin`:"—"},{l:"Tax Collected",v:fmt(totalTax),c:"#7c3aed",s:"tobacco only"},{l:"AR Outstanding",v:fmt(totalAR),c:"#dc2626",s:"unpaid"}].map(k=>(
                 <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div><div style={{fontSize:10,color:"#9ca3af",marginTop:4}}>{k.s}</div></div>
               ))}
             </div>
