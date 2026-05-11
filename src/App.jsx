@@ -915,15 +915,26 @@ export default function App(){
           {tab==="trucks"&&<div className="fu">
             {isAdmin&&<div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button className="btn ba" onClick={()=>setModal("addTruck")}>{ic.plus} Add Driver & Truck</button></div>}
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              {visTrucks.map(t=>{
+              {trucks.map(t=>{
                 const load=activeLoad(t.id),inv=truckInv(t.id);
                 const ts=visSales.filter(s=>s.truck_id===t.id),tr=returns.filter(r=>r.truck_id===t.id);
                 const isEditingT=editingTid===t.id;
+                // Show all products with their truck quantity (0 if not loaded)
+                const allProductsOnTruck = products.map(p=>{
+                  const invItem = inv.find(i=>i.pid===p.id);
+                  return {
+                    pid: p.id,
+                    name: p.name,
+                    loaded: invItem?.loaded||0,
+                    remaining: invItem?.remaining||0,
+                    sold: invItem?(invItem.loaded-invItem.remaining):0,
+                  };
+                }).filter(p=>p.loaded>0||load); // show loaded items, or all if on route
                 return(
                   <div key={t.id} className="card" style={{padding:18}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
                       <div style={{display:"flex",alignItems:"center",gap:11}}>
-                        <div style={{width:42,height:42,background:"#0e1e30",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>🚚</div>
+                        <div style={{width:42,height:42,background:"#f5f3ff",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>🚚</div>
                         {isEditingT?(
                           <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
                             <div><label>Driver</label><EI val={editTruck.driver} onChange={v=>setEditTruck(x=>({...x,driver:v}))}/></div>
@@ -943,10 +954,35 @@ export default function App(){
                       </div>
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                      {/* Inventory */}
                       <div className="cin" style={{padding:12}}>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#7c3aed",letterSpacing:".08em",marginBottom:8}}>TRUCK INVENTORY</div>
-                        {inv.length===0?<Empty icon="📦" msg="NOT LOADED"/>:inv.map(i=>{const p=getP(i.pid);const pct=Math.round(i.remaining/i.loaded*100);return(<div key={i.pid} style={{marginBottom:7}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:10,color:"#6b7280"}}>{p?.name}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:12,color:"#212121"}}>{i.remaining}<span style={{color:"#9ca3af"}}>/{i.loaded}</span></span></div><div className="pb"><div className="pf" style={{width:`${pct}%`,background:pct<25?"#dc2626":pct<60?"#7c3aed":"#059669"}}/></div></div>);})}
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#7c3aed",letterSpacing:".08em",marginBottom:8}}>
+                          TRUCK INVENTORY {load?<span style={{color:"#f59e0b"}}>● ACTIVE</span>:<span style={{color:"#9ca3af"}}>● NOT LOADED</span>}
+                        </div>
+                        {products.map(p=>{
+                          const invItem=inv.find(i=>i.pid===p.id);
+                          const loaded=invItem?.loaded||0;
+                          const remaining=invItem?.remaining||0;
+                          const pct=loaded>0?Math.round(remaining/loaded*100):0;
+                          return(
+                            <div key={p.id} style={{marginBottom:8,opacity:loaded===0?0.5:1}}>
+                              <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                                <span style={{fontSize:11,color:"#6b7280"}}>{p.name}</span>
+                                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,color:loaded===0?"#9ca3af":remaining===0?"#dc2626":"#212121"}}>
+                                  {remaining}<span style={{color:"#9ca3af",fontWeight:400}}>/{loaded}</span>
+                                </span>
+                              </div>
+                              {loaded>0?(
+                                <div className="pb"><div className="pf" style={{width:`${pct}%`,background:pct<25?"#dc2626":pct<60?"#7c3aed":"#059669"}}/></div>
+                              ):(
+                                <div style={{height:4,background:"#f3f4f6",borderRadius:2}}/>
+                              )}
+                              {loaded>0&&<div style={{fontSize:9,color:"#9ca3af",marginTop:1}}>{invItem?.loaded-invItem?.remaining||0} sold · {remaining} remaining</div>}
+                            </div>
+                          );
+                        })}
                       </div>
+                      {/* Stats */}
                       <div style={{display:"flex",flexDirection:"column",gap:6}}>
                         {[{l:"Revenue",v:fmt(ts.reduce((a,s)=>a+s.total,0)),c:"#059669"},{l:"Profit",v:fmt(ts.reduce((a,s)=>a+s.profit,0)),c:"#7c3aed"},{l:"Tax",v:fmt(ts.reduce((a,s)=>a+s.total*taxRate/100,0)),c:"#7c3aed"},{l:"Invoices",v:ts.length,c:"#7c3aed"},{l:"Returns",v:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0)+" units",c:"#dc2626"}].map(k=>(
                           <div key={k.l} className="cin" style={{padding:"7px 11px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:10,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:k.c}}>{k.v}</span></div>
