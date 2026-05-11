@@ -758,6 +758,93 @@ export default function App(){
     return{truckSales:ts,loadedUnits:al.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+i.qty,0),0),soldUnits:ts.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>b+i.qty,0),0),retUnits:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0),rev,prof,cogs:rev-prof,tax:rev*(taxRate/100),collected:ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0),outstanding:ts.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0)};
   };
 
+  // ── CSV IMPORT ─────────────────────────────────────────────────────────────
+  const[csvPreview,setCsvPreview]=useState([]);
+  const[csvErrors,setCsvErrors]=useState([]);
+  const[csvImporting,setCsvImporting]=useState(false);
+
+  const CSV_TEMPLATE = [
+    ["name","sku","cat","unit","cost","price","shelf"],
+    ["Royal Honey 24pk","122151456+6","tobacco","Case/24","8.00","15.00","100"],
+    ["Pop Cake Box","654789963","nicotine","Box/10","4.00","8.00","50"],
+    ["Energy Drink 12pk","049000050103","beverage","Case/12","12.00","20.00","30"],
+  ];
+
+  const downloadTemplate=()=>{
+    downloadCSV(CSV_TEMPLATE,"product-import-template.csv");
+  };
+
+  const parseCSV=text=>{
+    const lines=text.trim().split("\n");
+    const headers=lines[0].split(",").map(h=>h.trim().replace(/"/g,"").toLowerCase());
+    const required=["name","sku","price","cost"];
+    const missing=required.filter(r=>!headers.includes(r));
+    if(missing.length>0){setCsvErrors([`Missing required columns: ${missing.join(", ")}`]);return[];}
+    const rows=[];
+    const errors=[];
+    for(let i=1;i<lines.length;i++){
+      if(!lines[i].trim())continue;
+      const vals=lines[i].split(",").map(v=>v.trim().replace(/"/g,""));
+      const row={};
+      headers.forEach((h,j)=>row[h]=vals[j]||"");
+      if(!row.name){errors.push(`Row ${i+1}: name is required`);continue;}
+      if(!row.sku){errors.push(`Row ${i+1}: SKU is required`);continue;}
+      if(isNaN(parseFloat(row.price))||parseFloat(row.price)<=0){errors.push(`Row ${i+1}: invalid price "${row.price}"`);continue;}
+      if(isNaN(parseFloat(row.cost))||parseFloat(row.cost)<0){errors.push(`Row ${i+1}: invalid cost "${row.cost}"`);continue;}
+      rows.push({
+        id:"P"+uid(),
+        name:row.name,
+        sku:row.sku,
+        cat:row.cat||"general",
+        unit:row.unit||"unit",
+        cost:parseFloat(row.cost),
+        price:parseFloat(row.price),
+        shelf:parseInt(row.shelf)||0,
+      });
+    }
+    setCsvErrors(errors);
+    return rows;
+  };
+
+  const handleCSVFile=e=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const rows=parseCSV(ev.target.result);
+      setCsvPreview(rows);
+    };
+    reader.readAsText(file);
+  };
+
+  const importCSV=async()=>{
+    if(!csvPreview.length)return;
+    setCsvImporting(true);
+    try{
+      // Check for duplicate SKUs
+      const existingSKUs=products.map(p=>p.sku);
+      const toInsert=csvPreview.filter(r=>!existingSKUs.includes(r.sku));
+      const toUpdate=csvPreview.filter(r=>existingSKUs.includes(r.sku));
+      let inserted=0,updated=0;
+      if(toInsert.length){
+        const{error}=await supabase.from("products").insert(toInsert);
+        if(error)throw error;
+        setProducts(prev=>[...prev,...toInsert]);
+        inserted=toInsert.length;
+      }
+      for(const p of toUpdate){
+        const existing=products.find(x=>x.sku===p.sku);
+        if(!existing)continue;
+        await supabase.from("products").update({name:p.name,cat:p.cat,unit:p.unit,cost:p.cost,price:p.price,shelf:p.shelf}).eq("id",existing.id);
+        setProducts(prev=>prev.map(x=>x.sku===p.sku?{...x,...p,id:x.id}:x));
+        updated++;
+      }
+      showToast(`✓ Imported: ${inserted} added, ${updated} updated`);
+      setCsvPreview([]);setCsvErrors([]);setModal(null);
+    }catch(e){showToast(e.message,"error");}
+    setCsvImporting(false);
+  };
+
   // ── PRODUCT ACTIONS ────────────────────────────────────────────────────────
   const addProduct=async()=>{
     if(!np.name||!np.sku||!np.cost||!np.price)return showToast("Name, SKU, cost & price required","error");
@@ -1323,7 +1410,7 @@ export default function App(){
           {/* ══ WAREHOUSE ══ */}
           {tab==="warehouse"&&<div className="fu">
             <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-              {isAdmin&&<><button className="btn ba" onClick={()=>setModal("addProduct")}>{ic.plus} Add Product</button><button className="btn bb" onClick={()=>{setRsPid(products[0]?.id||"");setRsQty("");setModal("restock");}}>{ic.box} Restock</button></>}
+              {isAdmin&&<><button className="btn ba" onClick={()=>setModal("addProduct")}>{ic.plus} Add Product</button><button className="btn bb" onClick={()=>{setRsPid(products[0]?.id||"");setRsQty("");setModal("restock");}}>{ic.box} Restock</button><button className="btn bp" onClick={()=>setModal("csvImport")}>📥 Import CSV</button></>}
               {!isAdmin&&<div style={{fontSize:12,color:"#6b7280",padding:"8px 0"}}>📦 View only — contact admin to edit</div>}
               <div style={{marginLeft:"auto",fontSize:11,color:"#6b7280",padding:"8px 0"}}>{editingPid?<span style={{color:"#7c3aed"}}>✏️ Editing — click Save or Cancel</span>:isAdmin?"Click ✏️ on any row to edit":""}
               </div>
@@ -2134,6 +2221,86 @@ export default function App(){
       </div>
 
       {/* ════ MODALS ════ */}
+
+      {/* ── CSV IMPORT MODAL ── */}
+      {modal==="csvImport"&&<Modal title="📥 Import Products from CSV" onClose={()=>{setModal(null);setCsvPreview([]);setCsvErrors([]);}} wide>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+
+          {/* Template download */}
+          <div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:10,padding:"14px 16px"}}>
+            <div style={{fontWeight:700,fontSize:13,color:"#7c3aed",marginBottom:6}}>📋 Step 1 — Download Template</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:10,lineHeight:1.6}}>
+              Use this template to fill in your products. Required columns: <strong>name, sku, price, cost</strong><br/>
+              Optional: cat (category), unit, shelf (initial quantity)
+            </div>
+            <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:7,padding:"10px 14px",fontFamily:"monospace",fontSize:11,color:"#374151",marginBottom:10}}>
+              name, sku, cat, unit, cost, price, shelf<br/>
+              Royal Honey 24pk, 122151456+6, tobacco, Case/24, 8.00, 15.00, 100<br/>
+              Pop Cake Box, 654789963, nicotine, Box/10, 4.00, 8.00, 50<br/>
+              Energy Drink 12pk, 049000050103, beverage, Case/12, 12.00, 20.00, 30
+            </div>
+            <button className="btn ba" onClick={downloadTemplate}>⬇️ Download Template CSV</button>
+          </div>
+
+          {/* File upload */}
+          <div style={{background:"#f9fafb",border:"2px dashed #d1d5db",borderRadius:10,padding:"20px",textAlign:"center"}}>
+            <div style={{fontWeight:700,fontSize:13,color:"#212121",marginBottom:6}}>📂 Step 2 — Upload Your CSV File</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:12}}>Fill the template with your products and upload it here</div>
+            <input type="file" accept=".csv,text/csv" onChange={handleCSVFile}
+              style={{display:"block",margin:"0 auto",fontSize:12,fontFamily:"'Barlow',sans-serif"}}/>
+          </div>
+
+          {/* Errors */}
+          {csvErrors.length>0&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"12px 14px"}}>
+            <div style={{fontWeight:700,fontSize:12,color:"#dc2626",marginBottom:6}}>⚠️ {csvErrors.length} Error{csvErrors.length!==1?"s":""} Found</div>
+            {csvErrors.map((e,i)=><div key={i} style={{fontSize:11,color:"#dc2626",marginBottom:2}}>• {e}</div>)}
+          </div>}
+
+          {/* Preview */}
+          {csvPreview.length>0&&<div>
+            <div style={{fontWeight:700,fontSize:13,color:"#212121",marginBottom:8}}>
+              ✅ Step 3 — Preview & Import
+              <span style={{fontWeight:400,fontSize:11,color:"#6b7280",marginLeft:8}}>{csvPreview.length} products ready to import</span>
+            </div>
+            {/* Duplicate warning */}
+            {csvPreview.some(r=>products.find(p=>p.sku===r.sku))&&<div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#92400e",marginBottom:10}}>
+              ⚠️ {csvPreview.filter(r=>products.find(p=>p.sku===r.sku)).length} product(s) with matching SKU will be <strong>updated</strong>, not duplicated
+            </div>}
+            <div style={{maxHeight:280,overflowY:"auto",border:"1px solid #e5e7eb",borderRadius:8}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead>
+                  <tr>{["Name","SKU","Category","Unit","Cost","Price","Shelf","Status"].map(h=><th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,color:"#6b7280",fontWeight:700,letterSpacing:".08em",borderBottom:"1px solid #e5e7eb",background:"#f9fafb"}}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {csvPreview.map((r,i)=>{
+                    const isDupe=products.find(p=>p.sku===r.sku);
+                    return(
+                      <tr key={i} style={{background:isDupe?"#fffbeb":"#fff"}}>
+                        <td style={{padding:"7px 12px",fontSize:12,fontWeight:600,color:"#212121",borderBottom:"1px solid #f3f4f6"}}>{r.name}</td>
+                        <td style={{padding:"7px 12px",fontSize:11,fontFamily:"monospace",color:"#6b7280",borderBottom:"1px solid #f3f4f6"}}>{r.sku}</td>
+                        <td style={{padding:"7px 12px",fontSize:11,color:"#6b7280",borderBottom:"1px solid #f3f4f6"}}>{r.cat}</td>
+                        <td style={{padding:"7px 12px",fontSize:11,color:"#6b7280",borderBottom:"1px solid #f3f4f6"}}>{r.unit}</td>
+                        <td style={{padding:"7px 12px",fontSize:12,borderBottom:"1px solid #f3f4f6"}}>${r.cost.toFixed(2)}</td>
+                        <td style={{padding:"7px 12px",fontSize:12,fontWeight:700,color:"#059669",borderBottom:"1px solid #f3f4f6"}}>${r.price.toFixed(2)}</td>
+                        <td style={{padding:"7px 12px",fontSize:12,color:"#7c3aed",fontWeight:600,borderBottom:"1px solid #f3f4f6"}}>{r.shelf}</td>
+                        <td style={{padding:"7px 12px",borderBottom:"1px solid #f3f4f6"}}>
+                          {isDupe?<span className="bdg ba2">UPDATE</span>:<span className="bdg bg2">NEW</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:12,justifyContent:"flex-end"}}>
+              <button className="btn bgh" onClick={()=>{setCsvPreview([]);setCsvErrors([]);}}>Clear</button>
+              <button className="btn ba" onClick={importCSV} disabled={csvImporting}>
+                {csvImporting?<><svg className="spin" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Importing…</>:`📥 Import ${csvPreview.length} Products`}
+              </button>
+            </div>
+          </div>}
+        </div>
+      </Modal>}
 
       {modal==="addProduct"&&<Modal title="📦 Add New Product" onClose={()=>setModal(null)}>
         <div style={{display:"flex",flexDirection:"column",gap:11}}>
