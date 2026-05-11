@@ -125,13 +125,10 @@ const Login=({})=>{
   const[pw,setPw]=useState("");
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState("");
-  const[stage,setStage]=useState("login");
+  const[stage,setStage]=useState("login"); // login | enroll | verify
   const[qrCode,setQrCode]=useState("");
   const[secret,setSecret]=useState("");
-  const[factorId,setFactorId]=useState("");
-  const[challengeId,setChallengeId]=useState("");
   const[otp,setOtp]=useState("");
-  const[enrollId,setEnrollId]=useState("");
 
   const callMfa=async(action,params={})=>{
     const{data:{session}}=await supabase.auth.getSession();
@@ -144,30 +141,25 @@ const Login=({})=>{
     });
     const result=await res.json();
     if(result.error)throw new Error(result.error);
-    return result.data;
+    return result;
   };
 
   const go=async e=>{
     e.preventDefault();
     setLoading(true);setErr("");
     try{
+      // Sign in with password
       const{error}=await supabase.auth.signInWithPassword({email,password:pw});
       if(error)throw error;
-      // List existing MFA factors
-      const factorsData=await callMfa("listFactors");
-      const verified=factorsData?.totp?.find(f=>f.status==="verified");
-      if(verified){
-        // Already enrolled — create challenge and go to verify
-        const ch=await callMfa("challenge",{factorId:verified.id});
-        setFactorId(verified.id);
-        setChallengeId(ch.id);
+      // Check if TOTP is set up
+      const{hasTotp}=await callMfa("check");
+      if(hasTotp){
         setStage("verify");
       } else {
-        // No MFA yet — enroll
-        const enrollData=await callMfa("enroll");
-        setQrCode(enrollData.totp.qr_code);
-        setSecret(enrollData.totp.secret);
-        setEnrollId(enrollData.id);
+        // First time — enroll
+        const{qrCode:qr,secret:sec}=await callMfa("enroll");
+        setQrCode(qr);
+        setSecret(sec);
         setStage("enroll");
       }
     }catch(e){
@@ -177,17 +169,22 @@ const Login=({})=>{
     setLoading(false);
   };
 
-  const verifyOtp=async()=>{
+  const verifyEnroll=async()=>{
     setLoading(true);setErr("");
     try{
-      if(stage==="enroll"){
-        const ch=await callMfa("challenge",{factorId:enrollId});
-        await callMfa("verify",{factorId:enrollId,challengeId:ch.id,code:otp.replace(/\s/g,"")});
-      } else {
-        await callMfa("verify",{factorId,challengeId,code:otp.replace(/\s/g,"")});
-      }
+      await callMfa("verifyEnroll",{code:otp});
+      setOtp("");
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const verifyLogin=async()=>{
+    setLoading(true);setErr("");
+    try{
+      await callMfa("verifyLogin",{code:otp});
+      setOtp("");
     }catch(e){
-      setErr(e.message||"Invalid code — try again");
+      setErr(e.message);
       setLoading(false);
       return;
     }
@@ -204,22 +201,25 @@ const Login=({})=>{
             <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>One-time setup — scan this QR code with your authenticator app</div>
           </div>
           <div style={{textAlign:"center",marginBottom:16}}>
-            <img src={qrCode} alt="QR Code" style={{width:180,height:180,borderRadius:10,border:"1px solid #e5e7eb"}}/>
+            <img src={qrCode} alt="QR Code" style={{width:200,height:200,borderRadius:10,border:"1px solid #e5e7eb"}}/>
           </div>
           <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:16}}>
-            <div style={{fontSize:10,color:"#9ca3af",marginBottom:4,fontWeight:700,letterSpacing:".08em"}}>MANUAL ENTRY CODE</div>
-            <div style={{fontFamily:"monospace",fontSize:13,color:"#212121",wordBreak:"break-all"}}>{secret}</div>
+            <div style={{fontSize:10,color:"#9ca3af",marginBottom:4,fontWeight:700,letterSpacing:".08em"}}>OR ENTER CODE MANUALLY</div>
+            <div style={{fontFamily:"monospace",fontSize:13,color:"#212121",wordBreak:"break-all",letterSpacing:".1em"}}>{secret}</div>
           </div>
-          <div style={{fontSize:12,color:"#6b7280",marginBottom:14,lineHeight:1.6}}>
+          <div style={{fontSize:12,color:"#6b7280",marginBottom:14,lineHeight:1.7}}>
             1. Open <strong>Google Authenticator</strong> or <strong>Authy</strong><br/>
             2. Tap <strong>+</strong> → <strong>Scan QR code</strong><br/>
-            3. Enter the 6-digit code shown below
+            3. Enter the 6-digit code shown in the app
           </div>
           {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"9px 13px",fontSize:12,color:"#dc2626",marginBottom:12}}>{err}</div>}
           <div><label>6-DIGIT CODE FROM APP</label>
-            <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&verifyOtp()} style={{textAlign:"center",fontSize:24,letterSpacing:"0.3em",fontWeight:700}}/>
+            <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp}
+              onChange={e=>setOtp(e.target.value.replace(/\D/g,""))}
+              onKeyDown={e=>e.key==="Enter"&&verifyEnroll()}
+              style={{textAlign:"center",fontSize:28,letterSpacing:"0.4em",fontWeight:700}}/>
           </div>
-          <button onClick={verifyOtp} className="btn ba" style={{width:"100%",justifyContent:"center",padding:"11px",marginTop:12}} disabled={loading||otp.length<6}>
+          <button onClick={verifyEnroll} className="btn ba" style={{width:"100%",justifyContent:"center",padding:"11px",marginTop:12}} disabled={loading||otp.length<6}>
             {loading?"Verifying…":"✓ Activate 2FA & Sign In"}
           </button>
         </div>
@@ -239,20 +239,25 @@ const Login=({})=>{
           <div style={{textAlign:"center",marginBottom:20}}>
             <div style={{fontSize:32,marginBottom:6}}>📱</div>
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121"}}>ENTER YOUR CODE</div>
-            <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>Open your authenticator app and enter the 6-digit code</div>
+            <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>Open Google Authenticator and enter the 6-digit code</div>
           </div>
           {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"9px 13px",fontSize:12,color:"#dc2626",marginBottom:12}}>{err}</div>}
           <div><label>6-DIGIT CODE</label>
-            <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&verifyOtp()} style={{textAlign:"center",fontSize:28,letterSpacing:"0.4em",fontWeight:700}}/>
+            <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp}
+              onChange={e=>setOtp(e.target.value.replace(/\D/g,""))}
+              onKeyDown={e=>e.key==="Enter"&&verifyLogin()}
+              style={{textAlign:"center",fontSize:28,letterSpacing:"0.4em",fontWeight:700}}
+              autoFocus/>
           </div>
-          <button onClick={verifyOtp} className="btn ba" style={{width:"100%",justifyContent:"center",padding:"11px",marginTop:12}} disabled={loading||otp.length<6}>
+          <button onClick={verifyLogin} className="btn ba" style={{width:"100%",justifyContent:"center",padding:"11px",marginTop:12}} disabled={loading||otp.length<6}>
             {loading?"Verifying…":"🔓 Verify & Sign In"}
           </button>
-          <button onClick={()=>{supabase.auth.signOut();setStage("login");setOtp("");setErr("");}} style={{width:"100%",background:"none",border:"none",color:"#9ca3af",fontSize:11,marginTop:10,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+          <button onClick={()=>{supabase.auth.signOut();setStage("login");setOtp("");setErr("");}}
+            style={{width:"100%",background:"none",border:"none",color:"#9ca3af",fontSize:11,marginTop:10,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
             ← Use different account
           </button>
         </div>
-        <div style={{textAlign:"center",marginTop:12,fontSize:11,color:"#9ca3af"}}>🔐 Protected by TOTP 2-Factor Authentication</div>
+        <div style={{textAlign:"center",marginTop:12,fontSize:11,color:"#9ca3af"}}>🔐 Protected by 2-Factor Authentication</div>
       </div>
     </div>
   );
