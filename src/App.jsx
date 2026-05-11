@@ -120,6 +120,153 @@ const Spinner=({msg=""})=>(<div style={{display:"flex",alignItems:"center",justi
 const Modal=({title,onClose,children,wide,xwide})=>(<div className="mo" onClick={e=>e.target===e.currentTarget&&onClose()}><div className={`mb fu${wide?" w":""}${xwide?" xw":""}`}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>{title?<div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:19,textTransform:"uppercase",letterSpacing:".04em",color:"#212121"}}>{title}</div>:<div/>}<button className="btn bgh" onClick={onClose}>{ic.X} Close</button></div>{children}</div></div>);
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────────
+// ── MFA GATE — verify 2FA even for cached sessions ────────────────────────────
+const MFAGate=({onVerified})=>{
+  const[otp,setOtp]=useState("");
+  const[loading,setLoading]=useState(false);
+  const[err,setErr]=useState("");
+  const[stage,setStage]=useState("checking"); // checking | enroll | verify
+
+  const callMfa=async(action,params={})=>{
+    const{data:{session}}=await supabase.auth.getSession();
+    const SUPABASE_URL=import.meta.env.VITE_SUPABASE_URL;
+    const SUPABASE_ANON_KEY=import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${session?.access_token}`,"apikey":SUPABASE_ANON_KEY},
+      body:JSON.stringify({action,...params}),
+    });
+    const result=await res.json();
+    if(result.error)throw new Error(result.error);
+    return result;
+  };
+
+  const[qrCode,setQrCode]=useState("");
+  const[secret,setSecret]=useState("");
+
+  useEffect(()=>{
+    const init=async()=>{
+      try{
+        const{hasTotp}=await callMfa("check");
+        if(hasTotp){
+          setStage("verify");
+        } else {
+          const{qrCode:qr,secret:sec}=await callMfa("enroll");
+          setQrCode(qr);
+          setSecret(sec);
+          setStage("enroll");
+        }
+      }catch(e){
+        setErr(e.message);
+        setStage("verify");
+      }
+    };
+    init();
+  },[]);
+
+  const verifyEnroll=async()=>{
+    setLoading(true);setErr("");
+    try{
+      await callMfa("verifyEnroll",{code:otp});
+      onVerified();
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const verifyLogin=async()=>{
+    setLoading(true);setErr("");
+    try{
+      await callMfa("verifyLogin",{code:otp});
+      onVerified();
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  if(stage==="checking") return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5"}}>
+      <div style={{textAlign:"center",color:"#6b7280"}}>
+        <svg className="spin" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" style={{margin:"0 auto 12px"}}><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        <div style={{fontSize:13}}>Checking 2FA status…</div>
+      </div>
+    </div>
+  );
+
+  if(stage==="enroll") return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5",padding:20}}>
+      <div style={{width:"100%",maxWidth:420}}>
+        <div className="card" style={{padding:28}}>
+          <div style={{textAlign:"center",marginBottom:20}}>
+            <div style={{fontSize:32,marginBottom:8}}>🔐</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121"}}>SET UP 2-FACTOR AUTH</div>
+            <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>One-time setup — scan this QR code with your authenticator app</div>
+          </div>
+          <div style={{textAlign:"center",marginBottom:16}}>
+            <img src={qrCode} alt="QR Code" style={{width:200,height:200,borderRadius:10,border:"1px solid #e5e7eb"}}/>
+          </div>
+          <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:16}}>
+            <div style={{fontSize:10,color:"#9ca3af",marginBottom:4,fontWeight:700,letterSpacing:".08em"}}>MANUAL ENTRY CODE</div>
+            <div style={{fontFamily:"monospace",fontSize:12,color:"#212121",wordBreak:"break-all",letterSpacing:".1em"}}>{secret}</div>
+          </div>
+          <div style={{fontSize:12,color:"#6b7280",marginBottom:14,lineHeight:1.7}}>
+            1. Open <strong>Google Authenticator</strong> or <strong>Authy</strong><br/>
+            2. Tap <strong>+</strong> → <strong>Scan QR code</strong><br/>
+            3. Enter the 6-digit code shown in the app
+          </div>
+          {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"9px 13px",fontSize:12,color:"#dc2626",marginBottom:12}}>{err}</div>}
+          <div><label>6-DIGIT CODE FROM APP</label>
+            <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp}
+              onChange={e=>setOtp(e.target.value.replace(/\D/g,""))}
+              onKeyDown={e=>e.key==="Enter"&&verifyEnroll()}
+              style={{textAlign:"center",fontSize:28,letterSpacing:"0.4em",fontWeight:700}}
+              autoFocus/>
+          </div>
+          <button onClick={verifyEnroll} className="btn ba" style={{width:"100%",justifyContent:"center",padding:"11px",marginTop:12}} disabled={loading||otp.length<6}>
+            {loading?"Verifying…":"✓ Activate 2FA & Sign In"}
+          </button>
+          <button onClick={()=>supabase.auth.signOut()} style={{width:"100%",background:"none",border:"none",color:"#9ca3af",fontSize:11,marginTop:10,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+            ← Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5",padding:20}}>
+      <div style={{width:"100%",maxWidth:380}}>
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{background:"#fff",borderRadius:20,padding:8,marginBottom:10,display:"inline-block"}}>
+            <img src="/logo-sidebar.png" style={{width:120,height:120,objectFit:"contain",display:"block",borderRadius:14}}/>
+          </div>
+        </div>
+        <div className="card" style={{padding:26}}>
+          <div style={{textAlign:"center",marginBottom:20}}>
+            <div style={{fontSize:32,marginBottom:6}}>📱</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121"}}>ENTER YOUR CODE</div>
+            <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>Open Google Authenticator and enter the 6-digit code</div>
+          </div>
+          {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"9px 13px",fontSize:12,color:"#dc2626",marginBottom:12}}>{err}</div>}
+          <div><label>6-DIGIT CODE</label>
+            <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp}
+              onChange={e=>setOtp(e.target.value.replace(/\D/g,""))}
+              onKeyDown={e=>e.key==="Enter"&&verifyLogin()}
+              style={{textAlign:"center",fontSize:28,letterSpacing:"0.4em",fontWeight:700}}
+              autoFocus/>
+          </div>
+          <button onClick={verifyLogin} className="btn ba" style={{width:"100%",justifyContent:"center",padding:"11px",marginTop:12}} disabled={loading||otp.length<6}>
+            {loading?"Verifying…":"🔓 Verify & Sign In"}
+          </button>
+          <button onClick={()=>supabase.auth.signOut()} style={{width:"100%",background:"none",border:"none",color:"#9ca3af",fontSize:11,marginTop:10,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+            ← Sign out
+          </button>
+        </div>
+        <div style={{textAlign:"center",marginTop:12,fontSize:11,color:"#9ca3af"}}>🔐 Protected by 2-Factor Authentication</div>
+      </div>
+    </div>
+  );
+};
+
+// ── LOGIN ─────────────────────────────────────────────────────────────────────
 const Login=({})=>{
   const[email,setEmail]=useState("");
   const[pw,setPw]=useState("");
@@ -399,6 +546,7 @@ export default function App(){
   const[session,setSession]=useState(null);
   const[profile,setProfile]=useState(null);
   const[authReady,setAuthReady]=useState(false);
+  const[mfaVerified,setMfaVerified]=useState(false);
 
   // Data
   const[co,setCo]=useState(null);
@@ -893,6 +1041,12 @@ export default function App(){
   if(!authReady)return<div className="app"><GS/><Spinner msg="STARTING UP…"/></div>;
   if(!session)return<div className="app"><GS/><Login/></div>;
   if(loading)return<div className="app"><GS/><Spinner msg="LOADING YOUR DATA…"/></div>;
+
+  // ── 2FA GATE ───────────────────────────────────────────────────────────────
+  // Force 2FA verification even for cached sessions
+  if(!mfaVerified&&profile?.role==="admin"){
+    return<div className="app"><GS/><MFAGate onVerified={()=>setMfaVerified(true)}/></div>;
+  }
 
   // ── ACCESS CONTROL ─────────────────────────────────────────────────────────
   // Only admins can access this dashboard — drivers & others go to order portal
