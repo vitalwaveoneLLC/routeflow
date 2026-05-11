@@ -137,22 +137,35 @@ const Login=({})=>{
     setLoading(true);setErr("");
     const{error}=await supabase.auth.signInWithPassword({email,password:pw});
     if(error){setErr(error.message);setLoading(false);return;}
-    // Check if MFA is required
-    const{data:{currentLevel,nextLevel}}=await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    if(nextLevel==="aal2"&&currentLevel!=="aal2"){
-      // User has MFA enrolled — need to verify
+
+    // Check MFA assurance level
+    const{data:aalData}=await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    const currentLevel=aalData?.currentLevel;
+    const nextLevel=aalData?.nextLevel;
+
+    if(nextLevel==="aal2"&&currentLevel==="aal1"){
+      // MFA enrolled and verified before — just need to verify code now
       const{data:factors}=await supabase.auth.mfa.listFactors();
-      const totp=factors?.totp?.[0];
-      if(totp){setFactorId(totp.id);setStage("verify");}
-    } else if(nextLevel!=="aal2"){
-      // No MFA enrolled yet — prompt to enroll
-      const{data,error:enrollErr}=await supabase.auth.mfa.enroll({factorType:"totp",issuer:"VitalWaveOne",friendlyName:"RouteFlow Admin"});
-      if(enrollErr){setErr(enrollErr.message);setLoading(false);return;}
-      setQrCode(data.totp.qr_code);
-      setSecret(data.totp.secret);
-      setEnrollId(data.id);
-      setStage("enroll");
+      const totp=factors?.totp?.find(f=>f.status==="verified");
+      if(totp){setFactorId(totp.id);setStage("verify");setLoading(false);return;}
     }
+
+    // No verified MFA factor — enroll now
+    const{data:factors}=await supabase.auth.mfa.listFactors();
+    const verified=factors?.totp?.find(f=>f.status==="verified");
+    if(verified){setFactorId(verified.id);setStage("verify");setLoading(false);return;}
+
+    // Fresh enrollment
+    const{data,error:enrollErr}=await supabase.auth.mfa.enroll({
+      factorType:"totp",
+      issuer:"VitalWaveOne LLC",
+      friendlyName:"RouteFlow Admin",
+    });
+    if(enrollErr){setErr(enrollErr.message);setLoading(false);return;}
+    setQrCode(data.totp.qr_code);
+    setSecret(data.totp.secret);
+    setEnrollId(data.id);
+    setStage("enroll");
     setLoading(false);
   };
 
@@ -160,9 +173,11 @@ const Login=({})=>{
     setLoading(true);setErr("");
     try{
       if(stage==="enroll"){
-        // First-time enrollment verify
-        const{data,error}=await supabase.auth.mfa.challengeAndVerify({factorId:enrollId,code:otp.replace(/\s/g,"")});
-        if(error)throw error;
+        // Challenge then verify for first-time enrollment
+        const{data:challenge,error:cErr}=await supabase.auth.mfa.challenge({factorId:enrollId});
+        if(cErr)throw cErr;
+        const{error:vErr}=await supabase.auth.mfa.verify({factorId:enrollId,challengeId:challenge.id,code:otp.replace(/\s/g,"")});
+        if(vErr)throw vErr;
       } else {
         // Regular login verify
         const{data:challenge,error:cErr}=await supabase.auth.mfa.challenge({factorId});
