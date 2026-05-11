@@ -600,6 +600,7 @@ export default function App(){
   const[products,setProducts]=useState([]);
   const[trucks,setTrucks]=useState([]);
   const[customers,setCustomers]=useState([]);
+  const[stateTaxes,setStateTaxes]=useState([]);
   const[loads,setLoads]=useState([]);
   const[sales,setSales]=useState([]);
   const[returns,setReturns]=useState([]);
@@ -613,7 +614,8 @@ export default function App(){
   const[saving,setSaving]=useState(false);
   const[toast,setToast]=useState(null);
   const[arFilter,setArFilter]=useState("all");
-  const[ordFilter,setOrdFilter]=useState("pending");
+  const[ordFilter,setOrdFilter]=useState("all");
+  const[selState,setSelState]=useState("ALL");
   const[viewSale,setViewSale]=useState(null);
   const[viewTruck,setViewTruck]=useState(null);
   const[stripeModal,setStripeModal]=useState(null);
@@ -664,7 +666,7 @@ export default function App(){
   const loadAll=useCallback(async()=>{
     setLoading(true);
     try{
-      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR]=await Promise.all([
+      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR]=await Promise.all([
         supabase.from("company").select("*").single(),
         supabase.from("products").select("*").order("name"),
         supabase.from("trucks").select("*").order("driver"),
@@ -674,6 +676,7 @@ export default function App(){
         supabase.from("returns").select("*").order("created_at",{ascending:false}),
         supabase.from("payments").select("*"),
         supabase.from("orders").select("*").order("created_at",{ascending:false}),
+        supabase.from("state_taxes").select("*").order("name"),
       ]);
       if(coR.data){setCo(coR.data);setCoEdit(coR.data);}
       if(prR.data)setProducts(prR.data);
@@ -684,6 +687,7 @@ export default function App(){
       if(rtR.data)setReturns(rtR.data);
       if(pmR.data)setPayments(pmR.data);
       if(orR.data)setOrders(orR.data);
+      if(stR.data)setStateTaxes(stR.data);
     }catch(e){showToast("Error loading data","error");}
     setLoading(false);
   },[profile]);
@@ -694,6 +698,38 @@ export default function App(){
   const getC=id=>customers.find(c=>c.id===id);
   const activeLoad=tid=>loads.find(l=>l.truck_id===tid&&l.status==="out");
   const pmtFor=sid=>payments.find(p=>p.sale_id===sid);
+
+  // ── STATE TAX HELPERS ──────────────────────────────────────────────────────
+  // Tax applies to tobacco/nicotine category ONLY
+  const TAXABLE_CATS = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+  const isTaxableProd = p => TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+
+  const getStateTaxRate = stateId => {
+    if(!stateId) return parseFloat(co?.tax_rate||8.25);
+    const st = stateTaxes.find(s=>s.id===stateId);
+    if(!st) return parseFloat(co?.tax_rate||8.25);
+    return st.exempt ? 0 : parseFloat(st.rate||0);
+  };
+
+  // Calculate tax for a sale — only on taxable products
+  const calcSaleTax = (sale) => {
+    const cust = getC(sale.cust_id);
+    const stateId = sale.state || cust?.state || "TX";
+    const rate = getStateTaxRate(stateId);
+    if(rate === 0) return 0;
+    // Sum only taxable items
+    const taxableSubtotal = (sale.items||[]).reduce((a,item)=>{
+      const p = getP(item.pid);
+      return isTaxableProd(p) ? a + (p?.price||0)*item.qty : a;
+    }, 0);
+    return parseFloat((taxableSubtotal * rate / 100).toFixed(2));
+  };
+
+  const calcSaleGrandTotal = sale => sale.total + calcSaleTax(sale);
+  const getSaleState = sale => {
+    const cust = getC(sale.cust_id);
+    return sale.state || cust?.state || "TX";
+  };
 
   const truckInv=tid=>{
     const load=activeLoad(tid);if(!load)return[];
@@ -803,6 +839,30 @@ export default function App(){
       setCustomers(prev=>prev.filter(c=>c.id!==id));
       showToast(`"${name}" deleted`);
     }catch(e){showToast(e.message,"error");}
+  };
+
+  // ── STATE TAX MANAGEMENT ───────────────────────────────────────────────────
+  const[stateForm,setStateForm]=useState({id:"",name:"",rate:"",exempt:false});
+
+  const saveStateTax=async()=>{
+    if(!stateForm.id||!stateForm.name)return showToast("State code and name required","error");
+    setSaving(true);
+    try{
+      const rec={id:stateForm.id.toUpperCase().trim(),name:stateForm.name.trim(),rate:stateForm.exempt?0:parseFloat(stateForm.rate||0),exempt:stateForm.exempt};
+      await supabase.from("state_taxes").upsert(rec);
+      setStateTaxes(prev=>{const exists=prev.find(s=>s.id===rec.id);return exists?prev.map(s=>s.id===rec.id?rec:s):[...prev,rec];});
+      showToast(`${rec.id} tax rate saved`);
+      setModal(null);
+      setStateForm({id:"",name:"",rate:"",exempt:false});
+    }catch(e){showToast(e.message,"error");}
+    setSaving(false);
+  };
+
+  const deleteStateTax=async id=>{
+    if(!window.confirm(`Delete ${id} tax rate?`))return;
+    await supabase.from("state_taxes").delete().eq("id",id);
+    setStateTaxes(prev=>prev.filter(s=>s.id!==id));
+    showToast(`${id} deleted`);
   };
 
   // ── LOAD / SALE / RETURN ───────────────────────────────────────────────────
@@ -1167,6 +1227,30 @@ export default function App(){
           </div>
           <div style={{padding:"8px 8px 14px"}}>
             <div style={{height:1,background:"#d1d5db",marginBottom:8}}/>
+            {/* State Tax Rates in sidebar */}
+            {isAdmin&&<div style={{marginBottom:10}}>
+              <div style={{fontSize:9,color:"#9ca3af",letterSpacing:".1em",marginBottom:6,paddingLeft:3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span>🏛 STATE TAX RATES</span>
+                <button onClick={()=>setModal("addState")} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:4,padding:"1px 6px",fontSize:9,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>+ Add</button>
+              </div>
+              {stateTaxes.map(st=>(
+                <div key={st.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 4px",marginBottom:2,background:"#f9fafb",borderRadius:5,border:"1px solid #e5e7eb"}}>
+                  <div>
+                    <span style={{fontSize:10,fontWeight:700,color:"#212121"}}>{st.id}</span>
+                    <span style={{fontSize:9,color:"#9ca3af",marginLeft:4}}>{st.name}</span>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    {st.exempt
+                      ?<span style={{fontSize:9,background:"#dcfce7",color:"#059669",padding:"1px 5px",borderRadius:3,fontWeight:700}}>EXEMPT</span>
+                      :<span style={{fontSize:10,fontWeight:700,color:"#7c3aed"}}>{st.rate}%</span>
+                    }
+                    <button onClick={()=>deleteStateTax(st.id)} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:10,padding:"0 2px",lineHeight:1}}>×</button>
+                  </div>
+                </div>
+              ))}
+              <div style={{fontSize:9,color:"#9ca3af",marginTop:4,paddingLeft:3}}>Tobacco/Nicotine only</div>
+            </div>}
+            <div style={{height:1,background:"#d1d5db",marginBottom:8}}/>
             <div style={{fontSize:9,color:"#9ca3af",letterSpacing:".1em",marginBottom:5,paddingLeft:3}}>{isAdmin?"COMPANY":"MY"} TOTALS</div>
             {[{l:"Revenue",v:fmt(totalRevenue),c:"#059669"},{l:"Profit",v:fmt(totalProfit),c:"#7c3aed"},{l:"AR Due",v:fmt(totalAR),c:"#dc2626"}].map(k=>(
               <div key={k.l} style={{display:"flex",justifyContent:"space-between",padding:"2px 3px"}}><span style={{fontSize:10,color:"#9ca3af"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:k.c}}>{k.v}</span></div>
@@ -1458,124 +1542,166 @@ export default function App(){
           </div>}
 
           {/* ══ TAX INVOICES ══ */}
-          {tab==="taxinvoices"&&<div className="fu">
-            {/* Summary KPIs */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
-              {[
-                {l:"Total Sales",v:fmt(visSales.reduce((a,s)=>a+s.total,0)),c:"#7c3aed"},
-                {l:"Total Tax Collected",v:fmt(visSales.reduce((a,s)=>a+s.total*taxRate/100,0)),c:"#059669"},
-                {l:"Grand Total",v:fmt(visSales.reduce((a,s)=>a+s.total*(1+taxRate/100),0)),c:"#0ea5e9"},
-                {l:"Invoices",v:visSales.length,c:"#f59e0b"},
-              ].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
-            </div>
+          {tab==="taxinvoices"&&(()=>{
+            // Get all unique states from sales
+            const allStates = ["ALL",...new Set(visSales.map(s=>getSaleState(s)).filter(Boolean))];
+            const filteredSales = selState==="ALL" ? visSales : visSales.filter(s=>getSaleState(s)===selState);
+            const totalSub = filteredSales.reduce((a,s)=>a+s.total,0);
+            const totalTaxAmt = filteredSales.reduce((a,s)=>a+calcSaleTax(s),0);
+            const totalGT = filteredSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+            const curStateTax = selState!=="ALL" ? getStateTaxRate(selState) : null;
+            const curStateExempt = selState!=="ALL" ? stateTaxes.find(s=>s.id===selState)?.exempt : false;
+            return(
+            <div className="fu">
+              {/* State tabs */}
+              <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+                {allStates.map(st=>{
+                  const stData = stateTaxes.find(s=>s.id===st);
+                  return(
+                    <button key={st} onClick={()=>setSelState(st)}
+                      style={{padding:"7px 14px",borderRadius:8,border:`1.5px solid ${selState===st?"#7c3aed":"#e5e7eb"}`,background:selState===st?"#f5f3ff":"#fff",color:selState===st?"#7c3aed":"#6b7280",fontWeight:selState===st?700:400,cursor:"pointer",fontSize:12,fontFamily:"'Barlow',sans-serif",display:"flex",alignItems:"center",gap:6}}>
+                      {st==="ALL"?"🌐 All States":`🏛 ${st}`}
+                      {stData&&<span style={{fontSize:10,background:stData.exempt?"#dcfce7":"#f5f3ff",color:stData.exempt?"#059669":"#7c3aed",padding:"1px 5px",borderRadius:3,fontWeight:700}}>
+                        {stData.exempt?"EXEMPT":`${stData.rate}%`}
+                      </span>}
+                    </button>
+                  );
+                })}
+              </div>
 
-            {/* Sales Summary Table */}
-            <div className="card" style={{marginBottom:16}}>
-              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>📊 SALES SUMMARY BY CUSTOMER</div>
-              </div>
-              <div className="tw">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Customer</th>
-                      <th>Driver</th>
-                      <th>Invoices</th>
-                      <th>Subtotal</th>
-                      <th>Tax ({taxRate}%)</th>
-                      <th>Grand Total</th>
-                      <th>Paid</th>
-                      <th>Outstanding</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {customers.map(c=>{
-                      const custSales=visSales.filter(s=>s.cust_id===c.id);
-                      if(!custSales.length)return null;
-                      const sub=custSales.reduce((a,s)=>a+s.total,0);
-                      const tax=sub*(taxRate/100);
-                      const gt=sub+tax;
-                      const paid=custSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0);
-                      const outstanding=gt-paid;
-                      const t=getT(c.truck_id);
-                      return(
-                        <tr key={c.id}>
-                          <td style={{fontWeight:600,color:"#212121"}}>{c.name}</td>
-                          <td style={{color:"#6b7280"}}>{t?.driver||"—"}</td>
-                          <td style={{fontWeight:600,color:"#7c3aed"}}>{custSales.length}</td>
-                          <td>{fmt(sub)}</td>
-                          <td style={{color:"#059669",fontWeight:600}}>{fmt(tax)}</td>
-                          <td style={{fontWeight:700}}>{fmt(gt)}</td>
-                          <td style={{color:"#059669",fontWeight:600}}>{fmt(paid)}</td>
-                          <td style={{color:outstanding>0?"#dc2626":"#059669",fontWeight:700}}>{fmt(outstanding)}</td>
-                        </tr>
-                      );
-                    }).filter(Boolean)}
-                    {/* Totals row */}
-                    <tr style={{background:"#f9fafb",fontWeight:700}}>
-                      <td colSpan={2} style={{fontWeight:700,color:"#212121"}}>TOTAL</td>
-                      <td style={{color:"#7c3aed",fontWeight:700}}>{visSales.length}</td>
-                      <td style={{fontWeight:700}}>{fmt(visSales.reduce((a,s)=>a+s.total,0))}</td>
-                      <td style={{color:"#059669",fontWeight:700}}>{fmt(visSales.reduce((a,s)=>a+s.total*taxRate/100,0))}</td>
-                      <td style={{fontWeight:800,fontSize:14,color:"#7c3aed"}}>{fmt(visSales.reduce((a,s)=>a+s.total*(1+taxRate/100),0))}</td>
-                      <td style={{color:"#059669",fontWeight:700}}>{fmt(visSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0))}</td>
-                      <td style={{color:"#dc2626",fontWeight:700}}>{fmt(visSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0))}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
+              {/* State info banner */}
+              {selState!=="ALL"&&<div style={{background:curStateExempt?"#f0fdf4":"#f5f3ff",border:`1px solid ${curStateExempt?"#a7f3d0":"#ddd6fe"}`,borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+                <div style={{fontSize:24}}>{curStateExempt?"✅":"🏛"}</div>
+                <div>
+                  <div style={{fontWeight:700,fontSize:14,color:curStateExempt?"#059669":"#7c3aed"}}>
+                    {stateTaxes.find(s=>s.id===selState)?.name||selState} — {curStateExempt?"TAX EXEMPT":"TAXABLE"}
+                  </div>
+                  <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>
+                    {curStateExempt
+                      ?"Tobacco/Nicotine sales are NOT taxable in this state"
+                      :`Tobacco/Nicotine taxed at ${curStateTax}% · Other products not taxed`}
+                  </div>
+                </div>
+              </div>}
 
-            {/* Full Invoice List with Tax */}
-            <div className="card">
-              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>🧾 ALL INVOICES WITH TAX — {visSales.length} TOTAL</div>
-                <button className="btn bpr" onClick={()=>{
-                  const rows=[["Invoice","Date","Customer","Driver","Subtotal",`Tax (${taxRate}%)`, "Grand Total","Status"]];
-                  visSales.forEach(s=>{
-                    const tax=s.total*taxRate/100;
-                    rows.push([s.id,s.date,getC(s.cust_id)?.name,getT(s.truck_id)?.driver,s.total.toFixed(2),tax.toFixed(2),(s.total+tax).toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);
-                  });
-                  downloadCSV(rows,"tax-invoices.csv");
-                }}>{ic.dl} Export CSV</button>
+              {/* KPIs */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
+                {[
+                  {l:"Subtotal Sales",v:fmt(totalSub),c:"#212121"},
+                  {l:"Tax (Tobacco Only)",v:fmt(totalTaxAmt),c:"#059669"},
+                  {l:"Grand Total",v:fmt(totalGT),c:"#7c3aed"},
+                  {l:"Invoices",v:filteredSales.length,c:"#0ea5e9"},
+                ].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
               </div>
-              <div className="tw">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Invoice</th>
-                      <th>Date</th>
-                      <th>Customer</th>
-                      <th>Driver</th>
-                      <th>Subtotal</th>
-                      <th>Tax ({taxRate}%)</th>
-                      <th>Grand Total</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visSales.map(s=>{
-                      const tax=s.total*taxRate/100;
-                      const gt=s.total+tax;
-                      const paid=pmtFor(s.id)?.status==="paid";
-                      return(
-                        <tr key={s.id}>
-                          <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td>
-                          <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
-                          <td style={{fontWeight:600,color:"#212121"}}>{getC(s.cust_id)?.name}</td>
-                          <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td>
-                          <td>{fmt(s.total)}</td>
-                          <td style={{color:"#059669",fontWeight:600}}>{fmt(tax)}</td>
-                          <td style={{fontWeight:700,color:"#7c3aed"}}>{fmt(gt)}</td>
-                          <td><span className={`bdg ${paid?"bg2":"br2"}`}>{paid?"PAID":"UNPAID"}</span></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+
+              {/* Summary by customer */}
+              <div className="card" style={{marginBottom:16}}>
+                <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>
+                  📊 SALES SUMMARY {selState!=="ALL"?`— ${selState}`:"— ALL STATES"}
+                </div>
+                <div className="tw">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Customer</th>
+                        <th>State</th>
+                        <th>Tax Rate</th>
+                        <th>Driver</th>
+                        <th>Invoices</th>
+                        <th>Subtotal</th>
+                        <th>Tax (Tobacco)</th>
+                        <th>Grand Total</th>
+                        <th>Paid</th>
+                        <th>Outstanding</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customers.map(c=>{
+                        const custSales=filteredSales.filter(s=>s.cust_id===c.id);
+                        if(!custSales.length)return null;
+                        const sub=custSales.reduce((a,s)=>a+s.total,0);
+                        const tax=custSales.reduce((a,s)=>a+calcSaleTax(s),0);
+                        const gt=custSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+                        const paid=custSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+                        const outstanding=gt-paid;
+                        const stData=stateTaxes.find(s=>s.id===(c.state||"TX"));
+                        return(
+                          <tr key={c.id}>
+                            <td style={{fontWeight:600,color:"#212121"}}>{c.name}</td>
+                            <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{c.state||"TX"}</span></td>
+                            <td>{stData?.exempt?<span className="bdg bg2">EXEMPT</span>:<span style={{fontWeight:600,color:"#7c3aed"}}>{stData?.rate||taxRate}%</span>}</td>
+                            <td style={{color:"#6b7280"}}>{getT(c.truck_id)?.driver||"—"}</td>
+                            <td style={{fontWeight:600,color:"#7c3aed"}}>{custSales.length}</td>
+                            <td>{fmt(sub)}</td>
+                            <td style={{color:"#059669",fontWeight:600}}>{fmt(tax)}</td>
+                            <td style={{fontWeight:700}}>{fmt(gt)}</td>
+                            <td style={{color:"#059669",fontWeight:600}}>{fmt(paid)}</td>
+                            <td style={{color:outstanding>0?"#dc2626":"#059669",fontWeight:700}}>{fmt(outstanding)}</td>
+                          </tr>
+                        );
+                      }).filter(Boolean)}
+                      <tr style={{background:"#f9fafb"}}>
+                        <td colSpan={4} style={{fontWeight:800,color:"#212121"}}>TOTAL</td>
+                        <td style={{fontWeight:700,color:"#7c3aed"}}>{filteredSales.length}</td>
+                        <td style={{fontWeight:700}}>{fmt(totalSub)}</td>
+                        <td style={{color:"#059669",fontWeight:700}}>{fmt(totalTaxAmt)}</td>
+                        <td style={{fontWeight:800,fontSize:14,color:"#7c3aed"}}>{fmt(totalGT)}</td>
+                        <td style={{color:"#059669",fontWeight:700}}>{fmt(filteredSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0))}</td>
+                        <td style={{color:"#dc2626",fontWeight:700}}>{fmt(filteredSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0))}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Invoice list */}
+              <div className="card">
+                <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>🧾 INVOICES — {filteredSales.length} TOTAL</div>
+                  <button className="btn bpr" onClick={()=>{
+                    const rows=[["Invoice","Date","Customer","State","Tax Rate","Driver","Subtotal","Tax (Tobacco)","Grand Total","Status"]];
+                    filteredSales.forEach(s=>{
+                      const cust=getC(s.cust_id);
+                      const st=cust?.state||"TX";
+                      const stData=stateTaxes.find(x=>x.id===st);
+                      rows.push([s.id,s.date,cust?.name,st,stData?.exempt?"EXEMPT":`${stData?.rate||taxRate}%`,getT(s.truck_id)?.driver,s.total.toFixed(2),calcSaleTax(s).toFixed(2),calcSaleGrandTotal(s).toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);
+                    });
+                    downloadCSV(rows,`tax-invoices-${selState}.csv`);
+                  }}>{ic.dl} Export</button>
+                </div>
+                <div className="tw">
+                  <table>
+                    <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>State</th><th>Tax Rate</th><th>Driver</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {filteredSales.map(s=>{
+                        const cust=getC(s.cust_id);
+                        const st=cust?.state||"TX";
+                        const stData=stateTaxes.find(x=>x.id===st);
+                        const tax=calcSaleTax(s);
+                        const gt=calcSaleGrandTotal(s);
+                        const paid=pmtFor(s.id)?.status==="paid";
+                        return(
+                          <tr key={s.id}>
+                            <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td>
+                            <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
+                            <td style={{fontWeight:600,color:"#212121"}}>{cust?.name}</td>
+                            <td><span className="tag" style={{background:"#ede9fe",color:"#7c3aed"}}>{st}</span></td>
+                            <td>{stData?.exempt?<span className="bdg bg2">EXEMPT</span>:<span style={{fontWeight:600,color:"#7c3aed"}}>{stData?.rate||taxRate}%</span>}</td>
+                            <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td>
+                            <td>{fmt(s.total)}</td>
+                            <td style={{color:"#059669",fontWeight:600}}>{fmt(tax)}</td>
+                            <td style={{fontWeight:700,color:"#7c3aed"}}>{fmt(gt)}</td>
+                            <td><span className={`bdg ${paid?"bg2":"br2"}`}>{paid?"PAID":"UNPAID"}</span></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-          </div>}
+            );
+          })()}
 
           {/* ══ AR ══ */}
           {tab==="ar"&&<div className="fu">
@@ -1879,6 +2005,12 @@ export default function App(){
                 {[{l:"Business Name",k:"name"},{l:"Address",k:"address"},{l:"Phone",k:"phone"},{l:"Email",k:"email"}].map(f=>(
                   <div key={f.k}><label>{f.l}</label><input value={editCust[f.k]||""} onChange={e=>setEditCust(x=>({...x,[f.k]:e.target.value}))}/></div>
                 ))}
+                <div><label>State</label>
+                  <select value={editCust.state||"TX"} onChange={e=>setEditCust(x=>({...x,state:e.target.value}))}>
+                    <option value="">— Select State —</option>
+                    {stateTaxes.map(st=><option key={st.id} value={st.id}>{st.id} — {st.name} {st.exempt?"(Exempt)":`(${st.rate}%)`}</option>)}
+                  </select>
+                </div>
                 <div><label>Assigned Driver</label><select value={editCust.truck_id||""} onChange={e=>setEditCust(x=>({...x,truck_id:e.target.value}))}><option value="">— Unassigned —</option>{trucks.map(t=><option key={t.id} value={t.id}>{t.driver} ({t.route||t.plate})</option>)}</select></div>
                 <div><label>Notes</label><input value={editCust.notes||""} onChange={e=>setEditCust(x=>({...x,notes:e.target.value}))}/></div>
               </div>
@@ -2170,6 +2302,30 @@ export default function App(){
           <div style={{marginLeft:"auto"}}><button className="btn bpr" onClick={()=>window.print()}>{ic.prt} Print / Save PDF</button></div>
         </div>
         <InvoiceDoc sale={viewSale} products={products} customers={customers} trucks={trucks} co={co} paid={pmtFor(viewSale.id)?.status==="paid"}/>
+      </Modal>}
+
+      {/* ── ADD STATE TAX MODAL ── */}
+      {modal==="addState"&&<Modal title="🏛 Add State Tax Rate" onClose={()=>setModal(null)}>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label>State Code *</label><input placeholder="e.g. TX, MI, IN" value={stateForm.id} onChange={e=>setStateForm(f=>({...f,id:e.target.value.toUpperCase().slice(0,2)}))} maxLength={2}/></div>
+            <div><label>State Name *</label><input placeholder="e.g. Texas" value={stateForm.name} onChange={e=>setStateForm(f=>({...f,name:e.target.value}))}/></div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:"#f9fafb",borderRadius:8,border:"1px solid #e5e7eb"}}>
+            <input type="checkbox" id="exempt-check" checked={stateForm.exempt} onChange={e=>setStateForm(f=>({...f,exempt:e.target.checked,rate:e.target.checked?"0":f.rate}))} style={{width:16,height:16}}/>
+            <label htmlFor="exempt-check" style={{fontSize:13,color:"#212121",cursor:"pointer",fontWeight:600,letterSpacing:"normal",textTransform:"none",display:"inline"}}>
+              Tax Exempt — Tobacco/Nicotine sales are NOT taxed in this state
+            </label>
+          </div>
+          {!stateForm.exempt&&<div><label>Tax Rate (%)</label><input type="number" min="0" max="30" step="0.01" placeholder="e.g. 8.25" value={stateForm.rate} onChange={e=>setStateForm(f=>({...f,rate:e.target.value}))}/></div>}
+          {!stateForm.exempt&&stateForm.rate&&<div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#7c3aed"}}>
+            On a $100 tobacco sale in {stateForm.id||"this state"}: tax = ${(100*parseFloat(stateForm.rate||0)/100).toFixed(2)} → customer pays ${(100+100*parseFloat(stateForm.rate||0)/100).toFixed(2)}
+          </div>}
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button className="btn bgh" onClick={()=>setModal(null)}>Cancel</button>
+            <button className="btn ba" onClick={saveStateTax} disabled={saving}>{ic.save} Save State</button>
+          </div>
+        </div>
       </Modal>}
 
       {modal==="settlement"&&viewTruck&&(()=>{const t=getT(viewTruck),d=settlementData(viewTruck);return<Modal title="" onClose={()=>setModal(null)} xwide><div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button className="btn bpr" onClick={()=>window.print()}>{ic.prt} Print / Save PDF</button></div><SettleDoc truck={t} d={d} co={co} customers={customers} payments={payments}/></Modal>;})()}
