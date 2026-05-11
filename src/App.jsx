@@ -796,6 +796,15 @@ export default function App(){
     setSaving(false);
   };
 
+  const deleteCustomer=async(id,name)=>{
+    if(!window.confirm(`Delete customer "${name}"? This cannot be undone.`))return;
+    try{
+      await supabase.from("customers").delete().eq("id",id);
+      setCustomers(prev=>prev.filter(c=>c.id!==id));
+      showToast(`"${name}" deleted`);
+    }catch(e){showToast(e.message,"error");}
+  };
+
   // ── LOAD / SALE / RETURN ───────────────────────────────────────────────────
   const openLoad=tid=>{if(activeLoad(tid))return showToast("Truck already has active load","error");setSelTruck(tid);setFormItems(products.map(p=>({pid:p.id,qty:0})));setModal("load");};
   const confirmLoad=async()=>{
@@ -1076,6 +1085,7 @@ export default function App(){
     {id:"trucks",label:"Trucks",icon:ic.truck},
     {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
+    {id:"taxinvoices",label:"Tax Invoices",icon:ic.inv},
     {id:"ar",label:"Accounts Receivable",icon:ic.ar},
     {id:"payments",label:"Payments",icon:ic.settle,badge:visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length||0},
     {id:"settlement",label:"Daily Settlement",icon:ic.settle},
@@ -1197,9 +1207,9 @@ export default function App(){
             <div className="card" style={{padding:18,marginBottom:16}}>
               <div className="sh">📦 Inventory Flow</div>
               <div style={{display:"flex",alignItems:"stretch"}}>
-                {[{l:"WAREHOUSE",e:"🏭",c:"#7c3aed",items:products.slice(0,5).map(p=>({n:p.name,v:p.shelf+" units"}))},null,{l:"ON TRUCKS",e:"🚚",c:"#7c3aed",items:visTrucks.map(t=>({n:t.driver,v:truckInv(t.id).reduce((a,i)=>a+i.remaining,0)+" units"}))},null,{l:"SOLD",e:"⛽",c:"#059669",items:visCustomers.filter(c=>visSales.some(s=>s.cust_id===c.id)).slice(0,5).map(c=>({n:c.name,v:fmt(visSales.filter(s=>s.cust_id===c.id).reduce((a,s)=>a+s.total,0))}))}].map((nd,i)=>{
-                  if(!nd)return<div key={i} style={{color:"#7c3aed",display:"flex",alignItems:"center",padding:"0 8px",flexShrink:0}}>{ic.arr}</div>;
-                  return(<div key={i} style={{flex:1,background:"#f9fafb",border:`1px solid ${nd.c}28`,borderRadius:10,padding:"12px 14px",textAlign:"center"}}><div style={{fontSize:18,marginBottom:4}}>{nd.e}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,color:nd.c,letterSpacing:".1em",marginBottom:8}}>{nd.l}</div>{nd.items.length===0?<div style={{fontSize:10,color:"#9ca3af"}}>No data</div>:nd.items.map((it,j)=><div key={j} style={{display:"flex",justifyContent:"space-between",background:"#0a1420",borderRadius:5,padding:"3px 7px",marginBottom:3}}><span style={{fontSize:10,color:"#2a4060",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:90}}>{it.n}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:nd.c,flexShrink:0,marginLeft:6}}>{it.v}</span></div>)}</div>);
+                {[{l:"WAREHOUSE",e:"🏭",c:"#7c3aed",items:products.slice(0,5).map(p=>({n:p.name,v:p.shelf+" units"}))},null,{l:"ON TRUCKS",e:"🚚",c:"#0ea5e9",items:visTrucks.map(t=>({n:t.driver,v:truckInv(t.id).reduce((a,i)=>a+i.remaining,0)+" units"}))},null,{l:"SOLD",e:"⛽",c:"#059669",items:visCustomers.filter(c=>visSales.some(s=>s.cust_id===c.id)).slice(0,5).map(c=>({n:c.name,v:fmt(visSales.filter(s=>s.cust_id===c.id).reduce((a,s)=>a+s.total,0))}))}].map((nd,i)=>{
+                  if(!nd)return<div key={i} style={{color:"#d1d5db",display:"flex",alignItems:"center",padding:"0 8px",flexShrink:0}}>{ic.arr}</div>;
+                  return(<div key={i} style={{flex:1,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"12px 14px",textAlign:"center"}}><div style={{fontSize:18,marginBottom:4}}>{nd.e}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,color:nd.c,letterSpacing:".1em",marginBottom:8}}>{nd.l}</div>{nd.items.length===0?<div style={{fontSize:10,color:"#9ca3af"}}>No data</div>:nd.items.map((it,j)=><div key={j} style={{display:"flex",justifyContent:"space-between",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:5,padding:"4px 8px",marginBottom:3}}><span style={{fontSize:11,color:"#212121",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:90}}>{it.n}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:nd.c,flexShrink:0,marginLeft:6}}>{it.v}</span></div>)}</div>);
                 })}
               </div>
             </div>
@@ -1444,6 +1454,126 @@ export default function App(){
                 </tr>);})}
                 </tbody></table></div>
               )}
+            </div>
+          </div>}
+
+          {/* ══ TAX INVOICES ══ */}
+          {tab==="taxinvoices"&&<div className="fu">
+            {/* Summary KPIs */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
+              {[
+                {l:"Total Sales",v:fmt(visSales.reduce((a,s)=>a+s.total,0)),c:"#7c3aed"},
+                {l:"Total Tax Collected",v:fmt(visSales.reduce((a,s)=>a+s.total*taxRate/100,0)),c:"#059669"},
+                {l:"Grand Total",v:fmt(visSales.reduce((a,s)=>a+s.total*(1+taxRate/100),0)),c:"#0ea5e9"},
+                {l:"Invoices",v:visSales.length,c:"#f59e0b"},
+              ].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
+            </div>
+
+            {/* Sales Summary Table */}
+            <div className="card" style={{marginBottom:16}}>
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>📊 SALES SUMMARY BY CUSTOMER</div>
+              </div>
+              <div className="tw">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      <th>Driver</th>
+                      <th>Invoices</th>
+                      <th>Subtotal</th>
+                      <th>Tax ({taxRate}%)</th>
+                      <th>Grand Total</th>
+                      <th>Paid</th>
+                      <th>Outstanding</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customers.map(c=>{
+                      const custSales=visSales.filter(s=>s.cust_id===c.id);
+                      if(!custSales.length)return null;
+                      const sub=custSales.reduce((a,s)=>a+s.total,0);
+                      const tax=sub*(taxRate/100);
+                      const gt=sub+tax;
+                      const paid=custSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0);
+                      const outstanding=gt-paid;
+                      const t=getT(c.truck_id);
+                      return(
+                        <tr key={c.id}>
+                          <td style={{fontWeight:600,color:"#212121"}}>{c.name}</td>
+                          <td style={{color:"#6b7280"}}>{t?.driver||"—"}</td>
+                          <td style={{fontWeight:600,color:"#7c3aed"}}>{custSales.length}</td>
+                          <td>{fmt(sub)}</td>
+                          <td style={{color:"#059669",fontWeight:600}}>{fmt(tax)}</td>
+                          <td style={{fontWeight:700}}>{fmt(gt)}</td>
+                          <td style={{color:"#059669",fontWeight:600}}>{fmt(paid)}</td>
+                          <td style={{color:outstanding>0?"#dc2626":"#059669",fontWeight:700}}>{fmt(outstanding)}</td>
+                        </tr>
+                      );
+                    }).filter(Boolean)}
+                    {/* Totals row */}
+                    <tr style={{background:"#f9fafb",fontWeight:700}}>
+                      <td colSpan={2} style={{fontWeight:700,color:"#212121"}}>TOTAL</td>
+                      <td style={{color:"#7c3aed",fontWeight:700}}>{visSales.length}</td>
+                      <td style={{fontWeight:700}}>{fmt(visSales.reduce((a,s)=>a+s.total,0))}</td>
+                      <td style={{color:"#059669",fontWeight:700}}>{fmt(visSales.reduce((a,s)=>a+s.total*taxRate/100,0))}</td>
+                      <td style={{fontWeight:800,fontSize:14,color:"#7c3aed"}}>{fmt(visSales.reduce((a,s)=>a+s.total*(1+taxRate/100),0))}</td>
+                      <td style={{color:"#059669",fontWeight:700}}>{fmt(visSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0))}</td>
+                      <td style={{color:"#dc2626",fontWeight:700}}>{fmt(visSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0))}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Full Invoice List with Tax */}
+            <div className="card">
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>🧾 ALL INVOICES WITH TAX — {visSales.length} TOTAL</div>
+                <button className="btn bpr" onClick={()=>{
+                  const rows=[["Invoice","Date","Customer","Driver","Subtotal",`Tax (${taxRate}%)`, "Grand Total","Status"]];
+                  visSales.forEach(s=>{
+                    const tax=s.total*taxRate/100;
+                    rows.push([s.id,s.date,getC(s.cust_id)?.name,getT(s.truck_id)?.driver,s.total.toFixed(2),tax.toFixed(2),(s.total+tax).toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);
+                  });
+                  downloadCSV(rows,"tax-invoices.csv");
+                }}>{ic.dl} Export CSV</button>
+              </div>
+              <div className="tw">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Invoice</th>
+                      <th>Date</th>
+                      <th>Customer</th>
+                      <th>Driver</th>
+                      <th>Subtotal</th>
+                      <th>Tax ({taxRate}%)</th>
+                      <th>Grand Total</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visSales.map(s=>{
+                      const tax=s.total*taxRate/100;
+                      const gt=s.total+tax;
+                      const paid=pmtFor(s.id)?.status==="paid";
+                      return(
+                        <tr key={s.id}>
+                          <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td>
+                          <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
+                          <td style={{fontWeight:600,color:"#212121"}}>{getC(s.cust_id)?.name}</td>
+                          <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td>
+                          <td>{fmt(s.total)}</td>
+                          <td style={{color:"#059669",fontWeight:600}}>{fmt(tax)}</td>
+                          <td style={{fontWeight:700,color:"#7c3aed"}}>{fmt(gt)}</td>
+                          <td><span className={`bdg ${paid?"bg2":"br2"}`}>{paid?"PAID":"UNPAID"}</span></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>}
 
@@ -1743,7 +1873,7 @@ export default function App(){
               <div style={{fontSize:12,color:"#6b7280"}}>{visCustomers.length} customer account{visCustomers.length!==1?"s":""}{!isAdmin?" on your route":""}</div>
               <button className="btn ba" onClick={()=>setModal("addCustomer")}>{ic.plus} Open New Account</button>
             </div>
-            {editingCid&&<div style={{background:"#0a1e14",border:"1px solid #143020",borderRadius:10,padding:"18px 20px",marginBottom:16}}>
+            {editingCid&&<div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:10,padding:"18px 20px",marginBottom:16}}>
               <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#059669",marginBottom:12}}>✏️ EDITING CUSTOMER</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
                 {[{l:"Business Name",k:"name"},{l:"Address",k:"address"},{l:"Phone",k:"phone"},{l:"Email",k:"email"}].map(f=>(
@@ -1780,6 +1910,7 @@ export default function App(){
                       <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}}>
                         {truck&&<span className="bdg bb2">{truck.route||truck.plate}</span>}
                         <button className="btn bgh" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>isEditingThis?cancelEditCustomer():startEditCustomer(c)}>{isEditingThis?<>{ic.X} Cancel</>:<>{ic.edit} Edit</>}</button>
+                        {isAdmin&&!isEditingThis&&<button className="btn br" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>deleteCustomer(c.id,c.name)}>{ic.X}</button>}
                       </div>
                     </div>
                     <Divider/>
