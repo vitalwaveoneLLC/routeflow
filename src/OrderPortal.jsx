@@ -285,7 +285,11 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     if(!saleItems.length) return setMsg({t:"error",m:"Add at least one product"});
     setSaving(true);
     try{
-      const ns = {id:"INV-"+uid(),load_id:driverData.activeLoad?.id,truck_id:driverData.truck.id,cust_id:selCust,date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,created_at:new Date().toISOString()};
+      const nextNum = driverData.sales.length > 0
+        ? Math.max(...driverData.sales.map(s => parseInt(s.id.replace("INV-",""))||0)) + 1
+        : 1;
+      const invId = "INV-" + String(nextNum).padStart(4,"0");
+      const ns = {id:invId,load_id:driverData.activeLoad?.id,truck_id:driverData.truck.id,cust_id:selCust,date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
       setDriverData(prev=>({...prev,sales:[ns,...prev.sales]}));
