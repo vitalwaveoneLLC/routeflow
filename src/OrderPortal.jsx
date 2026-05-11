@@ -450,6 +450,7 @@ export default function OrderPortal() {
   // Flow: "home" | "register" | "order" | "review" | "confirm"
   const [step,      setStep]      = useState("home");
   const [isNew,     setIsNew]     = useState(false);
+  const [isExisting,setIsExisting]= useState(false);
   const [isDriver,  setIsDriver]  = useState(false);
   const [driverEmail, setDriverEmail] = useState("");
   const [driverPw,    setDriverPw]    = useState("");
@@ -653,7 +654,7 @@ export default function OrderPortal() {
   };
 
   const resetAll = () => {
-    setStep("home"); setIsNew(false); setIsDriver(false); setSelCust(null);
+    setStep("home"); setIsNew(false); setIsExisting(false); setIsDriver(false); setSelCust(null);
     setCustSearch(""); setCustPhone(""); setVerifyError(""); setQuantities({}); setNotes(""); setOrder(null);
     setPayMethod("delivery"); setClientSecret(null); setStripeError(null); setStripeReady(false);
     setDriverUser(null); setDriverData(null); setDriverEmail(""); setDriverPw(""); setDriverError("");
@@ -847,9 +848,9 @@ export default function OrderPortal() {
           </button>
         )}
 
-        {/* Back to home — only for non-logged-in customer selection screens */}
-        {!driverUser&&(isNew||(isDriver&&!driverUser))&&step==="home"&&(
-          <button onClick={()=>{setIsNew(false);setIsDriver(false);}} style={{background:"#1e3050",border:"1px solid #2e4060",borderRadius:8,padding:"7px 14px",color:"#b0c8e0",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6,fontFamily:"'Inter',sans-serif"}}>
+        {/* Back to home — for non-logged-in selection screens */}
+        {!driverUser&&(isNew||isExisting||(isDriver&&!driverUser))&&step==="home"&&(
+          <button onClick={()=>{setIsNew(false);setIsExisting(false);setIsDriver(false);}} style={{background:"#1e3050",border:"1px solid #2e4060",borderRadius:8,padding:"7px 14px",color:"#b0c8e0",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6,fontFamily:"'Inter',sans-serif"}}>
             ← Back
           </button>
         )}
@@ -860,7 +861,7 @@ export default function OrderPortal() {
       {/* ══ HOME — New or Existing ══ */}
       {step==="home"&&<div className="fu">
         {/* Only show welcome + cards if no role selected yet */}
-        {!isNew&&!isDriver&&<>
+        {!isNew&&!isDriver&&!isExisting&&<>
         <div style={{textAlign:"center",marginBottom:36}}>
           <div style={{fontFamily:"'Playfair Display',serif",fontSize:42,color:"#0a1628",lineHeight:1.15,marginBottom:10}}>
             Welcome to VitalWaveOne
@@ -873,7 +874,7 @@ export default function OrderPortal() {
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,maxWidth:900,margin:"0 auto 40px"}} className="grid2">
           {/* Existing Customer */}
           <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb"}}
-            onClick={()=>{setIsNew(false);setIsDriver(false);}}
+            onClick={()=>{setIsExisting(true);setIsNew(false);setIsDriver(false);}}
             onMouseEnter={e=>{e.currentTarget.style.borderColor="#0a1628";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #0a162820";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
             <div style={{fontSize:36,marginBottom:12}}>💎</div>
@@ -1082,7 +1083,7 @@ export default function OrderPortal() {
             </div>
           )}
         </div>}
-        {!isNew&&<div className="fu">
+        {isExisting&&<div className="fu">
           <div style={{maxWidth:460,margin:"0 auto"}}>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:6,textAlign:"center"}}>Access Your Account</div>
             <div style={{fontSize:13,color:"#6b7280",textAlign:"center",marginBottom:24}}>Enter your shop name and phone number to continue</div>
@@ -1116,7 +1117,7 @@ export default function OrderPortal() {
                   {submitting?<><span className="sp">⟳</span> Verifying…</>:<>Access My Account →</>}
                 </button>
                 <div style={{textAlign:"center",fontSize:12,color:"#9ca3af"}}>
-                  Not registered yet? <span style={{color:"#0a1628",fontWeight:600,cursor:"pointer"}} onClick={()=>setIsNew(true)}>Register here →</span>
+                  Not registered yet? <span style={{color:"#0a1628",fontWeight:600,cursor:"pointer"}} onClick={()=>{setIsExisting(false);setIsNew(true);}}>Register here →</span>
                 </div>
               </div>
             </div>
