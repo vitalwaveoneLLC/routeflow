@@ -1572,57 +1572,6 @@ export default function App(){
               })}
             </div>
           </div>}
-            <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-              {isAdmin&&<><button className="btn ba" onClick={()=>setModal("addProduct")}>{ic.plus} Add Product</button><button className="btn bb" onClick={()=>{setRsPid(products[0]?.id||"");setRsQty("");setModal("restock");}}>{ic.box} Restock</button><button className="btn bp" onClick={()=>setModal("csvImport")}>📥 Import CSV</button></>}
-              {!isAdmin&&<div style={{fontSize:12,color:"#6b7280",padding:"8px 0"}}>📦 View only — contact admin to edit</div>}
-              <div style={{marginLeft:"auto",fontSize:11,color:"#6b7280",padding:"8px 0"}}>{editingPid?<span style={{color:"#7c3aed"}}>✏️ Editing — click Save or Cancel</span>:isAdmin?"Click ✏️ on any row to edit":""}
-              </div>
-            </div>
-            <div className="card">
-              <div className="tw"><table>
-                <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Unit</th><th>Cost</th><th>Sale Price</th><th>Margin</th><th>Shelf</th><th>Value</th><th>Status</th>{isAdmin&&<th>Actions</th>}</tr></thead>
-                <tbody>{products.map(p=>{
-                  const isEditing=editingPid===p.id;
-                  const mg=p.price>0?((p.price-p.cost)/p.price*100).toFixed(0):0;
-                  const pct=Math.min(100,Math.round(p.shelf/Math.max(p.shelf,50)*100));
-                  if(isEditing) return(
-                    <tr key={p.id} style={{background:"#0a1e14"}}>
-                      <td><EI val={editProd.name} onChange={v=>setEditProd(x=>({...x,name:v}))}/></td>
-                      <td><EI val={editProd.sku} onChange={v=>setEditProd(x=>({...x,sku:v}))}/></td>
-                      <td><ES val={editProd.cat} onChange={v=>setEditProd(x=>({...x,cat:v}))} options={["Beverage","Tobacco","Snack","Health","Misc","Other"]}/></td>
-                      <td><EI val={editProd.unit} onChange={v=>setEditProd(x=>({...x,unit:v}))}/></td>
-                      <td><EI val={editProd.cost} onChange={v=>setEditProd(x=>({...x,cost:v}))} type="number"/></td>
-                      <td><EI val={editProd.price} onChange={v=>setEditProd(x=>({...x,price:v}))} type="number"/></td>
-                      <td style={{color:"#059669"}}>{editProd.price>0?((editProd.price-editProd.cost)/editProd.price*100).toFixed(0):0}%</td>
-                      <td><EI val={editProd.shelf} onChange={v=>setEditProd(x=>({...x,shelf:v}))} type="number"/></td>
-                      <td style={{color:"#059669"}}>{fmt((editProd.shelf||0)*(editProd.cost||0))}</td>
-                      <td>—</td>
-                      <td><div style={{display:"flex",gap:5}}><button className="btn bg" style={{fontSize:10,padding:"4px 9px"}} onClick={saveEditProduct} disabled={saving}>{ic.save} Save</button><button className="btn bgh" style={{fontSize:10,padding:"4px 9px"}} onClick={cancelEditProduct}>{ic.X}</button></div></td>
-                    </tr>
-                  );
-                  return(
-                    <tr key={p.id}>
-                      <td style={{color:"#212121",fontWeight:600}}>{p.name}</td>
-                      <td><code style={{fontSize:11,color:"#6b7280"}}>{p.sku}</code></td>
-                      <td><span className="bdg bt">{p.cat}</span></td>
-                      <td style={{fontSize:11,color:"#6b7280"}}>{p.unit}</td>
-                      <td style={{color:"#6b7280"}}>{fmt(p.cost)}</td>
-                      <td style={{color:"#212121",fontWeight:600}}>{fmt(p.price)}</td>
-                      <td><span className="bdg bg2">{mg}%</span></td>
-                      <td><div style={{display:"flex",alignItems:"center",gap:7}}><div className="pb" style={{width:50}}><div className="pf" style={{width:`${pct}%`,background:p.shelf===0?"#dc2626":p.shelf<20?"#7c3aed":"#059669"}}/></div><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14}}>{p.shelf}</span></div></td>
-                      <td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(p.shelf*p.cost)}</td>
-                      <td><span className={`bdg ${p.shelf===0?"br2":p.shelf<20?"ba2":"bg2"}`}>{p.shelf===0?"OUT":p.shelf<20?"LOW":"OK"}</span></td>
-                      {isAdmin&&<td><button className="btn bgh" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>startEditProduct(p)}>{ic.edit} Edit</button></td>}
-                    </tr>
-                  );
-                })}</tbody>
-              </table></div>
-              <div style={{padding:"10px 16px",borderTop:"1px solid #e5e7eb",display:"flex",gap:20,flexWrap:"wrap"}}>
-                <div><span style={{fontSize:11,color:"#6b7280"}}>{products.length} products · Cost: </span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:"#7c3aed"}}>{fmt(products.reduce((a,p)=>a+p.shelf*p.cost,0))}</span></div>
-                <div><span style={{fontSize:11,color:"#6b7280"}}>Retail: </span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:"#059669"}}>{fmt(products.reduce((a,p)=>a+p.shelf*p.price,0))}</span></div>
-              </div>
-            </div>
-          </div>}
 
           {/* ══ ORDERS ══ */}
           {tab==="orders"&&<div className="fu">
