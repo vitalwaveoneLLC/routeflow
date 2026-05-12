@@ -488,13 +488,11 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
   const cust=customers.find(c=>c.id===sale.cust_id),truck=trucks.find(t=>t.id===sale.truck_id);
   const getP=pid=>products.find(p=>p.id===pid);
   const CARD_FEE=3;
-  const TAXABLE_CATS_I=["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
-  const isTaxableI=p=>TAXABLE_CATS_I.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
   const stateId=sale.state||cust?.state||"";
   const stData=stateTaxes?.find(s=>s.id===stateId);
   const stateRate=stData?.exempt?0:parseFloat(stData?.rate||0);
   const sub=sale.total;
-  const taxable=(sale.items||[]).reduce((a,i)=>{const p=getP(i.pid);return isTaxableI(p)?a+(p?.price||0)*i.qty:a;},0);
+  const taxable=(sale.items||[]).reduce((a,i)=>{const p=getP(i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
   const tax=parseFloat((taxable*stateRate/100).toFixed(2));
   const gt=sub+tax;
   const cardFeeAmt=parseFloat((gt*CARD_FEE/100).toFixed(2));
@@ -2615,7 +2613,7 @@ export default function App(){
             );})}
           </div>
           <Divider/>
-          {(()=>{const sub=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+(p?.price||0)*fi.qty;},0);const tax=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return isTaxableProd(p)?a+(p?.price||0)*fi.qty:a;},0)*taxRate/100,gt=sub+tax,prof=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+((p?.price||0)-(p?.cost||0))*fi.qty;},0);return<div style={{background:"#f9fafb",borderRadius:7,padding:"11px 13px",marginBottom:12}}>{[{l:"Subtotal",v:fmt(sub),c:"#6b7280"},{l:"Tax (Tobacco only)",v:fmt(tax),c:"#7c3aed"},{l:"Grand Total",v:fmt(gt),c:"#7c3aed"},{l:"Your Profit",v:fmt(prof),c:"#059669"}].map(k=><div key={k.l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:k.l==="Grand Total"?16:13,color:k.c}}>{k.v}</span></div>)}</div>;})()}
+          {(()=>{const sub=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+(p?.price||0)*fi.qty;},0);const tax=calcSaleTax({items:formItems.map(fi=>({pid:fi.pid,qty:fi.qty})),cust_id:selCust,state:customers.find(c=>c.id===selCust)?.state||""}),gt=sub+tax,prof=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+((p?.price||0)-(p?.cost||0))*fi.qty;},0);return<div style={{background:"#f9fafb",borderRadius:7,padding:"11px 13px",marginBottom:12}}>{[{l:"Subtotal",v:fmt(sub),c:"#6b7280"},{l:"Tax (Tobacco only)",v:fmt(tax),c:"#7c3aed"},{l:"Grand Total",v:fmt(gt),c:"#7c3aed"},{l:"Your Profit",v:fmt(prof),c:"#059669"}].map(k=><div key={k.l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:k.l==="Grand Total"?16:13,color:k.c}}>{k.v}</span></div>)}</div>;})()}
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <button className="btn bgh" onClick={()=>{setModal(null);setScanning(false);setScanInput("");}}>Cancel</button>
             <button className="btn bg" onClick={confirmSale} disabled={saving}>{ic.inv} Confirm & Invoice</button>

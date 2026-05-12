@@ -309,12 +309,11 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   // Get state tax rate for this driver's truck state
   const driverStateId = driverData.truck?.state || "TX";
   const driverStateTax = driverData.stateTaxes?.find?.(s=>s.id===driverStateId);
-  const driverTaxRate = (!co?.tax_enabled||driverStateTax?.exempt) ? 0 : parseFloat(driverStateTax?.rate||co?.tax_rate||0);
+  const driverTaxRate = driverStateTax?.exempt ? 0 : parseFloat(driverStateTax?.rate||co?.tax_rate||0);
   const sub = availableProducts.reduce((a,p)=>a+(p.price||0)*(items[p.id]||0),0);
   // Tax only on tobacco/nicotine items, only if tax enabled and state not exempt
-  const taxableAmount = availableProducts.reduce((a,p)=>isTaxableS(p)?(a+(p.price||0)*(items[p.id]||0)):a,0);
-  const hasTaxableItems = availableProducts.some(p=>isTaxableS(p)&&(items[p.id]||0)>0);
-  const tax = parseFloat((taxableAmount*driverTaxRate/100).toFixed(2));
+  const hasTaxableItems = availableProducts.some(p=>isTaxableProd(p)&&(items[p.id]||0)>0);
+  const tax = parseFloat((availableProducts.reduce((a,p)=>isTaxableProd(p)?(a+(p.price||0)*(items[p.id]||0)):a,0)*driverTaxRate/100).toFixed(2));
   const gt = sub+tax;
   const profit = availableProducts.reduce((a,p)=>a+((p.price||0)-(p.cost||0))*(items[p.id]||0),0);
 
@@ -389,7 +388,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
                 <button onClick={()=>setItems(prev=>({...prev,[p.id]:(prev[p.id]||0)+1}))} style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
               </div>
             </div>
-            {(items[p.id]||0)>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right"}}>{fmt(items[p.id]*p.price)}{isTaxableS(p)?<span style={{color:"#059669"}}> +tax</span>:""}</div>}
+            {(items[p.id]||0)>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right"}}>{fmt(items[p.id]*p.price)}{isTaxableProd(p)?<span style={{color:"#059669"}}> +tax</span>:""}</div>}
           </div>
         ))}
       </div>
@@ -599,7 +598,7 @@ export default function OrderPortal() {
   ,[quantities,products]);
 
   const subtotal = useMemo(()=>orderItems.reduce((a,i)=>a+(products.find(p=>p.id===i.pid)?.price||0)*i.qty,0),[orderItems,products]);
-  const tax = parseFloat((orderItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableO(p)?a+(p?.price||0)*i.qty:a;},0)*taxRate/100).toFixed(2));
+  const tax = parseFloat((orderItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0)*(parseFloat(co?.tax_rate)||0)/100).toFixed(2));
   const total = subtotal+tax;
   const cardSurcharge = payMethod==="card" ? parseFloat((total*CARD_FEE/100).toFixed(2)) : 0;
   const grandTotal = parseFloat((total+cardSurcharge).toFixed(2));
