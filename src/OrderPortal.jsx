@@ -231,12 +231,13 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
   const isLocked = driverData.truck?.locked;
 
   const confirmLoad = async () => {
+    if(!driverData.truck?.id) return setMsg({t:"error",m:"Truck not found. Please sign out and sign back in."});
     if(isLocked) return setMsg({t:"error",m:"Your truck is locked by admin. Contact your manager."});
     const loadItems = products.filter(p=>items[p.id]>0).map(p=>({pid:p.id,qty:parseInt(items[p.id])}));
     if(!loadItems.length) return setMsg({t:"error",m:"Add at least one product"});
     setSaving(true);
     try{
-      const nl = {id:"LD-"+uid(),truck_id:driverData.truck.id,date:new Date().toLocaleDateString(),items:loadItems,status:"out",created_at:new Date().toISOString()};
+      const nl = {id:"LD-"+uid(),truck_id:driverData.truck?.id,date:new Date().toLocaleDateString(),items:loadItems,status:"out",created_at:new Date().toISOString()};
       const {error} = await supabase.from("loads").insert(nl);
       if(error) throw error;
       for(const item of loadItems){
@@ -301,22 +302,22 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const [scanning, setScanning] = useState(false);
   const [scanInput, setScanInput] = useState("");
   const [editInv, setEditInv] = useState(null);
+  const [freshCustState, setFreshCustState] = useState("");
   const uid = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
   const fmt = v=>`$${parseFloat(v||0).toFixed(2)}`;
 
-  // Refresh customers with latest state data every time sell tab opens
-  useEffect(()=>{
-    supabase.from("customers")
-      .select("id,name,address,phone,email,state,truck_id,notes")
-      .eq("truck_id", driverData.truck.id)
-      .then(({data})=>{ if(data) setDriverData(prev=>({...prev,customers:data})); });
-  },[]);
+  const handleCustSelect = async (custId) => {
+    setSelCust(custId);
+    if(!custId){setFreshCustState("");return;}
+    const {data} = await supabase.from("customers").select("state").eq("id",custId).single();
+    setFreshCustState(data?.state||"");
+  };
 
   const loadedItems = driverData.activeLoad?.items||[];
   const availableProducts = products.filter(p=>loadedItems.find(i=>i.pid===p.id));
-  // Use selected customer's state for tax (falls back to truck state)
+  // Use freshly fetched customer state for accurate tax
   const selCustObj = driverData.customers.find(c=>c.id===selCust);
-  const custStateId = selCustObj?.state || driverData.truck?.state || "";
+  const custStateId = freshCustState || selCustObj?.state || driverData.truck?.state || "";
   const custStateTax = driverData.stateTaxes?.find(s=>s.id===custStateId);
   const driverTaxRate = custStateTax?.exempt ? 0 : parseFloat(custStateTax?.rate||0);
   const sub = availableProducts.reduce((a,p)=>a+(p.price||0)*(items[p.id]||0),0);
@@ -341,7 +342,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     try{
       const {data:seqData} = await supabase.rpc("next_invoice_number");
       const invId = "INV-" + String(seqData||1).padStart(4,"0");
-      const ns = {id:invId,load_id:driverData.activeLoad?.id,truck_id:driverData.truck.id,cust_id:selCust,state:selCustObj?.state||driverData.truck?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,created_at:new Date().toISOString()};
+      const ns = {id:invId,load_id:driverData.activeLoad?.id,truck_id:driverData.truck?.id,cust_id:selCust,state:freshCustState||selCustObj?.state||driverData.truck?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
       setDriverData(prev=>({...prev,sales:[ns,...prev.sales]}));
@@ -366,7 +367,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:14}}>💳 Record Sale</div>
       <div style={{marginBottom:12}}>
         <label style={{fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:4}}>CUSTOMER</label>
-        <select value={selCust} onChange={e=>setSelCust(e.target.value)} style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}>
+        <select value={selCust} onChange={e=>handleCustSelect(e.target.value)} style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}>
           <option value="">— Select customer —</option>
           {driverData.customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
@@ -426,14 +427,14 @@ function DriverExpensesTab({driverData, supabase}){
   const cats = [{k:"gas",e:"⛽",l:"Gas / Fuel"},{k:"maintenance",e:"🔧",l:"Maintenance"},{k:"food",e:"🍔",l:"Food & Meals"},{k:"accommodation",e:"🏨",l:"Accommodation"},{k:"other",e:"📋",l:"Other"}];
 
   useEffect(()=>{
-    supabase.from("expenses").select("*").eq("truck_id",driverData.truck.id).order("created_at",{ascending:false}).then(({data})=>{if(data)setExpenses(data);});
+    supabase.from("expenses").select("*").eq("truck_id",driverData.truck?.id).order("created_at",{ascending:false}).then(({data})=>{if(data)setExpenses(data);});
   },[]);
 
   const submitExpense = async () => {
     if(!form.amount) return setMsg({t:"error",m:"Amount is required"});
     setSaving(true);
     try{
-      const rec = {id:"EXP-"+uid(),truck_id:driverData.truck.id,driver_name:driverData.truck.driver,category:form.category,amount:parseFloat(form.amount),description:form.description,receipt_url:form.receipt_url||"",date:new Date().toLocaleDateString(),created_at:new Date().toISOString()};
+      const rec = {id:"EXP-"+uid(),truck_id:driverData.truck?.id,driver_name:driverData.truck?.driver,category:form.category,amount:parseFloat(form.amount),description:form.description,receipt_url:form.receipt_url||"",date:new Date().toLocaleDateString(),created_at:new Date().toISOString()};
       await supabase.from("expenses").insert(rec);
       setExpenses(prev=>[rec,...prev]);
       setMsg({t:"success",m:"Expense recorded!"});
@@ -1013,7 +1014,7 @@ export default function OrderPortal() {
                   <button onClick={async()=>{
                     // Refresh customers and state taxes
                     const [custsR, taxesR] = await Promise.all([
-                      supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",driverData.truck.id),
+                      supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",driverData.truck?.id),
                       supabase.from("state_taxes").select("*"),
                     ]);
                     setDriverData(prev=>({...prev, customers:custsR.data||prev.customers, stateTaxes:taxesR.data||prev.stateTaxes}));
