@@ -754,7 +754,7 @@ export default function OrderPortal() {
       if(!truckId) throw new Error("No truck assigned. Ask admin to assign your truck in Settings.");
 
       const [truckR, custsR, loadsR, salesR, taxesR] = await Promise.all([
-        supabase.from("trucks").select("id,driver,plate,route,state,locked").eq("id",truckId).single(),
+        supabase.from("trucks").select("*").eq("id",truckId).single(),
         supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",truckId),
         supabase.from("loads").select("*").eq("truck_id",truckId).eq("status","out"),
         supabase.from("sales").select("*").eq("truck_id",truckId).order("created_at",{ascending:false}),

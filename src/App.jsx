@@ -623,6 +623,82 @@ const SettleDoc=({truck,d,co,customers,payments,products,stateTaxes})=>{
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ══════════════════════════════════════════════════════════════════════════════
+// ── DRIVER TRUCK ASSIGNMENT ───────────────────────────────────────────────────
+function DriverTruckAssignment({supabase, trucks, showToast}){
+  const[profiles,setProfiles]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[saving,setSaving]=useState({});
+
+  useEffect(()=>{
+    // Load driver profiles with email from driver_profiles view
+    supabase
+      .from("driver_profiles")
+      .select("id, email, truck_id")
+      .then(({data,error})=>{
+        if(error||!data){
+          // Fallback: load from profiles table
+          supabase.from("profiles").select("id,truck_id").eq("role","driver")
+            .then(({data:pd})=>{
+              setProfiles((pd||[]).map(p=>({...p,email:p.id})));
+              setLoading(false);
+            });
+          return;
+        }
+        setProfiles(data);
+        setLoading(false);
+      });
+  },[]);
+
+  const assignTruck=async(profileId, truckId)=>{
+    setSaving(prev=>({...prev,[profileId]:true}));
+    const{error}=await supabase.from("profiles").update({truck_id:truckId}).eq("id",profileId);
+    if(error) showToast(error.message,"error");
+    else{
+      setProfiles(prev=>prev.map(p=>p.id===profileId?{...p,truck_id:truckId}:p));
+      showToast("✅ Truck assigned successfully");
+    }
+    setSaving(prev=>({...prev,[profileId]:false}));
+  };
+
+  if(loading) return <div style={{fontSize:12,color:"#9ca3af"}}>Loading drivers...</div>;
+  if(!profiles.length) return <div style={{fontSize:12,color:"#9ca3af"}}>No driver profiles found</div>;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {profiles.map(p=>{
+        const assignedTruck=trucks.find(t=>t.id===p.truck_id);
+        return(
+          <div key={p.id} style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8,padding:"12px 14px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{flex:1,minWidth:120}}>
+              <div style={{fontWeight:600,fontSize:13,color:"#212121"}}>👤 Driver</div>
+              <div style={{fontSize:11,color:"#9ca3af",fontFamily:"monospace"}}>{p.id.slice(0,8)}...</div>
+            </div>
+            <div style={{flex:2,minWidth:200}}>
+              <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:4}}>ASSIGNED TRUCK</label>
+              <select
+                value={p.truck_id||""}
+                onChange={e=>assignTruck(p.id,e.target.value)}
+                style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:7,padding:"8px 10px",fontSize:12,fontFamily:"'Barlow',sans-serif",background:"#fff"}}>
+                <option value="">— Select Truck —</option>
+                {trucks.map(t=>(
+                  <option key={t.id} value={t.id}>{t.driver} · {t.plate} {t.route?`· ${t.route}`:""}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{flexShrink:0}}>
+              {assignedTruck
+                ?<span style={{background:"#f0fdf4",color:"#059669",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700}}>✓ {assignedTruck.driver}</span>
+                :<span style={{background:"#fef2f2",color:"#dc2626",padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700}}>⚠️ Unassigned</span>
+              }
+              {saving[p.id]&&<span style={{fontSize:11,color:"#9ca3af",marginLeft:6}}>Saving...</span>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function App(){
   const[session,setSession]=useState(null);
   const[profile,setProfile]=useState(null);
@@ -2365,13 +2441,20 @@ export default function App(){
                   <button className="btn bp" onClick={()=>setModal("addCustomer")}>{ic.plus} Add Customer</button>
                 </div>
               </div>
-              <div className="card" style={{padding:22}}>
+              <div className="card" style={{padding:22,marginBottom:14}}>
                 <div className="sh">Order Portal Link</div>
                 <div style={{fontSize:12,color:"#6b7280",marginBottom:10}}>Share this link with your gas station customers so they can place orders:</div>
                 <div style={{background:"#f9fafb",border:"1px solid #1a2e40",borderRadius:8,padding:"11px 14px",fontSize:13,color:"#059669",fontFamily:"monospace",wordBreak:"break-all"}}>
                   {window.location.origin+"/order"}
                 </div>
                 <button className="btn bb" style={{marginTop:10}} onClick={()=>{navigator.clipboard.writeText(window.location.origin+"/order");showToast("Link copied!");}}>Copy Link</button>
+              </div>
+
+              {/* Driver Truck Assignment */}
+              <div className="card" style={{padding:22,marginBottom:14}}>
+                <div className="sh">🚚 Driver Truck Assignment</div>
+                <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>Assign each driver to their truck using the dropdown — no manual typing, no typos.</div>
+                <DriverTruckAssignment supabase={supabase} trucks={trucks} showToast={showToast}/>
               </div>
             </div>
           </div>}
