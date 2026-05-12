@@ -486,10 +486,10 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"16px",textAlign:"center"}}>
             <div style={{fontWeight:700,fontSize:13,color:"#7c3aed",marginBottom:4}}>💳 Card Payment via QR</div>
             <div style={{fontSize:11,color:"#6b7280",marginBottom:12}}>Customer scans QR → pays on their phone</div>
-            {co?.stripe_payment_link?(
+            {(driverData.co||co)?.stripe_payment_link?(
               <>
                 <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(co.stripe_payment_link)}`}
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent((driverData.co||co).stripe_payment_link)}`}
                   alt="Stripe Payment QR"
                   style={{width:200,height:200,borderRadius:8,border:"3px solid #7c3aed"}}
                 />
@@ -977,13 +977,14 @@ export default function OrderPortal() {
 
       const truckId = profile.truck_id;
 
-      const [truckR, custsR, loadsR, salesR, taxesR, pmtsR] = await Promise.all([
+      const [truckR, custsR, loadsR, salesR, taxesR, pmtsR, coR] = await Promise.all([
         supabase.from("trucks").select("*").eq("id",truckId).single(),
         supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",truckId),
         supabase.from("loads").select("*").eq("truck_id",truckId).eq("status","out").order("created_at",{ascending:false}),
         supabase.from("sales").select("*").eq("truck_id",truckId).order("created_at",{ascending:false}),
         supabase.from("state_taxes").select("*"),
         supabase.from("payments").select("sale_id,status,method,amount").eq("status","paid"),
+        supabase.from("company").select("*").single(),
       ]);
 
       if(!truckR.data) throw new Error("Truck not found. Run this SQL: update profiles set truck_id = 'CORRECT_TRUCK_ID' where id = '"+data.user.id+"'");
@@ -1020,6 +1021,7 @@ export default function OrderPortal() {
         activeLoad: mergedLoad,
         sales: salesWithPaid,
         stateTaxes: taxesR.data||[],
+        co: coR.data||null,
       });
     } catch(e) {
       setDriverError(e.message);
