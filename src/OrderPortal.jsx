@@ -184,7 +184,7 @@ const Invoice = ({order, products, co, stateTaxes, custState}) => {
 function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
   const cust = customers.find(c=>c.id===sale.cust_id);
 
-  const stateId = sale.state||cust?.state||"TX";
+  const stateId = sale.state||cust?.state||"";
   const stData = stateTaxes?.find(s=>s.id===stateId);
   const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
   const sub = sale.total;
@@ -333,7 +333,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     try{
       const {data:seqData} = await supabase.rpc("next_invoice_number");
       const invId = "INV-" + String(seqData||1).padStart(4,"0");
-      const ns = {id:invId,load_id:driverData.activeLoad?.id,truck_id:driverData.truck.id,cust_id:selCust,date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,created_at:new Date().toISOString()};
+      const ns = {id:invId,load_id:driverData.activeLoad?.id,truck_id:driverData.truck.id,cust_id:selCust,state:selCustObj?.state||driverData.truck?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
       setDriverData(prev=>({...prev,sales:[ns,...prev.sales]}));
@@ -773,7 +773,7 @@ export default function OrderPortal() {
     try{
       const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
       const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const stateId = sale.state||cust?.state||"TX";
+      const stateId = sale.state||cust?.state||"";
       const stData = driverData?.stateTaxes?.find?.(s=>s.id===stateId);
       const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
       const items = (sale.items||[]).map(i=>{
