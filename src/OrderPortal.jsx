@@ -351,6 +351,82 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     setTimeout(()=>setMsg(null),2000);
   };
 
+  const [createdSale, setCreatedSale] = useState(null);
+  const [showPayment, setShowPayment] = useState(false);
+  const [createdSaleForHistory, setCreatedSaleForHistory] = useState(null);
+  const [showHistoryPayment, setShowHistoryPayment] = useState(false);
+  const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
+  const [paymentSaving, setPaymentSaving] = useState(false);
+  const [stripeQR, setStripeQR] = useState(null);
+  const CARD_FEE = 3;
+
+  const collectPayment = async (sale, method) => {
+    setPaymentSaving(true);
+    try{
+      const saleTax = (() => {
+        const st = driverData.stateTaxes?.find(s=>s.id===(sale.state||""));
+        const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
+        if(!rate) return 0;
+        const taxable = (sale.items||[]).reduce((a,i)=>{
+          const p = products.find(x=>x.id===i.pid);
+          return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
+        }, 0);
+        return parseFloat((taxable*rate/100).toFixed(2));
+      })();
+      const gt = parseFloat((sale.total + saleTax).toFixed(2));
+      const surcharge = method==="card" ? parseFloat((gt*CARD_FEE/100).toFixed(2)) : 0;
+      const total = parseFloat((gt+surcharge).toFixed(2));
+
+      await supabase.from("payments").upsert({
+        sale_id: sale.id,
+        status: "paid",
+        method,
+        amount: total,
+        check_number: payForm.checkNum||"",
+        bank_name: payForm.bankName||"",
+        zelle_ref: payForm.zelleRef||"",
+        notes: payForm.notes||"",
+        collected_at: new Date().toISOString(),
+      });
+      setDriverData(prev=>({...prev, sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
+      setShowPayment(false);
+      setCreatedSale(null);
+      setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
+      setMsg({t:"success",m:`✅ Payment of $${total.toFixed(2)} collected via ${method}!`});
+    }catch(e){setMsg({t:"error",m:e.message});}
+    setPaymentSaving(false);
+  };
+
+  const generateStripeQR = async (sale) => {
+    try{
+      const saleTax = (() => {
+        const st = driverData.stateTaxes?.find(s=>s.id===(sale.state||""));
+        const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
+        if(!rate) return 0;
+        const taxable = (sale.items||[]).reduce((a,i)=>{
+          const p = products.find(x=>x.id===i.pid);
+          return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
+        }, 0);
+        return parseFloat((taxable*rate/100).toFixed(2));
+      })();
+      const gt = sale.total + saleTax;
+      const total = parseFloat((gt*(1+CARD_FEE/100)).toFixed(2));
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+      const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment-intent`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json","apikey":SUPABASE_ANON_KEY,"Authorization":`Bearer ${SUPABASE_ANON_KEY}`},
+        body:JSON.stringify({amount:total,currency:"usd",metadata:{invoice_id:sale.id,customer:selCustObj?.name||"",driver:driverData.truck?.driver||""}})
+      });
+      const data = await res.json();
+      if(data.client_secret){
+        // Generate QR pointing to payment page
+        const payUrl = `${window.location.origin}/pay?inv=${sale.id}&secret=${data.client_secret}&amount=${total}`;
+        setStripeQR({url:payUrl, amount:total, invoiceId:sale.id});
+      }
+    }catch(e){setMsg({t:"error",m:"Could not generate QR: "+e.message});}
+  };
+
   const confirmSale = async () => {
     if(!selCust) return setMsg({t:"error",m:"Select a customer"});
     const saleItems = availableProducts.filter(p=>items[p.id]>0).map(p=>({pid:p.id,qty:items[p.id]}));
@@ -363,15 +439,132 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       await supabase.from("sales").insert(ns);
       await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
       setDriverData(prev=>({...prev,sales:[ns,...prev.sales]}));
-      setMsg({t:"success",m:`✓ Invoice ${ns.id} created!`});
+      setCreatedSale(ns);
+      setShowPayment(true);
       setItems({});
       setSelCust("");
+      setFreshCustState("");
       if(setDriverSaleCust) setDriverSaleCust(null);
     }catch(e){setMsg({t:"error",m:e.message});}
     setSaving(false);
   };
 
-  if(!driverData.activeLoad) return(
+  // Payment Collection Modal
+  if(showPayment && createdSale){
+    const saleTax = (() => {
+      const st = driverData.stateTaxes?.find(s=>s.id===(createdSale.state||""));
+      const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
+      if(!rate) return 0;
+      const taxable = (createdSale.items||[]).reduce((a,i)=>{
+        const p = products.find(x=>x.id===i.pid);
+        return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
+      }, 0);
+      return parseFloat((taxable*rate/100).toFixed(2));
+    })();
+    const gt = parseFloat((createdSale.total+saleTax).toFixed(2));
+    const cardTotal = parseFloat((gt*(1+CARD_FEE/100)).toFixed(2));
+    const methods = [
+      {id:"cash",label:"💵 Cash",color:"#059669",note:"No surcharge"},
+      {id:"check",label:"🧾 Check",color:"#0369a1",note:"No surcharge"},
+      {id:"money_order",label:"📮 Money Order",color:"#7c3aed",note:"No surcharge"},
+      {id:"zelle",label:"⚡ Zelle",color:"#6366f1",note:"No surcharge"},
+      {id:"card",label:"💳 Card",color:"#dc2626",note:`+${CARD_FEE}% surcharge = $${cardTotal.toFixed(2)}`},
+    ];
+    return(
+      <div style={{fontFamily:"'Inter',sans-serif"}}>
+        {/* Invoice Summary */}
+        <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:12,padding:"14px 16px",marginBottom:16}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#065f46",marginBottom:6}}>✅ Invoice {createdSale.id} Created!</div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280"}}>
+            <span>Subtotal</span><span>${createdSale.total.toFixed(2)}</span>
+          </div>
+          {saleTax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#059669"}}>
+            <span>Tobacco/Vape Tax</span><span>${saleTax.toFixed(2)}</span>
+          </div>}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:15,fontWeight:800,color:"#0a1628",borderTop:"1px solid #d1fae5",marginTop:6,paddingTop:6}}>
+            <span>TOTAL (Cash/Zelle)</span><span>${gt.toFixed(2)}</span>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#dc2626",marginTop:3}}>
+            <span>TOTAL (Card +{CARD_FEE}%)</span><span>${cardTotal.toFixed(2)}</span>
+          </div>
+        </div>
+
+        {/* Payment Method Selection */}
+        <div style={{fontWeight:700,fontSize:13,color:"#0a1628",marginBottom:10}}>💰 Collect Payment</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
+          {methods.map(m=>(
+            <button key={m.id} onClick={()=>setPayForm(p=>({...p,method:m.id}))}
+              style={{padding:"12px 14px",borderRadius:10,border:`2px solid ${payForm.method===m.id?m.color:"#e5e7eb"}`,background:payForm.method===m.id?m.color+"15":"#fff",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",fontFamily:"'Inter',sans-serif"}}>
+              <span style={{fontWeight:600,fontSize:13,color:payForm.method===m.id?m.color:"#212121"}}>{m.label}</span>
+              <span style={{fontSize:11,color:payForm.method===m.id?m.color:"#9ca3af"}}>{m.note}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Method-specific fields */}
+        {payForm.method==="check"&&<div style={{marginBottom:12}}>
+          <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>CHECK NUMBER</label>
+          <input value={payForm.checkNum} onChange={e=>setPayForm(p=>({...p,checkNum:e.target.value}))}
+            placeholder="e.g. 1042" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
+        </div>}
+        {payForm.method==="zelle"&&<div style={{marginBottom:12}}>
+          <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>ZELLE REFERENCE</label>
+          <input value={payForm.zelleRef} onChange={e=>setPayForm(p=>({...p,zelleRef:e.target.value}))}
+            placeholder="Transaction ref or phone" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
+        </div>}
+        {payForm.method==="money_order"&&<div style={{marginBottom:12}}>
+          <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>MONEY ORDER #</label>
+          <input value={payForm.checkNum} onChange={e=>setPayForm(p=>({...p,checkNum:e.target.value}))}
+            placeholder="Money order number" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
+        </div>}
+        {payForm.method==="card"&&<div style={{marginBottom:12}}>
+          {!stripeQR?(
+            <button onClick={()=>generateStripeQR(createdSale)}
+              style={{width:"100%",padding:"13px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+              📱 Generate QR Code for Card Payment
+            </button>
+          ):(
+            <div style={{textAlign:"center",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"16px"}}>
+              <div style={{fontWeight:700,fontSize:13,color:"#7c3aed",marginBottom:8}}>Show QR to Customer</div>
+              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(stripeQR.url)}`}
+                alt="Payment QR" style={{width:180,height:180,borderRadius:8,border:"2px solid #7c3aed"}}/>
+              <div style={{fontSize:12,color:"#6b7280",marginTop:8}}>Amount: <strong style={{color:"#7c3aed"}}>${stripeQR.amount.toFixed(2)}</strong></div>
+              <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>Customer scans → pays on their phone</div>
+              <button onClick={()=>setStripeQR(null)} style={{marginTop:8,background:"none",border:"1px solid #e5e7eb",borderRadius:6,padding:"4px 12px",fontSize:11,cursor:"pointer",color:"#6b7280"}}>
+                Regenerate
+              </button>
+              <div style={{marginTop:10}}>
+                <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Once customer pays, confirm below:</div>
+                <button onClick={()=>collectPayment(createdSale,"card")} disabled={paymentSaving}
+                  style={{width:"100%",padding:"11px",background:"#059669",color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                  ✅ Confirm Card Payment Received
+                </button>
+              </div>
+            </div>
+          )}
+        </div>}
+
+        {/* Notes */}
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>NOTES (optional)</label>
+          <input value={payForm.notes} onChange={e=>setPayForm(p=>({...p,notes:e.target.value}))}
+            placeholder="Any notes..." style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{display:"flex",gap:8}}>
+          {payForm.method!=="card"&&<button onClick={()=>collectPayment(createdSale,payForm.method)} disabled={paymentSaving}
+            style={{flex:1,padding:"13px",background:"#059669",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+            {paymentSaving?"Saving...":"✅ Confirm Payment"}
+          </button>}
+          <button onClick={()=>{setShowPayment(false);setCreatedSale(null);setMsg({t:"success",m:`Invoice ${createdSale.id} saved — collect payment later`});}}
+            style={{flex:payForm.method==="card"?1:0,padding:"13px 16px",background:"#f9fafb",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:10,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+            💾 Collect Later
+          </button>
+        </div>
+      </div>
+    );
+  }
     <div className="card" style={{padding:24,textAlign:"center"}}>
       <div style={{fontSize:36,marginBottom:12}}>🟡</div>
       <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Truck Not Loaded</div>
@@ -765,15 +958,20 @@ export default function OrderPortal() {
 
       const truckId = profile.truck_id;
 
-      const [truckR, custsR, loadsR, salesR, taxesR] = await Promise.all([
+      const [truckR, custsR, loadsR, salesR, taxesR, pmtsR] = await Promise.all([
         supabase.from("trucks").select("*").eq("id",truckId).single(),
         supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",truckId),
         supabase.from("loads").select("*").eq("truck_id",truckId).eq("status","out").order("created_at",{ascending:false}),
         supabase.from("sales").select("*").eq("truck_id",truckId).order("created_at",{ascending:false}),
         supabase.from("state_taxes").select("*"),
+        supabase.from("payments").select("sale_id,status,method,amount").eq("status","paid"),
       ]);
 
       if(!truckR.data) throw new Error("Truck not found. Run this SQL: update profiles set truck_id = 'CORRECT_TRUCK_ID' where id = '"+data.user.id+"'");
+
+      // Mark sales as paid based on payments table
+      const paidSaleIds = new Set((pmtsR.data||[]).map(p=>p.sale_id));
+      const salesWithPaid = (salesR.data||[]).map(s=>({...s, _paid: paidSaleIds.has(s.id)}));
 
       // Merge all active loads items into one virtual load
       const allLoads = loadsR.data||[];
@@ -801,7 +999,7 @@ export default function OrderPortal() {
         truck: truckR.data,
         customers: custsR.data||[],
         activeLoad: mergedLoad,
-        sales: salesR.data||[],
+        sales: salesWithPaid,
         stateTaxes: taxesR.data||[],
       });
     } catch(e) {
@@ -1070,7 +1268,7 @@ export default function OrderPortal() {
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:10,color:"#4b6080",marginBottom:4}}>TODAY'S REVENUE</div>
                   <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0ea5e9"}}>
-                    ${driverData.sales.filter(s=>{const d=new Date(s.created_at);const today=new Date();return d.toDateString()===today.toDateString();}).reduce((a,s)=>a+s.total,0).toFixed(2)}
+                    ${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>a+s.total,0).toFixed(2)} collected
                   </div>
                   <button onClick={async()=>{
                     // Refresh customers and state taxes
@@ -1168,7 +1366,7 @@ export default function OrderPortal() {
                   {[
                     {l:"Customers",v:driverData.customers.length,e:"⛽",c:"#0ea5e9"},
                     {l:"Today's Sales",v:driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).length,e:"📄",c:"#7c3aed"},
-                    {l:"Today Revenue",v:`$${driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>a+s.total,0).toFixed(2)}`,e:"💰",c:"#059669"},
+                    {l:"Collected Today",v:`$${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>a+s.total,0).toFixed(2)}`,e:"💰",c:"#059669"},{l:"Pending",v:`$${driverData.sales.filter(s=>!s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>a+s.total,0).toFixed(2)}`,e:"⏳",c:"#f59e0b"},
                   ].map(k=>(
                     <div key={k.l} className="card" style={{padding:"12px",textAlign:"center"}}>
                       <div style={{fontSize:20,marginBottom:3}}>{k.e}</div>
@@ -1211,27 +1409,47 @@ export default function OrderPortal() {
                   ?<div className="card" style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No invoices yet</div>
                   :driverData.sales.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(s=>{
                     const cust=driverData.customers.find(c=>c.id===s.cust_id);
+                    const isPaid=s._paid||false;
+                    const saleTax=(()=>{
+                      const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));
+                      const rate=st?.exempt?0:parseFloat(st?.rate||0);
+                      if(!rate)return 0;
+                      const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
+                      return parseFloat((taxable*rate/100).toFixed(2));
+                    })();
+                    const gt=parseFloat((s.total+saleTax).toFixed(2));
                     return(
-                      <div key={s.id} className="card" style={{padding:"14px 16px",marginBottom:10,borderLeft:`4px solid ${s.email_sent?"#059669":"#e5e7eb"}`}}>
+                      <div key={s.id} className="card" style={{padding:"14px 16px",marginBottom:10,borderLeft:`4px solid ${isPaid?"#059669":s.email_sent?"#0ea5e9":"#e5e7eb"}`}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                           <div>
-                            <span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700}}>{s.id}</span>
+                            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                              <span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700}}>{s.id}</span>
+                              {isPaid
+                                ?<span style={{background:"#dcfce7",color:"#166534",padding:"2px 8px",borderRadius:4,fontSize:10,fontWeight:700}}>✓ PAID</span>
+                                :<span style={{background:"#fef9c3",color:"#854d0e",padding:"2px 8px",borderRadius:4,fontSize:10,fontWeight:700}}>⏳ UNPAID</span>
+                              }
+                            </div>
                             <div style={{fontWeight:600,fontSize:13,marginTop:4}}>{cust?.name||"Unknown"}</div>
                             <div style={{fontSize:11,color:"#9ca3af"}}>{s.date}</div>
                           </div>
                           <div style={{textAlign:"right"}}>
-                            <div style={{fontWeight:800,fontSize:18,color:"#7c3aed"}}>${s.total.toFixed(2)}</div>
-                            {s.email_sent&&<div style={{fontSize:10,color:"#059669"}}>✓ Email sent</div>}
+                            <div style={{fontWeight:800,fontSize:18,color:isPaid?"#059669":"#7c3aed"}}>${gt.toFixed(2)}</div>
+                            {saleTax>0&&<div style={{fontSize:10,color:"#9ca3af"}}>incl. ${saleTax.toFixed(2)} tax</div>}
+                            {s.email_sent&&<div style={{fontSize:10,color:"#0ea5e9"}}>✓ Email sent</div>}
                           </div>
                         </div>
-                        <div style={{display:"flex",gap:6}}>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                           <button onClick={()=>setDriverViewInv(s)} style={{flex:1,padding:"8px",background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:7,fontSize:12,fontWeight:600,color:"#7c3aed",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-                            👁 View Invoice
+                            👁 View
                           </button>
-                          {cust?.email&&!s.email_sent&&<button onClick={()=>sendInvoiceEmail(s,cust)} style={{flex:1,padding:"8px",background:"#0ea5e9",border:"none",borderRadius:7,fontSize:12,fontWeight:600,color:"#fff",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-                            📧 Email Customer
+                          {!isPaid&&<button onClick={()=>{setCreatedSaleForHistory(s);setShowHistoryPayment(true);}}
+                            style={{flex:1,padding:"8px",background:"#059669",border:"none",borderRadius:7,fontSize:12,fontWeight:600,color:"#fff",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                            💰 Collect
                           </button>}
-                          {s.email_sent&&<div style={{flex:1,padding:"8px",background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,fontSize:12,color:"#059669",textAlign:"center"}}>✓ Sent</div>}
+                          {cust?.email&&!s.email_sent&&<button onClick={()=>sendInvoiceEmail(s,cust)} style={{flex:1,padding:"8px",background:"#0ea5e9",border:"none",borderRadius:7,fontSize:12,fontWeight:600,color:"#fff",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                            📧 Email
+                          </button>}
+                          {isPaid&&<div style={{flex:1,padding:"8px",background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,fontSize:12,color:"#059669",textAlign:"center",fontWeight:600}}>✓ Paid</div>}
                         </div>
                       </div>
                     );
@@ -1258,6 +1476,50 @@ export default function OrderPortal() {
                   <DriverInvoiceView sale={driverViewInv} customers={driverData.customers} products={products} co={co} driver={driverData.truck?.driver} stateTaxes={driverData.stateTaxes}/>
                 </div>
               </div>}
+
+              {/* History Payment Modal */}
+              {showHistoryPayment&&createdSaleForHistory&&(()=>{
+                const s=createdSaleForHistory;
+                const saleTax=(()=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);if(!rate)return 0;const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);return parseFloat((taxable*rate/100).toFixed(2));})();
+                const gt=parseFloat((s.total+saleTax).toFixed(2));
+                const cardTotal=parseFloat((gt*(1+CARD_FEE/100)).toFixed(2));
+                const methods=[{id:"cash",label:"💵 Cash",color:"#059669"},{id:"check",label:"🧾 Check",color:"#0369a1"},{id:"money_order",label:"📮 Money Order",color:"#7c3aed"},{id:"zelle",label:"⚡ Zelle",color:"#6366f1"},{id:"card",label:`💳 Card (+${CARD_FEE}%)`,color:"#dc2626"}];
+                return(
+                  <div style={{position:"fixed",inset:0,background:"#00000070",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+                    <div style={{background:"#fff",borderRadius:16,padding:20,maxWidth:420,width:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                        <div style={{fontWeight:700,fontSize:15}}>💰 Collect Payment — {s.id}</div>
+                        <button onClick={()=>{setShowHistoryPayment(false);setCreatedSaleForHistory(null);}} style={{background:"#f3f4f6",border:"none",borderRadius:7,padding:"6px 12px",cursor:"pointer"}}>✕</button>
+                      </div>
+                      <div style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between"}}>
+                        <span style={{fontSize:13,color:"#6b7280"}}>Total Due</span>
+                        <span style={{fontWeight:800,fontSize:18,color:"#0a1628"}}>${gt.toFixed(2)}</span>
+                      </div>
+                      <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:14}}>
+                        {methods.map(m=>(
+                          <button key={m.id} onClick={()=>setPayForm(p=>({...p,method:m.id}))}
+                            style={{padding:"11px 14px",borderRadius:9,border:`2px solid ${payForm.method===m.id?m.color:"#e5e7eb"}`,background:payForm.method===m.id?m.color+"15":"#fff",cursor:"pointer",display:"flex",justifyContent:"space-between",fontFamily:"'Inter',sans-serif"}}>
+                            <span style={{fontWeight:600,fontSize:13,color:payForm.method===m.id?m.color:"#212121"}}>{m.label}</span>
+                            {m.id==="card"&&<span style={{fontSize:11,color:"#9ca3af"}}>${cardTotal.toFixed(2)}</span>}
+                          </button>
+                        ))}
+                      </div>
+                      {payForm.method==="check"&&<input value={payForm.checkNum} onChange={e=>setPayForm(p=>({...p,checkNum:e.target.value}))} placeholder="Check number" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,marginBottom:10,boxSizing:"border-box"}}/>}
+                      {payForm.method==="zelle"&&<input value={payForm.zelleRef} onChange={e=>setPayForm(p=>({...p,zelleRef:e.target.value}))} placeholder="Zelle reference" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,marginBottom:10,boxSizing:"border-box"}}/>}
+                      {payForm.method==="money_order"&&<input value={payForm.checkNum} onChange={e=>setPayForm(p=>({...p,checkNum:e.target.value}))} placeholder="Money order number" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,marginBottom:10,boxSizing:"border-box"}}/>}
+                      <button onClick={async()=>{
+                        await collectPayment(s,payForm.method);
+                        setDriverData(prev=>({...prev,sales:prev.sales.map(x=>x.id===s.id?{...x,_paid:true}:x)}));
+                        setShowHistoryPayment(false);
+                        setCreatedSaleForHistory(null);
+                      }} disabled={paymentSaving}
+                        style={{width:"100%",padding:"13px",background:"#059669",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                        {paymentSaving?"Saving...":"✅ Confirm Payment"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
 
             </div>
           )}
