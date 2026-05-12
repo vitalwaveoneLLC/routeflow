@@ -1411,7 +1411,43 @@ export default function App(){
                 const rem=inv.reduce((a,i)=>a+i.remaining,0),loaded=inv.reduce((a,i)=>a+i.loaded,0);
                 const pct=loaded>0?Math.round(rem/loaded*100):0;
                 const ts=visSales.filter(s=>s.truck_id===t.id);
-                return(<div key={t.id} className="card" style={{padding:14}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}><div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#212121"}}>{t.driver}</div><div style={{fontSize:10,color:"#9ca3af"}}>{t.plate}{t.route&&` · ${t.route}`}</div></div><span className={`bdg ${t.locked?"br2":load?"ba2":"bgr"}`}>{t.locked?"🔒 LOCKED":load?"ACTIVE":"IDLE"}</span></div>{load&&<><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:10,color:"#6b7280"}}>Inventory</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#7c3aed"}}>{rem}/{loaded}</span></div><div className="pb"><div className="pf" style={{width:`${pct}%`,background:"#7c3aed"}}/></div></>}<div style={{display:"flex",justifyContent:"space-between",marginTop:8}}><span style={{fontSize:10,color:"#6b7280"}}>Revenue</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#059669"}}>{fmt(ts.reduce((a,s)=>a+s.total,0))}</span></div><div style={{display:"flex",gap:5,marginTop:8}}>{!t.locked&&<button className="btn bb" style={{flex:1,justifyContent:"center"}} onClick={()=>openLoad(t.id)}>{ic.truck} {load?"Reload":"Load"}</button>}{load&&<><button className="btn bg" style={{flex:1,justifyContent:"center"}} onClick={()=>openSale(t.id)}>{ic.inv} Sell</button><button className="btn bgh" style={{flex:1,justifyContent:"center"}} onClick={()=>openReturn(t.id)}>{ic.undo} Rtn</button></>}</div></div>);
+                return(
+                  <div key={t.id} className="card" style={{padding:14}}>
+                    {/* Header */}
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                      <div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#212121"}}>{t.driver}</div>
+                        <div style={{fontSize:10,color:"#9ca3af"}}>{t.plate}{t.route&&` · ${t.route}`}</div>
+                      </div>
+                      <span className={`bdg ${t.locked?"br2":load?"ba2":"bgr"}`}>{t.locked?"🔒 LOCKED":load?"ACTIVE":"IDLE"}</span>
+                    </div>
+                    {/* Inventory bar */}
+                    {load&&<>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                        <span style={{fontSize:10,color:"#6b7280"}}>Inventory</span>
+                        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#7c3aed"}}>{rem}/{loaded}</span>
+                      </div>
+                      <div className="pb"><div className="pf" style={{width:`${pct}%`,background:"#7c3aed"}}/></div>
+                    </>}
+                    {/* Revenue */}
+                    <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
+                      <span style={{fontSize:10,color:"#6b7280"}}>Revenue</span>
+                      <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#059669"}}>{fmt(ts.reduce((a,s)=>a+s.total,0))}</span>
+                    </div>
+                    {/* Action buttons — all inside the card */}
+                    <div style={{display:"flex",gap:5,marginTop:8,flexWrap:"wrap"}}>
+                      {!t.locked&&<button className="btn bb" style={{flex:1,justifyContent:"center"}} onClick={()=>openLoad(t.id)}>{ic.truck} {load?"Reload":"Load"}</button>}
+                      {load&&<><button className="btn bg" style={{flex:1,justifyContent:"center"}} onClick={()=>openSale(t.id)}>{ic.inv} Sell</button><button className="btn bgh" style={{flex:1,justifyContent:"center"}} onClick={()=>openReturn(t.id)}>{ic.undo} Rtn</button></>}
+                    </div>
+                    {/* Admin lock/unlock — inside the card */}
+                    {isAdmin&&<div style={{display:"flex",gap:5,marginTop:6}}>
+                      {t.locked
+                        ?<button className="btn bg" style={{flex:1,justifyContent:"center",fontSize:11}} onClick={()=>unlockTruck(t.id)}>🔓 Unlock Truck</button>
+                        :<button className="btn br" style={{flex:1,justifyContent:"center",fontSize:11}} onClick={()=>lockTruck(t.id)}>🔒 Lock Truck</button>
+                      }
+                    </div>}
+                  </div>
+                );
               })}
             </div>
             <div className="card">
