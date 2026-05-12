@@ -565,6 +565,8 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       </div>
     );
   }
+
+  if(!driverData.activeLoad) return(
     <div className="card" style={{padding:24,textAlign:"center"}}>
       <div style={{fontSize:36,marginBottom:12}}>🟡</div>
       <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Truck Not Loaded</div>
