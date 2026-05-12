@@ -2417,7 +2417,7 @@ export default function App(){
               <div className="card" style={{padding:22,marginBottom:14}}>
                 <div className="sh">Company Information</div>
                 {coEdit&&<div style={{display:"flex",flexDirection:"column",gap:11}}>
-                  {[{l:"Company Name",k:"name"},{l:"Address",k:"address"},{l:"Phone",k:"phone"},{l:"Email",k:"email"},{l:`Default Tax Rate (%)`,k:"tax_rate"}].map(f=>(
+                  {[{l:"Company Name",k:"name"},{l:"Address",k:"address"},{l:"Phone",k:"phone"},{l:"Email",k:"email"},{l:`Default Tax Rate (%)`,k:"tax_rate"},{l:"Stripe Payment Link (for driver card QR)",k:"stripe_payment_link"}].map(f=>(
                     <div key={f.k}><label>{f.l}</label><input value={coEdit[f.k]||""} onChange={e=>setCoEdit(prev=>({...prev,[f.k]:e.target.value}))}/></div>
                   ))}
 

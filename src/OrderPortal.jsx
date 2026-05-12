@@ -392,7 +392,11 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     setPaymentSaving(false);
   };
 
+  const [qrLoading, setQrLoading] = useState(false);
+
   const generateStripeQR = async (sale) => {
+    setQrLoading(true);
+    setStripeQR(null);
     try{
       const saleTax = (() => {
         const st = driverData.stateTaxes?.find(s=>s.id===(sale.state||""));
@@ -413,13 +417,19 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         headers:{"Content-Type":"application/json","apikey":SUPABASE_ANON_KEY,"Authorization":`Bearer ${SUPABASE_ANON_KEY}`},
         body:JSON.stringify({amount:total,currency:"usd",metadata:{invoice_id:sale.id,customer:selCustObj?.name||"",driver:driverData.truck?.driver||""}})
       });
+      if(!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
+      if(data.error) throw new Error(data.error);
       if(data.client_secret){
-        // Generate QR pointing to payment page
-        const payUrl = `${window.location.origin}/pay?inv=${sale.id}&secret=${data.client_secret}&amount=${total}`;
+        const payUrl = `${window.location.origin}/order?pay=${sale.id}&cs=${data.client_secret}&amt=${total}`;
         setStripeQR({url:payUrl, amount:total, invoiceId:sale.id});
+      } else {
+        throw new Error("No payment intent returned");
       }
-    }catch(e){setMsg({t:"error",m:"Could not generate QR: "+e.message});}
+    }catch(e){
+      setMsg({t:"error",m:"QR Error: "+e.message});
+    }
+    setQrLoading(false);
   };
 
   const confirmSale = async () => {
@@ -513,30 +523,39 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
             placeholder="Money order number" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
         </div>}
         {payForm.method==="card"&&<div style={{marginBottom:12}}>
-          {!stripeQR?(
-            <button onClick={()=>generateStripeQR(createdSale)}
-              style={{width:"100%",padding:"13px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-              📱 Generate QR Code for Card Payment
-            </button>
-          ):(
-            <div style={{textAlign:"center",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"16px"}}>
-              <div style={{fontWeight:700,fontSize:13,color:"#7c3aed",marginBottom:8}}>Show QR to Customer</div>
-              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(stripeQR.url)}`}
-                alt="Payment QR" style={{width:180,height:180,borderRadius:8,border:"2px solid #7c3aed"}}/>
-              <div style={{fontSize:12,color:"#6b7280",marginTop:8}}>Amount: <strong style={{color:"#7c3aed"}}>${stripeQR.amount.toFixed(2)}</strong></div>
-              <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>Customer scans → pays on their phone</div>
-              <button onClick={()=>setStripeQR(null)} style={{marginTop:8,background:"none",border:"1px solid #e5e7eb",borderRadius:6,padding:"4px 12px",fontSize:11,cursor:"pointer",color:"#6b7280"}}>
-                Regenerate
-              </button>
-              <div style={{marginTop:10}}>
-                <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Once customer pays, confirm below:</div>
+          <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"16px",textAlign:"center"}}>
+            <div style={{fontWeight:700,fontSize:13,color:"#7c3aed",marginBottom:4}}>💳 Card Payment via QR</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:12}}>Customer scans QR → pays on their phone</div>
+            {co?.stripe_payment_link?(
+              <>
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(co.stripe_payment_link)}`}
+                  alt="Stripe Payment QR"
+                  style={{width:200,height:200,borderRadius:8,border:"3px solid #7c3aed"}}
+                />
+                <div style={{marginTop:10,background:"#faf5ff",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#7c3aed",fontWeight:700}}>
+                  Amount to collect: ${(()=>{
+                    const st=driverData.stateTaxes?.find(x=>x.id===(createdSale.state||""));
+                    const rate=st?.exempt?0:parseFloat(st?.rate||0);
+                    const taxable=(createdSale.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
+                    const tax=parseFloat((taxable*rate/100).toFixed(2));
+                    const gt=createdSale.total+tax;
+                    return parseFloat((gt*(1+CARD_FEE/100)).toFixed(2)).toFixed(2);
+                  })()} (incl. {CARD_FEE}% card fee)
+                </div>
+                <div style={{fontSize:10,color:"#9ca3af",marginTop:6}}>Tell customer to enter exact amount when paying</div>
                 <button onClick={()=>collectPayment(createdSale,"card")} disabled={paymentSaving}
-                  style={{width:"100%",padding:"11px",background:"#059669",color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                  style={{width:"100%",marginTop:12,padding:"11px",background:"#059669",color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
                   ✅ Confirm Card Payment Received
                 </button>
+              </>
+            ):(
+              <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"12px",fontSize:12,color:"#854d0e"}}>
+                ⚠️ No Stripe Payment Link set up yet.<br/>
+                Ask admin to add it in <strong>Settings → Stripe Payment Link</strong>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>}
 
         {/* Notes */}
