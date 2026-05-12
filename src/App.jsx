@@ -740,7 +740,7 @@ export default function App(){
     // Global tax toggle — if disabled return 0
     if(!co?.tax_enabled) return 0;
     const cust = getC(sale.cust_id);
-    const stateId = sale.state || cust?.state || "TX";
+    const stateId = sale.state || cust?.state || "";
     const rate = getStateTaxRate(stateId);
     if(rate === 0) return 0;
     // Sum only taxable items (tobacco/nicotine only)
@@ -754,7 +754,7 @@ export default function App(){
   const calcSaleGrandTotal = sale => sale.total + calcSaleTax(sale);
   const getSaleState = sale => {
     const cust = getC(sale.cust_id);
-    return sale.state || cust?.state || "TX";
+    return sale.state || cust?.state || "";
   };
 
   const truckInv=tid=>{

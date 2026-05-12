@@ -306,12 +306,12 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
 
   const loadedItems = driverData.activeLoad?.items||[];
   const availableProducts = products.filter(p=>loadedItems.find(i=>i.pid===p.id));
-  // Get state tax rate for this driver's truck state
-  const driverStateId = driverData.truck?.state || "TX";
-  const driverStateTax = driverData.stateTaxes?.find?.(s=>s.id===driverStateId);
-  const driverTaxRate = driverStateTax?.exempt ? 0 : parseFloat(driverStateTax?.rate||co?.tax_rate||0);
+  // Use selected customer's state for tax (falls back to truck state)
+  const selCustObj = driverData.customers.find(c=>c.id===selCust);
+  const custStateId = selCustObj?.state || driverData.truck?.state || "";
+  const custStateTax = driverData.stateTaxes?.find(s=>s.id===custStateId);
+  const driverTaxRate = custStateTax?.exempt ? 0 : parseFloat(custStateTax?.rate||0);
   const sub = availableProducts.reduce((a,p)=>a+(p.price||0)*(items[p.id]||0),0);
-  // Tax only on tobacco/nicotine items, only if tax enabled and state not exempt
   const hasTaxableItems = availableProducts.some(p=>isTaxableProd(p)&&(items[p.id]||0)>0);
   const tax = parseFloat((availableProducts.reduce((a,p)=>isTaxableProd(p)?(a+(p.price||0)*(items[p.id]||0)):a,0)*driverTaxRate/100).toFixed(2));
   const gt = sub+tax;
@@ -393,7 +393,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         ))}
       </div>
       {gt>0&&<div style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
-        {[["Subtotal",fmt(sub),""],hasTaxableItems&&tax>0?[`Tax · Tobacco/Vape (${driverTaxRate}%)`,fmt(tax),"#059669"]:null,["Grand Total",fmt(gt),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].filter(Boolean).map(([l,v,c])=>(
+        {[["Subtotal",fmt(sub),""],hasTaxableItems&&tax>0?[`Tobacco/Vape Tax · ${custStateId} (${driverTaxRate}%)`,fmt(tax),"#059669"]:null,["Grand Total",fmt(gt),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].filter(Boolean).map(([l,v,c])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
             <span style={{fontSize:12,color:"#6b7280"}}>{l}</span>
             <span style={{fontWeight:700,fontSize:l==="Grand Total"?16:13,color:c||"#212121"}}>{v}</span>
