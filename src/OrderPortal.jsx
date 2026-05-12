@@ -577,16 +577,17 @@ export default function OrderPortal() {
   // Load data
   useEffect(()=>{
     (async()=>{
-      const [pr, cu, co, ld, sa, rt] = await Promise.all([
-        supabase.from("products").select("*").order("cat").order("name"),
-        supabase.from("customers").select("*").order("name"),
-        supabase.from("company").select("*").single(),
-        supabase.from("loads").select("*").eq("truck_id",profile?.truck_id||"").eq("status","out").order("created_at",{ascending:false}),
-        supabase.from("sales").select("*"),
-        supabase.from("returns").select("*"),
-      ]);
-      if(cu.data) setCustomers(cu.data);
-      if(co.data) setCo(co.data);
+      try{
+        const [pr, cu, co, ld, sa, rt] = await Promise.all([
+          supabase.from("products").select("*").order("cat").order("name"),
+          supabase.from("customers").select("*").order("name"),
+          supabase.from("company").select("*").single(),
+          supabase.from("loads").select("*").eq("status","out"),
+          supabase.from("sales").select("*"),
+          supabase.from("returns").select("*"),
+        ]);
+        if(cu.data) setCustomers(cu.data);
+        if(co.data) setCo(co.data);
 
       if(pr.data){
         const loads = ld.data||[];
@@ -623,6 +624,7 @@ export default function OrderPortal() {
         setProducts(enriched.filter(p=>p.totalStock>0));
       }
       setLoading(false);
+      }catch(e){ console.error("Portal load error:",e); setLoading(false); }
     })();
   },[]);
 
@@ -760,33 +762,8 @@ export default function OrderPortal() {
       if(!profile) throw new Error("Profile not found");
       if(profile.role==="admin") throw new Error("Please use the admin dashboard instead");
       if(!profile.truck_id) throw new Error("No truck assigned — contact your admin");
-      // Get truck - use profile.truck_id, find correct one if mismatch
-      let truckId = profile.truck_id;
 
-      // Verify truck exists, if not find any truck for this driver
-      if(truckId) {
-        const {data:checkTruck} = await supabase.from("trucks").select("id").eq("id",truckId).maybeSingle();
-        if(!checkTruck) truckId = null;
-      }
-
-      // Still no truck? Find by profile user id match in trucks
-      if(!truckId) {
-        const {data:allTrucks} = await supabase.from("trucks").select("*");
-        // Try to match by common patterns
-        const userEmail = data.user.email;
-        const matched = allTrucks?.find(t =>
-          t.driver_email === userEmail ||
-          t.email === userEmail ||
-          userEmail.includes(t.driver?.toLowerCase().replace(' ','_'))
-        );
-        if(matched) {
-          truckId = matched.id;
-          // Fix the profile
-          await supabase.from("profiles").update({truck_id:truckId}).eq("id",data.user.id);
-        }
-      }
-
-      if(!truckId) throw new Error("No truck assigned. Ask admin to assign your truck in Settings.");
+      const truckId = profile.truck_id;
 
       const [truckR, custsR, loadsR, salesR, taxesR] = await Promise.all([
         supabase.from("trucks").select("*").eq("id",truckId).single(),
@@ -796,7 +773,7 @@ export default function OrderPortal() {
         supabase.from("state_taxes").select("*"),
       ]);
 
-      if(!truckR.data) throw new Error("Could not load truck data. Please try again.");
+      if(!truckR.data) throw new Error("Truck not found. Run this SQL: update profiles set truck_id = 'CORRECT_TRUCK_ID' where id = '"+data.user.id+"'");
 
       // Merge all active loads items into one virtual load
       const allLoads = loadsR.data||[];
