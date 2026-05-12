@@ -967,6 +967,8 @@ export default function App(){
     setTrucks(prev=>prev.map(t=>t.id===tid?{...t,locked:false}:t));
     showToast("🔓 Truck unlocked — loading enabled");
   };
+
+  const openLoad=tid=>{
     const truck=trucks.find(t=>t.id===tid);
     if(truck?.locked)return showToast("Truck is locked — admin must unlock it first","error");
     setSelTruck(tid);
