@@ -483,6 +483,10 @@ const Login=({})=>{
 };
 
 // ── INVOICE DOC ───────────────────────────────────────────────────────────────
+// ── GLOBAL TAX HELPERS (module level - available to all components) ──────────
+const TAXABLE_CATS=["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+const isTaxableProd=p=>TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+
 const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
   if(!sale)return null;
   const cust=customers.find(c=>c.id===sale.cust_id),truck=trucks.find(t=>t.id===sale.truck_id);
@@ -528,7 +532,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
           <thead><tr>{(tax>0?["SKU","Product","Unit","Qty","Unit Price","Amount","Tax"]:["SKU","Product","Unit","Qty","Unit Price","Amount"]).map(h=><th key={h} style={{textAlign:["Qty","Unit Price","Amount","Tax"].includes(h)?"right":"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".07em",borderBottom:"2px solid #111",background:"transparent"}}>{h}</th>)}</tr></thead>
           <tbody>{(sale.items||[]).map((item,i)=>{
             const p=getP(item.pid);
-            const taxable=isTaxable(p)&&!stData?.exempt;
+            const taxable=isTaxableProd(p)&&!stData?.exempt;
             const itemTax=taxable?parseFloat(((p?.price||0)*item.qty*stateRate/100).toFixed(2)):0;
             return(
               <tr key={i}>
@@ -551,10 +555,10 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
             <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
               <span style={{fontSize:13,color:"#6b7280"}}>Subtotal</span><span style={{fontSize:13}}>{fmt(sub)}</span>
             </div>
-            <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
-              <span style={{fontSize:13,color:"#6b7280"}}>{`Tobacco/Vape Tax (${stateRate}%)`}</span>
-              <span style={{fontSize:13,color:tax>0?"#059669":"#9ca3af"}}>{fmt(tax)}</span>
-            </div>
+            {tax>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
+              <span style={{fontSize:13,color:"#6b7280"}}>{`Tobacco/Vape Tax · ${stateId} (${stateRate}%)`}</span>
+              <span style={{fontSize:13,color:"#059669"}}>{fmt(tax)}</span>
+            </div>}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111",marginTop:3}}>
               <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#111"}}>💵 CASH / CHECK TOTAL</span>
               <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#059669"}}>{fmt(gt)}</span>
@@ -580,7 +584,18 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
 };
 
 // ── SETTLEMENT DOC ────────────────────────────────────────────────────────────
-const SettleDoc=({truck,d,co,customers,payments,calcSaleTax,calcSaleGrandTotal})=>{
+const TAXABLE_CATS_SETTLE=["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+const calcSettleTax=(sale,products,stateTaxes)=>{
+  const cust_state=sale.state||"";
+  const st=stateTaxes?.find(s=>s.id===cust_state);
+  const rate=st?.exempt?0:parseFloat(st?.rate||0);
+  if(!rate)return 0;
+  return parseFloat(((sale.items||[]).reduce((a,i)=>{
+    const p=products?.find(x=>x.id===i.pid);
+    return TAXABLE_CATS_SETTLE.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t))?a+(p?.price||0)*i.qty:a;
+  },0)*rate/100).toFixed(2));
+};
+const SettleDoc=({truck,d,co,customers,payments,products,stateTaxes})=>{
   return(
     <div className="sw">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:13,borderBottom:"2px solid #7c3aed",marginBottom:16,flexWrap:"wrap",gap:10}}>
@@ -601,7 +616,7 @@ const SettleDoc=({truck,d,co,customers,payments,calcSaleTax,calcSaleGrandTotal})
       </div>
       {d.truckSales.length>0&&<><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>INVOICE DETAIL</div>
       <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Invoice","Customer","Units","Subtotal","Tax","Total","Status"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#9ca3af",borderBottom:"1px solid #e5e7eb",background:"transparent"}}>{h}</th>)}</tr></thead>
-      <tbody>{d.truckSales.map(s=>{const cust=customers.find(c=>c.id===s.cust_id);const pmt=payments.find(p=>p.sale_id===s.id);return(<tr key={s.id}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,fontWeight:700,color:"#2563eb"}}>{s.id}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{cust?.name}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{fmt(s.total)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:700}}>{fmt(calcSaleGrandTotal(s))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb"}}><span style={{background:pmt?.status==="paid"?"#dcfce7":"#fef9c3",color:pmt?.status==="paid"?"#166534":"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:700}}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td></tr>);})}</tbody></table></>}
+      <tbody>{d.truckSales.map(s=>{const cust=customers.find(c=>c.id===s.cust_id);const pmt=payments.find(p=>p.sale_id===s.id);return(<tr key={s.id}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,fontWeight:700,color:"#2563eb"}}>{s.id}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{cust?.name}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{fmt(s.total)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,color:"#7c3aed"}}>{fmt(calcSettleTax(s,products,stateTaxes))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:700}}>{fmt(s.total+calcSettleTax(s,products,stateTaxes))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb"}}><span style={{background:pmt?.status==="paid"?"#dcfce7":"#fef9c3",color:pmt?.status==="paid"?"#166534":"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:700}}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td></tr>);})}</tbody></table></>}
       <div style={{marginTop:20,paddingTop:10,borderTop:"1px solid #e5e7eb",fontSize:10,color:"#9ca3af",textAlign:"center"}}>{co?.name} · {co?.phone} · {dateLabel()}</div>
     </div>
   );
@@ -2678,7 +2693,7 @@ export default function App(){
         </div>
       </Modal>}
 
-      {modal==="settlement"&&viewTruck&&(()=>{const t=getT(viewTruck),d=settlementData(viewTruck);return<Modal title="" onClose={()=>setModal(null)} xwide><div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button className="btn bpr" onClick={()=>window.print()}>{ic.prt} Print / Save PDF</button></div><SettleDoc truck={t} d={d} co={co} customers={customers} payments={payments}/></Modal>;})()}
+      {modal==="settlement"&&viewTruck&&(()=>{const t=getT(viewTruck),d=settlementData(viewTruck);return<Modal title="" onClose={()=>setModal(null)} xwide><div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button className="btn bpr" onClick={()=>window.print()}>{ic.prt} Print / Save PDF</button></div><SettleDoc truck={t} d={d} co={co} customers={customers} payments={payments} products={products} stateTaxes={stateTaxes}/></Modal>;})()}
 
       {/* ── STRIPE PAYMENT MODAL ── */}
       {stripeModal&&<StripePaymentModal
