@@ -314,6 +314,21 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
 
   const loadedItems = driverData.activeLoad?.items||[];
   const availableProducts = products.filter(p=>loadedItems.find(i=>i.pid===p.id));
+
+  // Calculate how many of each product already sold from this load
+  const soldMap = driverData.sales
+    .filter(s=>s.load_id===driverData.activeLoad?.id)
+    .reduce((acc,s)=>{
+      (s.items||[]).forEach(i=>{ acc[i.pid]=(acc[i.pid]||0)+i.qty; });
+      return acc;
+    },{});
+
+  // Remaining = loaded qty - sold qty
+  const getRemainingQty = (pid) => {
+    const loaded = loadedItems.find(i=>i.pid===pid)?.qty||0;
+    const sold = soldMap[pid]||0;
+    return Math.max(0, loaded-sold);
+  };
   // Use freshly fetched customer state for accurate tax
   const selCustObj = driverData.customers.find(c=>c.id===selCust);
   const custStateId = freshCustState || selCustObj?.state || driverData.truck?.state || "";
@@ -383,22 +398,39 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         </div>
       </div>}
       <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
-        {availableProducts.map(p=>(
-          <div key={p.id} className="card" style={{padding:"10px 14px",border:`1.5px solid ${items[p.id]>0?"#0ea5e9":"#e5e7eb"}`}}>
+        {availableProducts.map(p=>{
+          const remaining = getRemainingQty(p.id);
+          const loaded = loadedItems.find(i=>i.pid===p.id)?.qty||0;
+          const sold = soldMap[p.id]||0;
+          const isOut = remaining===0;
+          return(
+          <div key={p.id} className="card" style={{padding:"10px 14px",border:`1.5px solid ${isOut?"#fecaca":items[p.id]>0?"#0ea5e9":"#e5e7eb"}`,opacity:isOut?0.6:1}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
               <div style={{flex:1}}>
                 <div style={{fontWeight:600,fontSize:13}}>{p.name}</div>
-                <div style={{fontSize:11,color:"#9ca3af"}}>SKU: {p.sku} · {fmt(p.price)}</div>
+                <div style={{fontSize:11,color:"#9ca3af"}}>{fmt(p.price)} · {isTaxableProd(p)?<span style={{color:"#7c3aed"}}>taxable</span>:"no tax"}</div>
+                <div style={{fontSize:11,marginTop:3,display:"flex",gap:8}}>
+                  <span style={{color:"#059669",fontWeight:600}}>📦 {remaining} left</span>
+                  <span style={{color:"#9ca3af"}}>{loaded} loaded · {sold} sold</span>
+                </div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:5}}>
-                <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))} style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
-                <input type="number" min="0" value={items[p.id]||""} placeholder="0" onChange={e=>setItems(prev=>({...prev,[p.id]:Math.max(0,parseInt(e.target.value)||0)}))} style={{width:48,textAlign:"center",border:`1.5px solid ${items[p.id]>0?"#0ea5e9":"#e5e7eb"}`,borderRadius:6,padding:"5px",fontSize:13,fontWeight:700}}/>
-                <button onClick={()=>setItems(prev=>({...prev,[p.id]:(prev[p.id]||0)+1}))} style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))}
+                  style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                <input type="number" min="0" max={remaining} value={items[p.id]||""} placeholder="0"
+                  onChange={e=>setItems(prev=>({...prev,[p.id]:Math.min(remaining,Math.max(0,parseInt(e.target.value)||0))}))}
+                  style={{width:48,textAlign:"center",border:`1.5px solid ${items[p.id]>0?"#0ea5e9":"#e5e7eb"}`,borderRadius:6,padding:"5px",fontSize:13,fontWeight:700}}
+                  disabled={isOut}/>
+                <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.min(remaining,(prev[p.id]||0)+1)}))}
+                  disabled={isOut}
+                  style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:isOut?"not-allowed":"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
               </div>
             </div>
             {(items[p.id]||0)>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right"}}>{fmt(items[p.id]*p.price)}{isTaxableProd(p)?<span style={{color:"#059669"}}> +tax</span>:""}</div>}
+            {isOut&&<div style={{fontSize:10,color:"#dc2626",marginTop:3,textAlign:"center",fontWeight:700}}>OUT OF STOCK ON TRUCK</div>}
           </div>
-        ))}
+          );
+        })}
       </div>
       {gt>0&&<div style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
         {[["Subtotal",fmt(sub),""],hasTaxableItems&&tax>0?[`Tobacco/Vape Tax · ${custStateId} (${driverTaxRate}%)`,fmt(tax),"#059669"]:null,["Grand Total",fmt(gt),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].filter(Boolean).map(([l,v,c])=>(
@@ -546,7 +578,7 @@ export default function OrderPortal() {
         supabase.from("products").select("*").order("cat").order("name"),
         supabase.from("customers").select("*").order("name"),
         supabase.from("company").select("*").single(),
-        supabase.from("loads").select("*").eq("status","out"),
+        supabase.from("loads").select("*").eq("truck_id",profile?.truck_id||"").eq("status","out").order("created_at",{ascending:false}),
         supabase.from("sales").select("*"),
         supabase.from("returns").select("*"),
       ]);
@@ -756,19 +788,39 @@ export default function OrderPortal() {
       const [truckR, custsR, loadsR, salesR, taxesR] = await Promise.all([
         supabase.from("trucks").select("*").eq("id",truckId).single(),
         supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",truckId),
-        supabase.from("loads").select("*").eq("truck_id",truckId).eq("status","out"),
+        supabase.from("loads").select("*").eq("truck_id",truckId).eq("status","out").order("created_at",{ascending:false}),
         supabase.from("sales").select("*").eq("truck_id",truckId).order("created_at",{ascending:false}),
         supabase.from("state_taxes").select("*"),
       ]);
 
       if(!truckR.data) throw new Error("Could not load truck data. Please try again.");
 
+      // Merge all active loads items into one virtual load
+      const allLoads = loadsR.data||[];
+      let mergedLoad = null;
+      if(allLoads.length>0){
+        // Combine all load items, summing quantities for same product
+        const itemMap = {};
+        allLoads.forEach(load=>{
+          (load.items||[]).forEach(item=>{
+            itemMap[item.pid] = (itemMap[item.pid]||0) + item.qty;
+          });
+        });
+        const mergedItems = Object.entries(itemMap).map(([pid,qty])=>({pid,qty}));
+        mergedLoad = {
+          ...allLoads[0],
+          id: allLoads[0].id, // use latest load id for new sales
+          items: mergedItems,
+          _allLoadIds: allLoads.map(l=>l.id)
+        };
+      }
+
       setDriverUser(data.user);
       setDriverData({
         profile: {...profile, truck_id:truckId},
         truck: truckR.data,
         customers: custsR.data||[],
-        activeLoad: loadsR.data?.[0]||null,
+        activeLoad: mergedLoad,
         sales: salesR.data||[],
         stateTaxes: taxesR.data||[],
       });
@@ -1087,7 +1139,10 @@ export default function OrderPortal() {
                 {/* ── TRUCK INVENTORY ── */}
                 {driverData.activeLoad&&(()=>{
                   const loadedItems=driverData.activeLoad.items||[];
-                  const soldMap=driverData.sales.reduce((acc,s)=>{(s.items||[]).forEach(i=>{acc[i.pid]=(acc[i.pid]||0)+i.qty;});return acc;},{});
+                  // Only count sales from this specific load
+                  const soldMap=driverData.sales
+                    .filter(s=>s.load_id===driverData.activeLoad.id)
+                    .reduce((acc,s)=>{(s.items||[]).forEach(i=>{acc[i.pid]=(acc[i.pid]||0)+i.qty;});return acc;},{});
                   const totalLoaded=loadedItems.reduce((a,i)=>a+i.qty,0);
                   const totalSold=loadedItems.reduce((a,i)=>a+(soldMap[i.pid]||0),0);
                   const totalRemaining=totalLoaded-totalSold;
