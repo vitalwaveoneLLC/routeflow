@@ -148,7 +148,7 @@ const Invoice = ({order, products, co, stateTaxes, custState}) => {
         {/* Totals */}
         <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}>
           <div style={{width:280}}>
-            {[["Subtotal",fmt(sub)],[stData?.exempt?"Tax (Exempt)":`Tax ${stateRate}% · Tobacco only`,fmt(taxAmt)]].map(([l,v])=>(
+            {[["Subtotal",fmt(sub)],...(taxAmt>0?[["Tobacco/Vape Tax",fmt(taxAmt)]]:[])].map(([l,v])=>(
               <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #f3f4f6"}}>
                 <span style={{fontSize:13,color:"#6b7280"}}>{l}</span><span style={{fontSize:13}}>{v}</span>
               </div>
@@ -201,7 +201,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
         </table>
         <div style={{display:"flex",justifyContent:"flex-end"}}>
           <div style={{width:220}}>
-            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?[`Tax ${stateRate}% · Tobacco/Vape`,`$${tax.toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:12,color:"#6b7280"}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":"#212121"}}>{v}</span></div>)}
+            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:12,color:"#6b7280"}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":"#212121"}}>{v}</span></div>)}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${gt.toFixed(2)}</span></div>
           </div>
         </div>

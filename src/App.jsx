@@ -493,7 +493,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
   // Get state tax rate for this sale
   const stateId=sale.state||cust?.state||"TX";
   const stData=stateTaxes?.find(s=>s.id===stateId);
-  const stateRate=stData?.exempt?0:parseFloat(stData?.rate||co?.tax_rate||8.25);
+  const stateRate=(!co?.tax_enabled||stData?.exempt)?0:parseFloat(stData?.rate||co?.tax_rate||0);
   const sub=sale.total;
   // Tax only on taxable items
   const tax=parseFloat(((sale.items||[]).reduce((a,item)=>{
@@ -531,7 +531,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
       </div>
       <div style={{padding:"18px 28px"}}>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr>{["SKU","Product","Unit","Qty","Unit Price","Amount","Tax"].map(h=><th key={h} style={{textAlign:["Qty","Unit Price","Amount","Tax"].includes(h)?"right":"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".07em",borderBottom:"2px solid #111",background:"transparent"}}>{h}</th>)}</tr></thead>
+          <thead><tr>{(tax>0?["SKU","Product","Unit","Qty","Unit Price","Amount","Tax"]:["SKU","Product","Unit","Qty","Unit Price","Amount"]).map(h=><th key={h} style={{textAlign:["Qty","Unit Price","Amount","Tax"].includes(h)?"right":"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".07em",borderBottom:"2px solid #111",background:"transparent"}}>{h}</th>)}</tr></thead>
           <tbody>{(sale.items||[]).map((item,i)=>{
             const p=getP(item.pid);
             const taxable=isTaxable(p)&&!stData?.exempt;
@@ -547,7 +547,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
                 <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:13,fontWeight:700,textAlign:"right"}}>{item.qty}</td>
                 <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:13,textAlign:"right"}}>{fmt(p?.price||0)}</td>
                 <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:13,fontWeight:700,textAlign:"right"}}>{fmt(item.qty*(p?.price||0))}</td>
-                <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:12,textAlign:"right",color:taxable?"#059669":"#9ca3af"}}>{taxable?fmt(itemTax):"—"}</td>
+                {tax>0&&<td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:12,textAlign:"right",color:taxable?"#059669":"#9ca3af"}}>{taxable?fmt(itemTax):"—"}</td>}
               </tr>
             );
           })}</tbody>
@@ -558,7 +558,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
               <span style={{fontSize:13,color:"#6b7280"}}>Subtotal</span><span style={{fontSize:13}}>{fmt(sub)}</span>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
-              <span style={{fontSize:13,color:"#6b7280"}}>{stData?.exempt?"Tax (Exempt)":`Tax ${stateRate}% · Tobacco/Nicotine only`}</span>
+              <span style={{fontSize:13,color:"#6b7280"}}>{`Tobacco/Vape Tax (${stateRate}%)`}</span>
               <span style={{fontSize:13,color:tax>0?"#059669":"#9ca3af"}}>{fmt(tax)}</span>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111",marginTop:3}}>
