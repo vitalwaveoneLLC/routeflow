@@ -294,7 +294,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
 
 
 // ── DRIVER SELL TAB ───────────────────────────────────────────────────────────
-function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust, payForm, setPayForm, paymentSaving, setPaymentSaving, collectPayment}){
+function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust, payForm, setPayForm, paymentSaving, setPaymentSaving, collectPayment, createdSale, setCreatedSale, showPayment, setShowPayment}){
   const [selCust, setSelCust] = useState(initCust||"");
   const [items, setItems] = useState({});
   const [saving, setSaving] = useState(false);
@@ -352,14 +352,9 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     setTimeout(()=>setMsg(null),2000);
   };
 
-  const [showPayment, setShowPayment] = useState(false);
-  const [createdSaleForHistory, setCreatedSaleForHistory] = useState(null);
-
-  // collectPayment moved to parent OrderPortal
-
   const [qrLoading, setQrLoading] = useState(false);
 
-  const generateStripeQR = async (sale) => {
+  const generateStripeQR_unused = async (sale) => {
     setQrLoading(true);
     setStripeQR(null);
     try{
@@ -723,7 +718,8 @@ export default function OrderPortal() {
   const [driverSaleCust, setDriverSaleCust] = useState(null);
   const [driverViewInv, setDriverViewInv] = useState(null);
   const [showHistoryPayment, setShowHistoryPayment] = useState(false);
-  const [createdSaleForHistory, setCreatedSaleForHistory] = useState(null);
+  const [createdSale, setCreatedSale] = useState(null);
+  const [showPayment, setShowPayment] = useState(false);
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
   const [paymentSaving, setPaymentSaving] = useState(false);
 
@@ -1419,7 +1415,7 @@ export default function OrderPortal() {
               {driverTab==="load"&&<DriverLoadTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co}/>}
 
               {/* ── SELL TAB ── */}
-              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust} payForm={payForm} setPayForm={setPayForm} paymentSaving={paymentSaving} setPaymentSaving={setPaymentSaving} collectPayment={collectPayment}/>}
+              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust} payForm={payForm} setPayForm={setPayForm} paymentSaving={paymentSaving} setPaymentSaving={setPaymentSaving} collectPayment={collectPayment} createdSale={createdSale} setCreatedSale={setCreatedSale} showPayment={showPayment} setShowPayment={setShowPayment}/>}
 
               {/* ── EXPENSES TAB ── */}
               {driverTab==="expenses"&&<DriverExpensesTab driverData={driverData} supabase={supabase}/>}
