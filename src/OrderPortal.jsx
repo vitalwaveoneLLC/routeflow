@@ -71,7 +71,7 @@ const Invoice = ({order, products, co, stateTaxes, custState}) => {
   const TAXABLE_CATS = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
   const isTaxable = p => TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
   const stData = stateTaxes?.find(s=>s.id===(custState||"TX"));
-  const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||8.25);
+  const stateRate = (!co?.tax_enabled||stData?.exempt) ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
   const sub = order.items.reduce((a,i)=>a+(products.find(p=>p.id===i.pid)?.price||0)*i.qty, 0);
   const taxAmt = parseFloat((order.items.reduce((a,i)=>{
     const p=products.find(x=>x.id===i.pid);
@@ -177,7 +177,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
   const isTaxable = p => TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
   const stateId = sale.state||cust?.state||"TX";
   const stData = stateTaxes?.find(s=>s.id===stateId);
-  const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||8.25);
+  const stateRate = (!co?.tax_enabled||stData?.exempt) ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
   const sub = sale.total;
   const tax = parseFloat(((sale.items||[]).reduce((a,i)=>{
     const p=products.find(x=>x.id===i.pid);
@@ -201,7 +201,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
         </table>
         <div style={{display:"flex",justifyContent:"flex-end"}}>
           <div style={{width:220}}>
-            {[["Subtotal",`$${sub.toFixed(2)}`],[stData?.exempt?"Tax (Exempt)":`Tax ${stateRate}% · Tobacco only`,`$${tax.toFixed(2)}`]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:12,color:"#6b7280"}}>{l}</span><span style={{fontSize:12}}>{v}</span></div>)}
+            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?[`Tax ${stateRate}% · Tobacco/Vape`,`$${tax.toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:12,color:"#6b7280"}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":"#212121"}}>{v}</span></div>)}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${gt.toFixed(2)}</span></div>
           </div>
         </div>
@@ -293,7 +293,6 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const [scanInput, setScanInput] = useState("");
   const [editInv, setEditInv] = useState(null);
   const uid = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
-  const taxRate = parseFloat(co?.tax_rate||8.25);
   const fmt = v=>`$${parseFloat(v||0).toFixed(2)}`;
 
   const loadedItems = driverData.activeLoad?.items||[];
@@ -301,8 +300,15 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
 
   const TAXABLE_CATS_S = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
   const isTaxableS = p => TAXABLE_CATS_S.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+  // Get state tax rate for this driver's truck state
+  const driverStateId = driverData.truck?.state || "TX";
+  const driverStateTax = driverData.stateTaxes?.find?.(s=>s.id===driverStateId);
+  const driverTaxRate = (!co?.tax_enabled||driverStateTax?.exempt) ? 0 : parseFloat(driverStateTax?.rate||co?.tax_rate||0);
   const sub = availableProducts.reduce((a,p)=>a+(p.price||0)*(items[p.id]||0),0);
-  const tax = parseFloat((availableProducts.reduce((a,p)=>isTaxableS(p)?a+(p.price||0)*(items[p.id]||0):a,0)*taxRate/100).toFixed(2));
+  // Tax only on tobacco/nicotine items, only if tax enabled and state not exempt
+  const taxableAmount = availableProducts.reduce((a,p)=>isTaxableS(p)?(a+(p.price||0)*(items[p.id]||0)):a,0);
+  const hasTaxableItems = availableProducts.some(p=>isTaxableS(p)&&(items[p.id]||0)>0);
+  const tax = parseFloat((taxableAmount*driverTaxRate/100).toFixed(2));
   const gt = sub+tax;
   const profit = availableProducts.reduce((a,p)=>a+((p.price||0)-(p.cost||0))*(items[p.id]||0),0);
 
@@ -382,7 +388,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         ))}
       </div>
       {gt>0&&<div style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
-        {[["Subtotal",fmt(sub),""],[`Tax · Tobacco only`,fmt(tax),""],["Grand Total",fmt(gt),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].map(([l,v,c])=>(
+        {[["Subtotal",fmt(sub),""],hasTaxableItems&&tax>0?[`Tax · Tobacco/Vape (${driverTaxRate}%)`,fmt(tax),"#059669"]:null,["Grand Total",fmt(gt),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].filter(Boolean).map(([l,v,c])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
             <span style={{fontSize:12,color:"#6b7280"}}>{l}</span>
             <span style={{fontWeight:700,fontSize:l==="Grand Total"?16:13,color:c||"#212121"}}>{v}</span>
@@ -709,11 +715,12 @@ export default function OrderPortal() {
       if(profile.role==="admin") throw new Error("Please use the admin dashboard instead");
       if(!profile.truck_id) throw new Error("No truck assigned — contact your admin");
       // Get truck + customers + loads + sales
-      const [truckR, custsR, loadsR, salesR] = await Promise.all([
+      const [truckR, custsR, loadsR, salesR, taxesR] = await Promise.all([
         supabase.from("trucks").select("*").eq("id",profile.truck_id).single(),
         supabase.from("customers").select("*").eq("truck_id",profile.truck_id),
         supabase.from("loads").select("*").eq("truck_id",profile.truck_id).eq("status","out"),
         supabase.from("sales").select("*").eq("truck_id",profile.truck_id),
+        supabase.from("state_taxes").select("*"),
       ]);
       setDriverUser(data.user);
       setDriverData({
@@ -722,6 +729,7 @@ export default function OrderPortal() {
         customers: custsR.data||[],
         activeLoad: loadsR.data?.[0]||null,
         sales: salesR.data||[],
+        stateTaxes: taxesR.data||[],
       });
     } catch(e) {
       setDriverError(e.message);
@@ -766,7 +774,7 @@ export default function OrderPortal() {
       const isTaxableM = p => TAXABLE_CATS_M.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
       const stateId = sale.state||cust?.state||"TX";
       const stData = driverData?.stateTaxes?.find?.(s=>s.id===stateId);
-      const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||8.25);
+      const stateRate = (!co?.tax_enabled||stData?.exempt) ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
       const items = (sale.items||[]).map(i=>{
         const p = products.find(x=>x.id===i.pid);
         return {name:p?.name||"Product",qty:i.qty,price:p?.price||0,unit:p?.unit||"",cat:p?.cat||""};
@@ -1128,7 +1136,7 @@ export default function OrderPortal() {
                             <div style={{fontSize:11,color:"#9ca3af"}}>{s.date}</div>
                           </div>
                           <div style={{textAlign:"right"}}>
-                            <div style={{fontWeight:800,fontSize:18,color:"#7c3aed"}}>${(s.total*(1+(parseFloat(co?.tax_rate||8.25)/100))).toFixed(2)}</div>
+                            <div style={{fontWeight:800,fontSize:18,color:"#7c3aed"}}>${s.total.toFixed(2)}</div>
                             {s.email_sent&&<div style={{fontSize:10,color:"#059669"}}>✓ Email sent</div>}
                           </div>
                         </div>
@@ -1163,7 +1171,7 @@ export default function OrderPortal() {
                       <button onClick={()=>setDriverViewInv(null)} style={{background:"#f3f4f6",border:"none",borderRadius:7,padding:"8px 14px",fontSize:12,cursor:"pointer"}}>✕ Close</button>
                     </div>
                   </div>
-                  <DriverInvoiceView sale={driverViewInv} customers={driverData.customers} products={products} co={co} driver={driverData.truck?.driver}/>
+                  <DriverInvoiceView sale={driverViewInv} customers={driverData.customers} products={products} co={co} driver={driverData.truck?.driver} stateTaxes={driverData.stateTaxes}/>
                 </div>
               </div>}
 
