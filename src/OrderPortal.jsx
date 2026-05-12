@@ -67,6 +67,7 @@ const CAT_COLORS = {Beverage:"#0ea5e9",Tobacco:"#8b5cf6",Snack:"#f59e0b",Health:
 const catC = c => CAT_COLORS[c]||"#64748b";
 
 // ── TAX HELPER (tobacco/nicotine/vape only) ──────────────────────────────────
+const CARD_FEE = 3; // Card surcharge percentage
 const TAXABLE_CATS_GLOBAL = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
 const isTaxableProd=p=>{const c=(p?.cat||"").toLowerCase().trim(),n=(p?.name||"").toLowerCase().trim();return["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff","smoke","eliquid","e-liquid","pod","disposable"].some(t=>c.includes(t)||n.includes(t));};
 const calcItemTax = (p, qty, rate) => isTaxableProd(p) ? parseFloat(((p?.price||0)*qty*rate/100).toFixed(2)) : 0;
@@ -741,7 +742,6 @@ export default function OrderPortal() {
   const [createdSaleForHistory, setCreatedSaleForHistory] = useState(null);
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
   const [paymentSaving, setPaymentSaving] = useState(false);
-  const CARD_FEE = 3;
   const [payMethod, setPayMethod] = useState("delivery"); // "delivery" | "card"
   const [stripeReady, setStripeReady] = useState(false);
   const [clientSecret, setClientSecret] = useState(null);
@@ -824,7 +824,6 @@ export default function OrderPortal() {
 
   const cats = useMemo(()=>["All",...new Set(products.map(p=>p.cat))],[products]);
   const taxRate = parseFloat(co?.tax_rate||0);
-  const CARD_FEE = 3;
 
   const filtered = useMemo(()=>products.filter(p=>{
     if(catFilter!=="All"&&p.cat!==catFilter) return false;
