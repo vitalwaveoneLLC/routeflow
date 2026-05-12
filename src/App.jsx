@@ -1931,7 +1931,7 @@ export default function App(){
                 </div>
                 <div className="tw">
                   <table>
-                    <thead><tr><th>Customer</th><th>State</th><th>Tax Rate</th><th>Driver</th><th>Invoices</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Paid</th><th>Outstanding</th></tr></thead>
+                    <thead><tr><th>Customer</th><th>State</th><th>Driver</th><th>Invoices</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Paid</th><th>Outstanding</th></tr></thead>
                     <tbody>
                       {customers.map(c=>{
                         const custSales=sumSales.filter(s=>s.cust_id===c.id);
@@ -1946,7 +1946,6 @@ export default function App(){
                           <tr key={c.id}>
                             <td style={{fontWeight:600,color:"#212121"}}>{c.name}</td>
                             <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{c.state||"TX"}</span></td>
-                            <td>{stData?.exempt?<span className="bdg bg2">EXEMPT</span>:<span style={{fontWeight:600,color:"#7c3aed"}}>{stData?.rate||taxRate}%</span>}</td>
                             <td style={{color:"#6b7280"}}>{getT(c.truck_id)?.driver||"—"}</td>
                             <td style={{fontWeight:600,color:"#7c3aed"}}>{custSales.length}</td>
                             <td>{fmt(sub)}</td>
@@ -1978,12 +1977,12 @@ export default function App(){
                     🧾 INVOICES — {invSales.length} TOTAL
                   </div>
                   <button className="btn bpr" onClick={()=>{
-                    const rows=[["Invoice","Date","Customer","State","Tax Rate","Driver","Subtotal","Tax (Tobacco)","Grand Total","Status"]];
+                    const rows=[["Invoice","Date","Customer","State","Driver","Subtotal","Tax (Tobacco)","Grand Total","Status"]];
                     invSales.forEach(s=>{
                       const cust=getC(s.cust_id);
                       const st=cust?.state||"TX";
                       const stData=stateTaxes.find(x=>x.id===st);
-                      rows.push([s.id,s.date,cust?.name,st,stData?.exempt?"EXEMPT":`${stData?.rate||taxRate}%`,getT(s.truck_id)?.driver,s.total.toFixed(2),calcSaleTax(s).toFixed(2),calcSaleGrandTotal(s).toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);
+                      rows.push([s.id,s.date,cust?.name,st,getT(s.truck_id)?.driver,s.total.toFixed(2),calcSaleTax(s).toFixed(2),calcSaleGrandTotal(s).toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);
                     });
                     downloadCSV(rows,`tax-invoices-${selState}.csv`);
                   }}>{ic.dl} Export</button>
@@ -1993,7 +1992,7 @@ export default function App(){
                 </div>
                 <div className="tw">
                   <table>
-                    <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>State</th><th>Tax Rate</th><th>Driver</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>State</th><th>Driver</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Status</th></tr></thead>
                     <tbody>
                       {invSales.map(s=>{
                         const cust=getC(s.cust_id);
@@ -2008,7 +2007,6 @@ export default function App(){
                             <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
                             <td style={{fontWeight:600,color:"#212121"}}>{cust?.name}</td>
                             <td><span className="tag" style={{background:"#ede9fe",color:"#7c3aed"}}>{st}</span></td>
-                            <td>{stData?.exempt?<span className="bdg bg2">EXEMPT</span>:<span style={{fontWeight:600,color:"#7c3aed"}}>{stData?.rate||taxRate}%</span>}</td>
                             <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td>
                             <td>{fmt(s.total)}</td>
                             <td style={{color:"#059669",fontWeight:600}}>{fmt(tax)}</td>
