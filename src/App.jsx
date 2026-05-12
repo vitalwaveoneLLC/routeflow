@@ -1533,7 +1533,18 @@ export default function App(){
             <div className="card" style={{padding:18,marginBottom:16}}>
               <div className="sh">📦 Inventory Flow</div>
               <div style={{display:"flex",alignItems:"stretch"}}>
-                {[{l:"WAREHOUSE",e:"🏭",c:"#7c3aed",items:products.slice(0,5).map(p=>({n:p.name,v:p.shelf+" units"}))},null,{l:"ON TRUCKS",e:"🚚",c:"#0ea5e9",items:visTrucks.map(t=>({n:t.driver,v:truckInv(t.id).reduce((a,i)=>a+i.remaining,0)+" units"}))},null,{l:"SOLD",e:"⛽",c:"#059669",items:visCustomers.filter(c=>paidSales.some(s=>s.cust_id===c.id)).slice(0,5).map(c=>({n:c.name,v:fmt(paidSales.filter(s=>s.cust_id===c.id).reduce((a,s)=>a+s.total,0))}))}].map((nd,i)=>{
+                {[
+                  {l:"WAREHOUSE",e:"🏭",c:"#7c3aed",items:products.slice(0,5).map(p=>({n:p.name,v:p.shelf+" units"}))},
+                  null,
+                  {l:"ON TRUCKS",e:"🚚",c:"#0ea5e9",items:visTrucks.map(t=>({n:t.driver,v:truckInv(t.id).reduce((a,i)=>a+i.remaining,0)+" units"}))},
+                  null,
+                  {l:"TOTAL INVENTORY",e:"📊",c:"#059669",items:products.map(p=>{
+                    const onTruck=visTrucks.reduce((a,t)=>{const inv=truckInv(t.id);return a+(inv.find(i=>i.pid===p.id)?.remaining||0);},0);
+                    return {n:p.name,v:(p.shelf+onTruck)+" units"};
+                  }).filter(i=>parseInt(i.v)>0).slice(0,5)},
+                  null,
+                  {l:"SOLD",e:"⛽",c:"#f59e0b",items:visCustomers.filter(c=>paidSales.some(s=>s.cust_id===c.id)).slice(0,5).map(c=>({n:c.name,v:fmt(paidSales.filter(s=>s.cust_id===c.id).reduce((a,s)=>a+s.total,0))}))}
+                ].map((nd,i)=>{
                   if(!nd)return<div key={i} style={{color:"#d1d5db",display:"flex",alignItems:"center",padding:"0 8px",flexShrink:0}}>{ic.arr}</div>;
                   return(<div key={i} style={{flex:1,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"12px 14px",textAlign:"center"}}><div style={{fontSize:18,marginBottom:4}}>{nd.e}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,color:nd.c,letterSpacing:".1em",marginBottom:8}}>{nd.l}</div>{nd.items.length===0?<div style={{fontSize:10,color:"#9ca3af"}}>No data</div>:nd.items.map((it,j)=><div key={j} style={{display:"flex",justifyContent:"space-between",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:5,padding:"4px 8px",marginBottom:3}}><span style={{fontSize:11,color:"#212121",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:90}}>{it.n}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:nd.c,flexShrink:0,marginLeft:6}}>{it.v}</span></div>)}</div>);
                 })}
