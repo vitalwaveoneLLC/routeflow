@@ -315,15 +315,18 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const loadedItems = driverData.activeLoad?.items||[];
   const availableProducts = products.filter(p=>loadedItems.find(i=>i.pid===p.id));
 
-  // Calculate how many of each product already sold from this load
+  // Get all load IDs for this truck's active loads
+  const allLoadIds = driverData.activeLoad?._allLoadIds || (driverData.activeLoad ? [driverData.activeLoad.id] : []);
+
+  // Calculate sold from ALL active loads
   const soldMap = driverData.sales
-    .filter(s=>s.load_id===driverData.activeLoad?.id)
+    .filter(s=>allLoadIds.includes(s.load_id))
     .reduce((acc,s)=>{
       (s.items||[]).forEach(i=>{ acc[i.pid]=(acc[i.pid]||0)+i.qty; });
       return acc;
     },{});
 
-  // Remaining = loaded qty - sold qty
+  // Remaining = total loaded qty - total sold qty
   const getRemainingQty = (pid) => {
     const loaded = loadedItems.find(i=>i.pid===pid)?.qty||0;
     const sold = soldMap[pid]||0;
@@ -1139,9 +1142,9 @@ export default function OrderPortal() {
                 {/* ── TRUCK INVENTORY ── */}
                 {driverData.activeLoad&&(()=>{
                   const loadedItems=driverData.activeLoad.items||[];
-                  // Only count sales from this specific load
+                  const allLdIds=driverData.activeLoad._allLoadIds||[driverData.activeLoad.id];
                   const soldMap=driverData.sales
-                    .filter(s=>s.load_id===driverData.activeLoad.id)
+                    .filter(s=>allLdIds.includes(s.load_id))
                     .reduce((acc,s)=>{(s.items||[]).forEach(i=>{acc[i.pid]=(acc[i.pid]||0)+i.qty;});return acc;},{});
                   const totalLoaded=loadedItems.reduce((a,i)=>a+i.qty,0);
                   const totalSold=loadedItems.reduce((a,i)=>a+(soldMap[i.pid]||0),0);
