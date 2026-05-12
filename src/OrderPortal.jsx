@@ -231,7 +231,6 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
   const isLocked = driverData.truck?.locked;
 
   const confirmLoad = async () => {
-    if(!driverData.truck?.id) return setMsg({t:"error",m:"Truck not found. Please sign out and sign back in."});
     if(isLocked) return setMsg({t:"error",m:"Your truck is locked by admin. Contact your manager."});
     const loadItems = products.filter(p=>items[p.id]>0).map(p=>({pid:p.id,qty:parseInt(items[p.id])}));
     if(!loadItems.length) return setMsg({t:"error",m:"Add at least one product"});
@@ -734,6 +733,7 @@ export default function OrderPortal() {
         supabase.from("sales").select("*").eq("truck_id",profile.truck_id).order("created_at",{ascending:false}),
         supabase.from("state_taxes").select("*"),
       ]);
+      if(truckR.error || !truckR.data) throw new Error("Truck not found — contact your admin to check your truck assignment");
       setDriverUser(data.user);
       setDriverData({
         profile,
