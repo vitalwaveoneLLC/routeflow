@@ -725,18 +725,47 @@ export default function OrderPortal() {
       if(!profile) throw new Error("Profile not found");
       if(profile.role==="admin") throw new Error("Please use the admin dashboard instead");
       if(!profile.truck_id) throw new Error("No truck assigned — contact your admin");
-      // Get truck + customers + loads + sales
+      // Get truck - use profile.truck_id, find correct one if mismatch
+      let truckId = profile.truck_id;
+
+      // Verify truck exists, if not find any truck for this driver
+      if(truckId) {
+        const {data:checkTruck} = await supabase.from("trucks").select("id").eq("id",truckId).maybeSingle();
+        if(!checkTruck) truckId = null;
+      }
+
+      // Still no truck? Find by profile user id match in trucks
+      if(!truckId) {
+        const {data:allTrucks} = await supabase.from("trucks").select("*");
+        // Try to match by common patterns
+        const userEmail = data.user.email;
+        const matched = allTrucks?.find(t =>
+          t.driver_email === userEmail ||
+          t.email === userEmail ||
+          userEmail.includes(t.driver?.toLowerCase().replace(' ','_'))
+        );
+        if(matched) {
+          truckId = matched.id;
+          // Fix the profile
+          await supabase.from("profiles").update({truck_id:truckId}).eq("id",data.user.id);
+        }
+      }
+
+      if(!truckId) throw new Error("No truck assigned. Ask admin to assign your truck in Settings.");
+
       const [truckR, custsR, loadsR, salesR, taxesR] = await Promise.all([
-        supabase.from("trucks").select("id,driver,plate,route,state,locked").eq("id",profile.truck_id).single(),
-        supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",profile.truck_id),
-        supabase.from("loads").select("*").eq("truck_id",profile.truck_id).eq("status","out"),
-        supabase.from("sales").select("*").eq("truck_id",profile.truck_id).order("created_at",{ascending:false}),
+        supabase.from("trucks").select("id,driver,plate,route,state,locked").eq("id",truckId).single(),
+        supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",truckId),
+        supabase.from("loads").select("*").eq("truck_id",truckId).eq("status","out"),
+        supabase.from("sales").select("*").eq("truck_id",truckId).order("created_at",{ascending:false}),
         supabase.from("state_taxes").select("*"),
       ]);
-      if(truckR.error || !truckR.data) throw new Error("Truck not found — contact your admin to check your truck assignment");
+
+      if(!truckR.data) throw new Error("Could not load truck data. Please try again.");
+
       setDriverUser(data.user);
       setDriverData({
-        profile,
+        profile: {...profile, truck_id:truckId},
         truck: truckR.data,
         customers: custsR.data||[],
         activeLoad: loadsR.data?.[0]||null,
