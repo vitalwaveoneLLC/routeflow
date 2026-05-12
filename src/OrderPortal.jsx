@@ -741,17 +741,23 @@ export default function OrderPortal() {
       const surcharge = method==="card" ? parseFloat((gt*CARD_FEE/100).toFixed(2)) : 0;
       const total = parseFloat((gt+surcharge).toFixed(2));
       // Try update first, then insert if no existing record
-      const {data:existing} = await supabase.from("payments").select("id").eq("sale_id",sale.id).single();
+      const {data:existing} = await supabase.from("payments").select("id,sale_id").eq("sale_id",sale.id).maybeSingle();
       const payData = {
-        sale_id:sale.id, status:"paid", method, amount:total,
-        check_number:payForm.checkNum||"", bank_name:payForm.bankName||"",
-        zelle_ref:payForm.zelleRef||"", notes:payForm.notes||"",
+        status:"paid",
+        method,
+        amount:total,
+        check_number:payForm.checkNum||"",
+        bank_name:payForm.bankName||"",
+        zelle_ref:payForm.zelleRef||"",
+        note:payForm.notes||"",
         collected_at:new Date().toISOString(),
       };
       if(existing){
+        // Update existing payment record
         await supabase.from("payments").update(payData).eq("sale_id",sale.id);
       } else {
-        await supabase.from("payments").insert({id:"PMT-"+Math.random().toString(36).slice(2,8).toUpperCase(),...payData});
+        // Insert new payment record
+        await supabase.from("payments").insert({sale_id:sale.id,...payData});
       }
       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
       setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
