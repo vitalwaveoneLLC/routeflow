@@ -762,13 +762,19 @@ export default function OrderPortal() {
     try{
       const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
       const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const taxRate = parseFloat(co?.tax_rate||8.25);
+      const TAXABLE_CATS_M = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+      const isTaxableM = p => TAXABLE_CATS_M.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+      const stateId = sale.state||cust?.state||"TX";
+      const stData = driverData?.stateTaxes?.find?.(s=>s.id===stateId);
+      const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||8.25);
       const items = (sale.items||[]).map(i=>{
         const p = products.find(x=>x.id===i.pid);
-        return {name:p?.name||"Product",qty:i.qty,price:p?.price||0,unit:p?.unit||""};
+        return {name:p?.name||"Product",qty:i.qty,price:p?.price||0,unit:p?.unit||"",cat:p?.cat||""};
       });
       const sub = sale.total;
-      const tax = sub*(taxRate/100);
+      const tax = parseFloat((items.reduce((a,i)=>{
+        return isTaxableM({cat:i.cat,name:i.name})?a+i.price*i.qty:a;
+      },0)*stateRate/100).toFixed(2));
       const gt = sub+tax;
       await fetch(`${SUPABASE_URL}/functions/v1/send-invoice-email`,{
         method:"POST",

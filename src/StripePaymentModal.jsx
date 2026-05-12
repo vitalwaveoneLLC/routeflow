@@ -142,7 +142,8 @@ export default function StripePaymentModal({
   sale,           // the sale/invoice object
   customer,       // customer object
   driver,         // driver name string
-  taxRate,        // e.g. 8.25
+  taxRate,        // kept for compatibility but tax is pre-calculated
+  saleTax,        // pre-calculated tobacco-only tax amount
   onSuccess,      // called with payment details on success
   onClose,        // called to close modal
 }) {
@@ -150,7 +151,8 @@ export default function StripePaymentModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const invoiceTotal = sale.total * (1 + taxRate / 100);
+  // Use pre-calculated tobacco-only tax if provided, otherwise fall back
+  const invoiceTotal = sale.total + (saleTax !== undefined ? saleTax : 0);
   const surcharge = parseFloat((invoiceTotal * CARD_FEE_PCT / 100).toFixed(2));
   const chargeTotal = parseFloat((invoiceTotal + surcharge).toFixed(2));
 
