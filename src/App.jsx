@@ -485,7 +485,7 @@ const Login=({})=>{
 // ── INVOICE DOC ───────────────────────────────────────────────────────────────
 // ── GLOBAL TAX HELPERS (module level - available to all components) ──────────
 const TAXABLE_CATS=["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
-const isTaxableProd=p=>TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+const isTaxableProd=p=>{const c=(p?.cat||"").toLowerCase().trim(),n=(p?.name||"").toLowerCase().trim();return["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff","smoke","eliquid","e-liquid","pod","disposable"].some(t=>c.includes(t)||n.includes(t));};
 
 const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
   if(!sale)return null;
@@ -584,15 +584,13 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
 };
 
 // ── SETTLEMENT DOC ────────────────────────────────────────────────────────────
-const TAXABLE_CATS_SETTLE=["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
 const calcSettleTax=(sale,products,stateTaxes)=>{
-  const cust_state=sale.state||"";
-  const st=stateTaxes?.find(s=>s.id===cust_state);
+  const st=stateTaxes?.find(s=>s.id===(sale.state||""));
   const rate=st?.exempt?0:parseFloat(st?.rate||0);
   if(!rate)return 0;
   return parseFloat(((sale.items||[]).reduce((a,i)=>{
     const p=products?.find(x=>x.id===i.pid);
-    return TAXABLE_CATS_SETTLE.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t))?a+(p?.price||0)*i.qty:a;
+    return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;
   },0)*rate/100).toFixed(2));
 };
 const SettleDoc=({truck,d,co,customers,payments,products,stateTaxes})=>{

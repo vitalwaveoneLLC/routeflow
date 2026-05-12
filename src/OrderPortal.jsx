@@ -68,7 +68,7 @@ const catC = c => CAT_COLORS[c]||"#64748b";
 
 // ── TAX HELPER (tobacco/nicotine/vape only) ──────────────────────────────────
 const TAXABLE_CATS_GLOBAL = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
-const isTaxableProd = p => TAXABLE_CATS_GLOBAL.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+const isTaxableProd=p=>{const c=(p?.cat||"").toLowerCase().trim(),n=(p?.name||"").toLowerCase().trim();return["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff","smoke","eliquid","e-liquid","pod","disposable"].some(t=>c.includes(t)||n.includes(t));};
 const calcItemTax = (p, qty, rate) => isTaxableProd(p) ? parseFloat(((p?.price||0)*qty*rate/100).toFixed(2)) : 0;
 const calcOrderTax = (items, products, rate) => items.reduce((a,i)=>{
   const p = products.find(x=>x.id===i.pid);
