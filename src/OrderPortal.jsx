@@ -294,7 +294,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
 
 
 // ── DRIVER SELL TAB ───────────────────────────────────────────────────────────
-function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust, payForm, setPayForm, paymentSaving, setPaymentSaving, CARD_FEE}){
+function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust, payForm, setPayForm, paymentSaving, setPaymentSaving, collectPayment}){
   const [selCust, setSelCust] = useState(initCust||"");
   const [items, setItems] = useState({});
   const [saving, setSaving] = useState(false);
@@ -355,42 +355,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const [showPayment, setShowPayment] = useState(false);
   const [createdSaleForHistory, setCreatedSaleForHistory] = useState(null);
 
-  const collectPayment = async (sale, method) => {
-    setPaymentSaving(true);
-    try{
-      const saleTax = (() => {
-        const st = driverData.stateTaxes?.find(s=>s.id===(sale.state||""));
-        const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
-        if(!rate) return 0;
-        const taxable = (sale.items||[]).reduce((a,i)=>{
-          const p = products.find(x=>x.id===i.pid);
-          return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
-        }, 0);
-        return parseFloat((taxable*rate/100).toFixed(2));
-      })();
-      const gt = parseFloat((sale.total + saleTax).toFixed(2));
-      const surcharge = method==="card" ? parseFloat((gt*CARD_FEE/100).toFixed(2)) : 0;
-      const total = parseFloat((gt+surcharge).toFixed(2));
-
-      await supabase.from("payments").upsert({
-        sale_id: sale.id,
-        status: "paid",
-        method,
-        amount: total,
-        check_number: payForm.checkNum||"",
-        bank_name: payForm.bankName||"",
-        zelle_ref: payForm.zelleRef||"",
-        notes: payForm.notes||"",
-        collected_at: new Date().toISOString(),
-      });
-      setDriverData(prev=>({...prev, sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
-      setShowPayment(false);
-      setCreatedSale(null);
-      setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
-      setMsg({t:"success",m:`✅ Payment of $${total.toFixed(2)} collected via ${method}!`});
-    }catch(e){setMsg({t:"error",m:e.message});}
-    setPaymentSaving(false);
-  };
+  // collectPayment moved to parent OrderPortal
 
   const [qrLoading, setQrLoading] = useState(false);
 
@@ -761,6 +726,31 @@ export default function OrderPortal() {
   const [createdSaleForHistory, setCreatedSaleForHistory] = useState(null);
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
   const [paymentSaving, setPaymentSaving] = useState(false);
+
+  const collectPayment = async (sale, method) => {
+    setPaymentSaving(true);
+    try{
+      const st = driverData?.stateTaxes?.find(s=>s.id===(sale.state||""));
+      const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
+      const taxable = (sale.items||[]).reduce((a,i)=>{
+        const p = products.find(x=>x.id===i.pid);
+        return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
+      }, 0);
+      const saleTax = parseFloat((taxable*rate/100).toFixed(2));
+      const gt = parseFloat((sale.total+saleTax).toFixed(2));
+      const surcharge = method==="card" ? parseFloat((gt*CARD_FEE/100).toFixed(2)) : 0;
+      const total = parseFloat((gt+surcharge).toFixed(2));
+      await supabase.from("payments").upsert({
+        sale_id:sale.id, status:"paid", method, amount:total,
+        check_number:payForm.checkNum||"", bank_name:payForm.bankName||"",
+        zelle_ref:payForm.zelleRef||"", notes:payForm.notes||"",
+        collected_at:new Date().toISOString(),
+      });
+      setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
+      setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
+    }catch(e){console.error("Payment error:",e.message);}
+    setPaymentSaving(false);
+  };
   const [payMethod, setPayMethod] = useState("delivery"); // "delivery" | "card"
   const [stripeReady, setStripeReady] = useState(false);
   const [clientSecret, setClientSecret] = useState(null);
@@ -1416,7 +1406,7 @@ export default function OrderPortal() {
               {driverTab==="load"&&<DriverLoadTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co}/>}
 
               {/* ── SELL TAB ── */}
-              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust} payForm={payForm} setPayForm={setPayForm} paymentSaving={paymentSaving} setPaymentSaving={setPaymentSaving} CARD_FEE={CARD_FEE}/>}
+              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust} payForm={payForm} setPayForm={setPayForm} paymentSaving={paymentSaving} setPaymentSaving={setPaymentSaving} collectPayment={collectPayment}/>}
 
               {/* ── EXPENSES TAB ── */}
               {driverTab==="expenses"&&<DriverExpensesTab driverData={driverData} supabase={supabase}/>}
