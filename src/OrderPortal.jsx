@@ -66,16 +66,26 @@ const nowStr = () => new Date().toLocaleString("en-US",{month:"short",day:"numer
 const CAT_COLORS = {Beverage:"#0ea5e9",Tobacco:"#8b5cf6",Snack:"#f59e0b",Health:"#10b981",Misc:"#6b7280",Other:"#64748b"};
 const catC = c => CAT_COLORS[c]||"#64748b";
 
+// ── TAX HELPER (tobacco/nicotine/vape only) ──────────────────────────────────
+const TAXABLE_CATS_GLOBAL = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+const isTaxableProd = p => TAXABLE_CATS_GLOBAL.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+const calcItemTax = (p, qty, rate) => isTaxableProd(p) ? parseFloat(((p?.price||0)*qty*rate/100).toFixed(2)) : 0;
+const calcOrderTax = (items, products, rate) => items.reduce((a,i)=>{
+  const p = products.find(x=>x.id===i.pid);
+  return a + calcItemTax(p, i.qty, rate);
+}, 0);
+
+
+
 // ── PROFORMA INVOICE ──────────────────────────────────────────────────────────
 const Invoice = ({order, products, co, stateTaxes, custState}) => {
-  const TAXABLE_CATS = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
-  const isTaxable = p => TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+
   const stData = stateTaxes?.find(s=>s.id===(custState||"TX"));
-  const stateRate = (!co?.tax_enabled||stData?.exempt) ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
+  const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
   const sub = order.items.reduce((a,i)=>a+(products.find(p=>p.id===i.pid)?.price||0)*i.qty, 0);
   const taxAmt = parseFloat((order.items.reduce((a,i)=>{
     const p=products.find(x=>x.id===i.pid);
-    return isTaxable(p)?a+(p?.price||0)*i.qty:a;
+    return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;
   },0)*stateRate/100).toFixed(2));
   const total = sub+taxAmt;
   return (
@@ -173,15 +183,14 @@ const Invoice = ({order, products, co, stateTaxes, custState}) => {
 // ── DRIVER INVOICE VIEW ───────────────────────────────────────────────────────
 function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
   const cust = customers.find(c=>c.id===sale.cust_id);
-  const TAXABLE_CATS = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
-  const isTaxable = p => TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+
   const stateId = sale.state||cust?.state||"TX";
   const stData = stateTaxes?.find(s=>s.id===stateId);
-  const stateRate = (!co?.tax_enabled||stData?.exempt) ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
+  const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
   const sub = sale.total;
   const tax = parseFloat(((sale.items||[]).reduce((a,i)=>{
     const p=products.find(x=>x.id===i.pid);
-    return isTaxable(p)?a+(p?.price||0)*i.qty:a;
+    return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;
   },0)*stateRate/100).toFixed(2));
   const gt = sub+tax;
   return(
@@ -297,9 +306,6 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
 
   const loadedItems = driverData.activeLoad?.items||[];
   const availableProducts = products.filter(p=>loadedItems.find(i=>i.pid===p.id));
-
-  const TAXABLE_CATS_S = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
-  const isTaxableS = p => TAXABLE_CATS_S.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
   // Get state tax rate for this driver's truck state
   const driverStateId = driverData.truck?.state || "TX";
   const driverStateTax = driverData.stateTaxes?.find?.(s=>s.id===driverStateId);
@@ -579,7 +585,7 @@ export default function OrderPortal() {
   },[]);
 
   const cats = useMemo(()=>["All",...new Set(products.map(p=>p.cat))],[products]);
-  const taxRate = parseFloat(co?.tax_rate||8.25);
+  const taxRate = parseFloat(co?.tax_rate||0);
   const CARD_FEE = 3;
 
   const filtered = useMemo(()=>products.filter(p=>{
@@ -593,8 +599,6 @@ export default function OrderPortal() {
   ,[quantities,products]);
 
   const subtotal = useMemo(()=>orderItems.reduce((a,i)=>a+(products.find(p=>p.id===i.pid)?.price||0)*i.qty,0),[orderItems,products]);
-  const TAXABLE_CATS_O = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
-  const isTaxableO = p => TAXABLE_CATS_O.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
   const tax = parseFloat((orderItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableO(p)?a+(p?.price||0)*i.qty:a;},0)*taxRate/100).toFixed(2));
   const total = subtotal+tax;
   const cardSurcharge = payMethod==="card" ? parseFloat((total*CARD_FEE/100).toFixed(2)) : 0;
@@ -770,18 +774,16 @@ export default function OrderPortal() {
     try{
       const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
       const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const TAXABLE_CATS_M = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
-      const isTaxableM = p => TAXABLE_CATS_M.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
       const stateId = sale.state||cust?.state||"TX";
       const stData = driverData?.stateTaxes?.find?.(s=>s.id===stateId);
-      const stateRate = (!co?.tax_enabled||stData?.exempt) ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
+      const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
       const items = (sale.items||[]).map(i=>{
         const p = products.find(x=>x.id===i.pid);
         return {name:p?.name||"Product",qty:i.qty,price:p?.price||0,unit:p?.unit||"",cat:p?.cat||""};
       });
       const sub = sale.total;
       const tax = parseFloat((items.reduce((a,i)=>{
-        return isTaxableM({cat:i.cat,name:i.name})?a+i.price*i.qty:a;
+        return isTaxableProd({cat:i.cat,name:i.name})?a+i.price*i.qty:a;
       },0)*stateRate/100).toFixed(2));
       const gt = sub+tax;
       await fetch(`${SUPABASE_URL}/functions/v1/send-invoice-email`,{

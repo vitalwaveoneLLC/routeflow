@@ -488,18 +488,14 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
   const cust=customers.find(c=>c.id===sale.cust_id),truck=trucks.find(t=>t.id===sale.truck_id);
   const getP=pid=>products.find(p=>p.id===pid);
   const CARD_FEE=3;
-  const TAXABLE_CATS=["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
-  const isTaxable=p=>TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
-  // Get state tax rate for this sale
-  const stateId=sale.state||cust?.state||"TX";
+  const TAXABLE_CATS_I=["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+  const isTaxableI=p=>TAXABLE_CATS_I.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+  const stateId=sale.state||cust?.state||"";
   const stData=stateTaxes?.find(s=>s.id===stateId);
-  const stateRate=(!co?.tax_enabled||stData?.exempt)?0:parseFloat(stData?.rate||co?.tax_rate||0);
+  const stateRate=stData?.exempt?0:parseFloat(stData?.rate||0);
   const sub=sale.total;
-  // Tax only on taxable items
-  const tax=parseFloat(((sale.items||[]).reduce((a,item)=>{
-    const p=getP(item.pid);
-    return isTaxable(p)?a+(p?.price||0)*item.qty:a;
-  },0)*stateRate/100).toFixed(2));
+  const taxable=(sale.items||[]).reduce((a,i)=>{const p=getP(i.pid);return isTaxableI(p)?a+(p?.price||0)*i.qty:a;},0);
+  const tax=parseFloat((taxable*stateRate/100).toFixed(2));
   const gt=sub+tax;
   const cardFeeAmt=parseFloat((gt*CARD_FEE/100).toFixed(2));
   const gtCard=parseFloat((gt+cardFeeAmt).toFixed(2));
@@ -586,7 +582,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
 };
 
 // ── SETTLEMENT DOC ────────────────────────────────────────────────────────────
-const SettleDoc=({truck,d,co,customers,payments})=>{
+const SettleDoc=({truck,d,co,customers,payments,calcSaleTax,calcSaleGrandTotal})=>{
   return(
     <div className="sw">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:13,borderBottom:"2px solid #7c3aed",marginBottom:16,flexWrap:"wrap",gap:10}}>
@@ -678,7 +674,7 @@ export default function App(){
   const[coEdit,setCoEdit]=useState(null);
 
   const isAdmin=profile?.role==="admin";
-  const taxRate=parseFloat(co?.tax_rate||0);
+  const taxRate=0;// tax handled per-product via calcSaleTax
 
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3200);};
 
