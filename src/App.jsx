@@ -483,14 +483,107 @@ const Login=({})=>{
 };
 
 // ── INVOICE DOC ───────────────────────────────────────────────────────────────
-const InvoiceDoc=({sale,products,customers,trucks,co,paid})=>{
+const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
   if(!sale)return null;
   const cust=customers.find(c=>c.id===sale.cust_id),truck=trucks.find(t=>t.id===sale.truck_id);
   const getP=pid=>products.find(p=>p.id===pid);
   const CARD_FEE=3;
-  const tr=parseFloat(co?.tax_rate||8.25),sub=sale.total,tax=sub*(tr/100),gt=sub+tax;
+  const TAXABLE_CATS=["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+  const isTaxable=p=>TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+  // Get state tax rate for this sale
+  const stateId=sale.state||cust?.state||"TX";
+  const stData=stateTaxes?.find(s=>s.id===stateId);
+  const stateRate=stData?.exempt?0:parseFloat(stData?.rate||co?.tax_rate||8.25);
+  const sub=sale.total;
+  // Tax only on taxable items
+  const tax=parseFloat(((sale.items||[]).reduce((a,item)=>{
+    const p=getP(item.pid);
+    return isTaxable(p)?a+(p?.price||0)*item.qty:a;
+  },0)*stateRate/100).toFixed(2));
+  const gt=sub+tax;
   const cardFeeAmt=parseFloat((gt*CARD_FEE/100).toFixed(2));
   const gtCard=parseFloat((gt+cardFeeAmt).toFixed(2));
+  return(
+    <div className="wdoc">
+      <div style={{background:"#7c3aed",padding:"20px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+        <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:26,color:"#fff"}}>INVOICE</div><div style={{fontSize:11,color:"#ddd6fe",marginTop:2}}>#{sale.id}</div></div>
+        <div style={{textAlign:"right"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#fff"}}>{co?.name}</div><div style={{fontSize:10,color:"#ddd6fe",lineHeight:1.8,marginTop:2}}>{co?.address}<br/>{co?.phone} · {co?.email}</div></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,padding:"16px 28px",background:"#f9fafb",borderBottom:"1px solid #e5e7eb"}}>
+        <div>
+          <div style={{fontSize:9,fontWeight:700,color:"#9ca3af",letterSpacing:".1em",marginBottom:4,textTransform:"uppercase"}}>Bill To</div>
+          <div style={{fontWeight:700,fontSize:14,color:"#111"}}>{cust?.name}</div>
+          {cust?.address&&<div style={{fontSize:11,color:"#6b7280",lineHeight:1.6,marginTop:2}}>{cust.address}</div>}
+          {cust?.phone&&<div style={{fontSize:11,color:"#6b7280"}}>{cust.phone}</div>}
+          {cust?.email&&<div style={{fontSize:11,color:"#6b7280"}}>{cust.email}</div>}
+        </div>
+        <div>
+          <div style={{fontSize:9,fontWeight:700,color:"#9ca3af",letterSpacing:".1em",marginBottom:4,textTransform:"uppercase"}}>Driver / Route</div>
+          <div style={{fontWeight:700,fontSize:14,color:"#111"}}>{truck?.driver}</div>
+          <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>{truck?.route} · {truck?.plate}</div>
+        </div>
+        <div>
+          <div style={{fontSize:9,fontWeight:700,color:"#9ca3af",letterSpacing:".1em",marginBottom:4,textTransform:"uppercase"}}>Invoice Date</div>
+          <div style={{fontWeight:700,fontSize:14,color:"#111"}}>{sale.date}</div>
+          <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>State: {stateId} {stData?.exempt?"(Tax Exempt)":""}</div>
+          <div style={{marginTop:8}}><span style={{background:paid?"#dcfce7":"#fef9c3",color:paid?"#166534":"#854d0e",padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700}}>{paid?"✓ PAID":"⏳ BALANCE DUE"}</span></div>
+        </div>
+      </div>
+      <div style={{padding:"18px 28px"}}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["SKU","Product","Unit","Qty","Unit Price","Amount","Tax"].map(h=><th key={h} style={{textAlign:["Qty","Unit Price","Amount","Tax"].includes(h)?"right":"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".07em",borderBottom:"2px solid #111",background:"transparent"}}>{h}</th>)}</tr></thead>
+          <tbody>{(sale.items||[]).map((item,i)=>{
+            const p=getP(item.pid);
+            const taxable=isTaxable(p)&&!stData?.exempt;
+            const itemTax=taxable?parseFloat(((p?.price||0)*item.qty*stateRate/100).toFixed(2)):0;
+            return(
+              <tr key={i}>
+                <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:12,color:"#9ca3af"}}>{p?.sku}</td>
+                <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:13,fontWeight:600,color:"#111"}}>
+                  {p?.name}
+                  {taxable&&<span style={{fontSize:9,background:"#fef3c7",color:"#92400e",padding:"1px 4px",borderRadius:3,marginLeft:5,fontWeight:700}}>TAX</span>}
+                </td>
+                <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:12,color:"#9ca3af"}}>{p?.unit}</td>
+                <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:13,fontWeight:700,textAlign:"right"}}>{item.qty}</td>
+                <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:13,textAlign:"right"}}>{fmt(p?.price||0)}</td>
+                <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:13,fontWeight:700,textAlign:"right"}}>{fmt(item.qty*(p?.price||0))}</td>
+                <td style={{padding:"9px 8px",borderBottom:"1px solid #f3f4f6",fontSize:12,textAlign:"right",color:taxable?"#059669":"#9ca3af"}}>{taxable?fmt(itemTax):"—"}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table>
+        <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}>
+          <div style={{width:300}}>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
+              <span style={{fontSize:13,color:"#6b7280"}}>Subtotal</span><span style={{fontSize:13}}>{fmt(sub)}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
+              <span style={{fontSize:13,color:"#6b7280"}}>{stData?.exempt?"Tax (Exempt)":`Tax ${stateRate}% · Tobacco/Nicotine only`}</span>
+              <span style={{fontSize:13,color:tax>0?"#059669":"#9ca3af"}}>{fmt(tax)}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111",marginTop:3}}>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#111"}}>💵 CASH / CHECK TOTAL</span>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#059669"}}>{fmt(gt)}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"6px 8px",background:"#faf5ff",margin:"0 -8px"}}>
+              <span style={{fontSize:12,color:"#7c3aed"}}>💳 Card surcharge ({CARD_FEE}%)</span>
+              <span style={{fontSize:12,color:"#7c3aed"}}>+{fmt(cardFeeAmt)}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0"}}>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#111"}}>💳 CARD TOTAL</span>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#7c3aed"}}>{fmt(gtCard)}</span>
+            </div>
+            {!paid&&<div style={{display:"flex",justifyContent:"space-between",padding:"8px 12px",background:"#fef9c3",borderRadius:7,marginTop:3}}><span style={{fontWeight:700,fontSize:12,color:"#854d0e"}}>Balance Due</span><span style={{fontWeight:900,fontSize:15,color:"#854d0e"}}>{fmt(gt)}</span></div>}
+          </div>
+        </div>
+        <div style={{marginTop:16,background:"#f9fafb",borderRadius:8,padding:"10px 14px",fontSize:11,color:"#6b7280",lineHeight:1.7}}>
+          <strong style={{color:"#212121"}}>Payment Methods:</strong> Cash · Check · Money Order · Zelle — <strong style={{color:"#059669"}}>No surcharge</strong> &nbsp;|&nbsp; Credit Card · Debit Card — <strong style={{color:"#7c3aed"}}>{CARD_FEE}% surcharge applies</strong>
+        </div>
+        <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between"}}><div style={{fontSize:10,color:"#9ca3af"}}>Thank you for your business · Payment due upon delivery</div><div style={{fontSize:10,color:"#9ca3af"}}>{co?.email}</div></div>
+      </div>
+    </div>
+  );
+};
   return(
     <div className="wdoc">
       <div style={{background:"#7c3aed",padding:"20px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
@@ -580,7 +673,7 @@ const SettleDoc=({truck,d,co,customers,payments})=>{
       </div>
       {d.truckSales.length>0&&<><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>INVOICE DETAIL</div>
       <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Invoice","Customer","Units","Subtotal","Tax","Total","Status"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#9ca3af",borderBottom:"1px solid #e5e7eb",background:"transparent"}}>{h}</th>)}</tr></thead>
-      <tbody>{d.truckSales.map(s=>{const cust=customers.find(c=>c.id===s.cust_id);const pmt=payments.find(p=>p.sale_id===s.id);return(<tr key={s.id}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,fontWeight:700,color:"#2563eb"}}>{s.id}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{cust?.name}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{fmt(s.total)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,color:"#7c3aed"}}>{fmt(s.total*(tr/100))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:700}}>{fmt(s.total*(1+tr/100))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb"}}><span style={{background:pmt?.status==="paid"?"#dcfce7":"#fef9c3",color:pmt?.status==="paid"?"#166534":"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:700}}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td></tr>);})}</tbody></table></>}
+      <tbody>{d.truckSales.map(s=>{const cust=customers.find(c=>c.id===s.cust_id);const pmt=payments.find(p=>p.sale_id===s.id);return(<tr key={s.id}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,fontWeight:700,color:"#2563eb"}}>{s.id}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{cust?.name}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{fmt(s.total)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:700}}>{fmt(calcSaleGrandTotal(s))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb"}}><span style={{background:pmt?.status==="paid"?"#dcfce7":"#fef9c3",color:pmt?.status==="paid"?"#166534":"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:700}}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td></tr>);})}</tbody></table></>}
       <div style={{marginTop:20,paddingTop:10,borderTop:"1px solid #e5e7eb",fontSize:10,color:"#9ca3af",textAlign:"center"}}>{co?.name} · {co?.phone} · {dateLabel()}</div>
     </div>
   );
@@ -755,7 +848,7 @@ export default function App(){
   const settlementData=tid=>{
     const ts=sales.filter(s=>s.truck_id===tid),tr=returns.filter(r=>r.truck_id===tid),al=loads.filter(l=>l.truck_id===tid);
     const rev=ts.reduce((a,s)=>a+s.total,0),prof=ts.reduce((a,s)=>a+s.profit,0);
-    return{truckSales:ts,loadedUnits:al.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+i.qty,0),0),soldUnits:ts.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>b+i.qty,0),0),retUnits:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0),rev,prof,cogs:rev-prof,tax:rev*(taxRate/100),collected:ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0),outstanding:ts.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0)};
+    return{truckSales:ts,loadedUnits:al.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+i.qty,0),0),soldUnits:ts.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>b+i.qty,0),0),retUnits:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0),rev,prof,cogs:rev-prof,tax:ts.reduce((a,s)=>a+calcSaleTax(s),0),collected:ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),outstanding:ts.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0)};
   };
 
   // ── CSV IMPORT ─────────────────────────────────────────────────────────────
@@ -1052,7 +1145,7 @@ export default function App(){
   const markPaid=async(sid,method="cash",amount=0,checkNum="",note="",collectedBy="")=>{
     const ex=pmtFor(sid);
     const sale=sales.find(s=>s.id===sid);
-    const gt=sale?sale.total*(1+taxRate/100):0;
+    const gt=sale?calcSaleGrandTotal(sale):0;
     const paidAmt=amount||gt;
     if(ex)await supabase.from("payments").update({status:"paid",method,amount:paidAmt,check_number:checkNum,note,collected_by:collectedBy,paid_at:new Date().toISOString()}).eq("sale_id",sid);
     else await supabase.from("payments").insert({sale_id:sid,status:"paid",method,amount:paidAmt,check_number:checkNum,note,collected_by:collectedBy,paid_at:new Date().toISOString()});
@@ -1242,8 +1335,8 @@ export default function App(){
   };
 
   // CSV
-  const exportInvoices=()=>{const rows=[["Invoice","Date","Customer","Driver","Subtotal","Tax","Total","Profit","Status"]];visSales.forEach(s=>{const gt=s.total*(1+taxRate/100);rows.push([s.id,s.date,getC(s.cust_id)?.name,getT(s.truck_id)?.driver,s.total.toFixed(2),(s.total*taxRate/100).toFixed(2),gt.toFixed(2),s.profit.toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);});downloadCSV(rows,"invoices.csv");};
-  const exportAR=()=>{const rows=[["Invoice","Customer","Driver","Total","Balance","Status"]];visSales.forEach(s=>{const gt=s.total*(1+taxRate/100);rows.push([s.id,getC(s.cust_id)?.name,getT(s.truck_id)?.driver,gt.toFixed(2),pmtFor(s.id)?.status==="paid"?"0.00":gt.toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);});downloadCSV(rows,"ar.csv");};
+  const exportInvoices=()=>{const rows=[["Invoice","Date","Customer","Driver","Subtotal","Tax (Tobacco)","Total","Profit","Status"]];visSales.forEach(s=>{const tax=calcSaleTax(s);const gt=calcSaleGrandTotal(s);rows.push([s.id,s.date,getC(s.cust_id)?.name,getT(s.truck_id)?.driver,s.total.toFixed(2),tax.toFixed(2),gt.toFixed(2),s.profit.toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);});downloadCSV(rows,"invoices.csv");};
+  const exportAR=()=>{const rows=[["Invoice","Customer","Driver","Subtotal","Tax (Tobacco)","Total","Balance","Status"]];visSales.forEach(s=>{const gt=calcSaleGrandTotal(s);rows.push([s.id,getC(s.cust_id)?.name,getT(s.truck_id)?.driver,s.total.toFixed(2),calcSaleTax(s).toFixed(2),gt.toFixed(2),pmtFor(s.id)?.status==="paid"?"0.00":gt.toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);});downloadCSV(rows,"ar.csv");};
   const exportPL=()=>{const rows=[["Metric","Value"],["Revenue",totalRevenue.toFixed(2)],["Tax",totalTax.toFixed(2)],["COGS",(totalRevenue-totalProfit).toFixed(2)],["Gross Profit",totalProfit.toFixed(2)],["Margin %",totalRevenue>0?((totalProfit/totalRevenue)*100).toFixed(1)+"%":"0%"],["AR Outstanding",totalAR.toFixed(2)]];downloadCSV(rows,"pl.csv");};
 
   // NAV
@@ -1455,7 +1548,7 @@ export default function App(){
               {visSales.length===0?<Empty icon="💳" msg="NO SALES YET"/>:(
                 <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Total</th><th>+Tax</th><th>Grand Total</th><th>Status</th><th></th></tr></thead>
                 <tbody>{visSales.slice(0,6).map(s=>(
-                  <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{fmt(s.total)}</td><td style={{color:"#7c3aed"}}>{fmt(s.total*taxRate/100)}</td><td><span className="bdg bg2">{fmt(s.total*(1+taxRate/100))}</span></td><td><span className={`bdg ${pmtFor(s.id)?.status==="paid"?"bg2":"br2"}`}>{pmtFor(s.id)?.status==="paid"?"PAID":"UNPAID"}</span></td><td><button className="btn bb" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt}</button></td>
+                  <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{fmt(s.total)}</td><td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td><td><span className="bdg bg2">{fmt(calcSaleGrandTotal(s))}</span></td><td><span className={`bdg ${pmtFor(s.id)?.status==="paid"?"bg2":"br2"}`}>{pmtFor(s.id)?.status==="paid"?"PAID":"UNPAID"}</span></td><td><button className="btn bb" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt}</button></td>
                 </tr>))}</tbody></table></div>
               )}
             </div>
@@ -1708,8 +1801,8 @@ export default function App(){
               <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>INVOICES — {visSales.length} TOTAL</div>
               {visSales.length===0?<Empty icon="📄" msg="NO INVOICES YET"/>:(
                 <div className="tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Driver</th><th>Subtotal</th><th>Tax</th><th>Grand Total</th><th>Profit</th><th>Status</th><th>Actions</th></tr></thead>
-                <tbody>{visSales.map(s=>{const gt=s.total*(1+taxRate/100),pmt=pmtFor(s.id);return(
-                  <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td>{fmt(s.total)}</td><td style={{color:"#7c3aed"}}>{fmt(s.total*taxRate/100)}</td><td><span className="bdg bb2">{fmt(gt)}</span></td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(s.profit)}</td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
+                <tbody>{visSales.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id);return(
+                  <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td>{fmt(s.total)}</td><td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td><td><span className="bdg bb2">{fmt(gt)}</span></td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(s.profit)}</td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
                   <td><div style={{display:"flex",gap:5}}><button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt} Invoice</button>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}{isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}</div></td>
                 </tr>);})}
                 </tbody></table></div>
@@ -1926,7 +2019,7 @@ export default function App(){
                 const filtered=visSales.filter(s=>arFilter==="all"||(arFilter==="unpaid"&&pmtFor(s.id)?.status!=="paid")||(arFilter==="paid"&&pmtFor(s.id)?.status==="paid"));
                 return filtered.length===0?<Empty icon="🔍" msg="NO RECORDS MATCH"/>:(
                   <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Driver</th><th>Grand Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
-                  <tbody>{filtered.map(s=>{const gt=s.total*(1+taxRate/100),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid;return(
+                  <tbody>{filtered.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid;return(
                     <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
                     <td><div style={{display:"flex",gap:5}}>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}<button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.inv}</button>{isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}</div></td>
                   </tr>);})}
@@ -1967,7 +2060,7 @@ export default function App(){
                 ?<Empty icon="✅" msg="ALL INVOICES PAID"/>
                 :<div className="tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Driver</th><th>Grand Total</th><th>Balance Due</th><th>Actions</th></tr></thead>
                 <tbody>{visSales.filter(s=>pmtFor(s.id)?.status!=="paid").map(s=>{
-                  const gt=s.total*(1+taxRate/100);
+                  const gt=calcSaleGrandTotal(s);
                   const cust=getC(s.cust_id);
                   return(
                     <tr key={s.id}>
@@ -2099,7 +2192,7 @@ export default function App(){
                     <label>Apply to Invoices (select all that apply)</label>
                     <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:6,maxHeight:200,overflowY:"auto"}}>
                       {custInvoices.map(s=>{
-                        const gt=s.total*(1+taxRate/100);
+                        const gt=calcSaleGrandTotal(s);
                         const isSelected=pmForm.invoice_ids.includes(s.id);
                         return(
                           <div key={s.id} onClick={()=>setPmForm(f=>({...f,invoice_ids:isSelected?f.invoice_ids.filter(x=>x!==s.id):[...f.invoice_ids,s.id]}))}
@@ -2118,7 +2211,7 @@ export default function App(){
                     </div>
                     {pmForm.invoice_ids.length>0&&(
                       <div style={{marginTop:8,fontSize:12,color:"#7c3aed",fontWeight:600}}>
-                        {pmForm.invoice_ids.length} invoice{pmForm.invoice_ids.length!==1?"s":""} selected — Total due: ${custInvoices.filter(s=>pmForm.invoice_ids.includes(s.id)).reduce((a,s)=>a+s.total*(1+taxRate/100),0).toFixed(2)}
+                        {pmForm.invoice_ids.length} invoice{pmForm.invoice_ids.length!==1?"s":""} selected — Total due: ${custInvoices.filter(s=>pmForm.invoice_ids.includes(s.id)).reduce((a,s)=>a+calcSaleGrandTotal(s),0).toFixed(2)}
                       </div>
                     )}
                   </div>
@@ -2232,7 +2325,7 @@ export default function App(){
               {visCustomers.map(c=>{
                 const cs=visSales.filter(s=>s.cust_id===c.id);
                 const rev=cs.reduce((a,s)=>a+s.total,0),prof=cs.reduce((a,s)=>a+s.profit,0);
-                const unpaid=cs.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+s.total*(1+taxRate/100),0);
+                const unpaid=cs.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0);
                 const truck=getT(c.truck_id);
                 const isEditingThis=editingCid===c.id;
                 return(
@@ -2547,7 +2640,7 @@ export default function App(){
                     <button onClick={()=>setFormItems(prev=>prev.map((x,i)=>i===idx?{...x,qty:Math.min(x.max,x.qty+1)}:x))} style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
                   </div>
                 </div>
-                {fi.qty>0&&<div style={{fontSize:10,color:"#059669",marginTop:3,textAlign:"right"}}>{fmt(fi.qty*p.price)} + {fmt(fi.qty*p.price*taxRate/100)} tax = <strong>{fmt(fi.qty*p.price*(1+taxRate/100))}</strong></div>}
+                {fi.qty>0&&<div style={{fontSize:10,color:"#059669",marginTop:3,textAlign:"right"}}>{fmt(fi.qty*p.price)}{isTaxableProd(p)?" + tax":""}</div>}
               </div>
             );})}
           </div>
@@ -2590,7 +2683,7 @@ export default function App(){
           {pmtFor(viewSale.id)?.status!=="paid"&&<button className="btn bp" style={{fontSize:11,padding:"7px 12px"}} onClick={()=>{setModal(null);setTimeout(()=>setStripeModal({sale:viewSale,customer:getC(viewSale.cust_id),driver:getT(viewSale.truck_id)?.driver}),100);}}>💳 Charge Card</button>}
           <div style={{marginLeft:"auto"}}><button className="btn bpr" onClick={()=>window.print()}>{ic.prt} Print / Save PDF</button></div>
         </div>
-        <InvoiceDoc sale={viewSale} products={products} customers={customers} trucks={trucks} co={co} paid={pmtFor(viewSale.id)?.status==="paid"}/>
+        <InvoiceDoc sale={viewSale} products={products} customers={customers} trucks={trucks} co={co} paid={pmtFor(viewSale.id)?.status==="paid"} stateTaxes={stateTaxes}/>
       </Modal>}
 
       {/* ── ADD STATE TAX MODAL ── */}
@@ -2624,7 +2717,7 @@ export default function App(){
         sale={stripeModal.sale}
         customer={stripeModal.customer}
         driver={stripeModal.driver}
-        taxRate={taxRate}
+        taxRate={taxRate} stateTaxes={stateTaxes}
         onClose={()=>setStripeModal(null)}
         onSuccess={async(pd)=>{
           const truck=trucks.find(t=>t.id===stripeModal.sale.truck_id);

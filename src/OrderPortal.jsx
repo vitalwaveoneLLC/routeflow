@@ -67,10 +67,16 @@ const CAT_COLORS = {Beverage:"#0ea5e9",Tobacco:"#8b5cf6",Snack:"#f59e0b",Health:
 const catC = c => CAT_COLORS[c]||"#64748b";
 
 // ── PROFORMA INVOICE ──────────────────────────────────────────────────────────
-const Invoice = ({order, products, co}) => {
-  const tax = parseFloat(co?.tax_rate||8.25);
+const Invoice = ({order, products, co, stateTaxes, custState}) => {
+  const TAXABLE_CATS = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+  const isTaxable = p => TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+  const stData = stateTaxes?.find(s=>s.id===(custState||"TX"));
+  const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||8.25);
   const sub = order.items.reduce((a,i)=>a+(products.find(p=>p.id===i.pid)?.price||0)*i.qty, 0);
-  const taxAmt = sub*(tax/100);
+  const taxAmt = parseFloat((order.items.reduce((a,i)=>{
+    const p=products.find(x=>x.id===i.pid);
+    return isTaxable(p)?a+(p?.price||0)*i.qty:a;
+  },0)*stateRate/100).toFixed(2));
   const total = sub+taxAmt;
   return (
     <div className="inv" style={{background:"#fff",fontFamily:"'Inter',sans-serif",borderRadius:14,overflow:"hidden",boxShadow:"0 4px 32px #00000012",maxWidth:760,margin:"0 auto"}}>
@@ -142,7 +148,7 @@ const Invoice = ({order, products, co}) => {
         {/* Totals */}
         <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}>
           <div style={{width:280}}>
-            {[["Subtotal",fmt(sub)],[`Tax (${tax}%)`,fmt(taxAmt)]].map(([l,v])=>(
+            {[["Subtotal",fmt(sub)],[stData?.exempt?"Tax (Exempt)":`Tax ${stateRate}% · Tobacco only`,fmt(taxAmt)]].map(([l,v])=>(
               <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #f3f4f6"}}>
                 <span style={{fontSize:13,color:"#6b7280"}}>{l}</span><span style={{fontSize:13}}>{v}</span>
               </div>
@@ -165,10 +171,19 @@ const Invoice = ({order, products, co}) => {
 
 // ── MAIN PORTAL ───────────────────────────────────────────────────────────────
 // ── DRIVER INVOICE VIEW ───────────────────────────────────────────────────────
-function DriverInvoiceView({sale, customers, products, co, driver}){
+function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
   const cust = customers.find(c=>c.id===sale.cust_id);
-  const taxRate = parseFloat(co?.tax_rate||8.25);
-  const sub = sale.total, tax = sub*(taxRate/100), gt = sub+tax;
+  const TAXABLE_CATS = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+  const isTaxable = p => TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+  const stateId = sale.state||cust?.state||"TX";
+  const stData = stateTaxes?.find(s=>s.id===stateId);
+  const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||8.25);
+  const sub = sale.total;
+  const tax = parseFloat(((sale.items||[]).reduce((a,i)=>{
+    const p=products.find(x=>x.id===i.pid);
+    return isTaxable(p)?a+(p?.price||0)*i.qty:a;
+  },0)*stateRate/100).toFixed(2));
+  const gt = sub+tax;
   return(
     <div style={{fontFamily:"'Inter',sans-serif"}}>
       <div style={{background:"#7c3aed",padding:"16px 20px",borderRadius:"8px 8px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -186,7 +201,7 @@ function DriverInvoiceView({sale, customers, products, co, driver}){
         </table>
         <div style={{display:"flex",justifyContent:"flex-end"}}>
           <div style={{width:220}}>
-            {[["Subtotal",`$${sub.toFixed(2)}`],[`Tax (${taxRate}%)`,`$${tax.toFixed(2)}`]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:12,color:"#6b7280"}}>{l}</span><span style={{fontSize:12}}>{v}</span></div>)}
+            {[["Subtotal",`$${sub.toFixed(2)}`],[stData?.exempt?"Tax (Exempt)":`Tax ${stateRate}% · Tobacco only`,`$${tax.toFixed(2)}`]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:12,color:"#6b7280"}}>{l}</span><span style={{fontSize:12}}>{v}</span></div>)}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${gt.toFixed(2)}</span></div>
           </div>
         </div>
@@ -284,8 +299,10 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const loadedItems = driverData.activeLoad?.items||[];
   const availableProducts = products.filter(p=>loadedItems.find(i=>i.pid===p.id));
 
+  const TAXABLE_CATS_S = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+  const isTaxableS = p => TAXABLE_CATS_S.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
   const sub = availableProducts.reduce((a,p)=>a+(p.price||0)*(items[p.id]||0),0);
-  const tax = sub*(taxRate/100);
+  const tax = parseFloat((availableProducts.reduce((a,p)=>isTaxableS(p)?a+(p.price||0)*(items[p.id]||0):a,0)*taxRate/100).toFixed(2));
   const gt = sub+tax;
   const profit = availableProducts.reduce((a,p)=>a+((p.price||0)-(p.cost||0))*(items[p.id]||0),0);
 
@@ -360,12 +377,12 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
                 <button onClick={()=>setItems(prev=>({...prev,[p.id]:(prev[p.id]||0)+1}))} style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
               </div>
             </div>
-            {(items[p.id]||0)>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right"}}>{fmt(items[p.id]*p.price)} + {fmt(items[p.id]*p.price*taxRate/100)} tax = <strong>{fmt(items[p.id]*p.price*(1+taxRate/100))}</strong></div>}
+            {(items[p.id]||0)>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right"}}>{fmt(items[p.id]*p.price)}{isTaxableS(p)?<span style={{color:"#059669"}}> +tax</span>:""}</div>}
           </div>
         ))}
       </div>
       {gt>0&&<div style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
-        {[["Subtotal",fmt(sub),""],[`Tax (${taxRate}%)`,fmt(tax),""],["Grand Total",fmt(gt),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].map(([l,v,c])=>(
+        {[["Subtotal",fmt(sub),""],[`Tax · Tobacco only`,fmt(tax),""],["Grand Total",fmt(gt),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].map(([l,v,c])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
             <span style={{fontSize:12,color:"#6b7280"}}>{l}</span>
             <span style={{fontWeight:700,fontSize:l==="Grand Total"?16:13,color:c||"#212121"}}>{v}</span>
@@ -570,7 +587,9 @@ export default function OrderPortal() {
   ,[quantities,products]);
 
   const subtotal = useMemo(()=>orderItems.reduce((a,i)=>a+(products.find(p=>p.id===i.pid)?.price||0)*i.qty,0),[orderItems,products]);
-  const tax = subtotal*(taxRate/100);
+  const TAXABLE_CATS_O = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
+  const isTaxableO = p => TAXABLE_CATS_O.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+  const tax = parseFloat((orderItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableO(p)?a+(p?.price||0)*i.qty:a;},0)*taxRate/100).toFixed(2));
   const total = subtotal+tax;
   const cardSurcharge = payMethod==="card" ? parseFloat((total*CARD_FEE/100).toFixed(2)) : 0;
   const grandTotal = parseFloat((total+cardSurcharge).toFixed(2));
@@ -1262,7 +1281,7 @@ export default function OrderPortal() {
             <div style={{background:"#0a1628",borderRadius:12,padding:"14px 20px",minWidth:210}}>
               <div style={{fontSize:10,color:"#4b6080",letterSpacing:".08em",marginBottom:5}}>ORDER TOTAL</div>
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:26,color:"#f59e0b"}}>{fmt(total)}</div>
-              <div style={{fontSize:11,color:"#4b6080",marginBottom:12}}>{orderItems.length} item{orderItems.length!==1?"s":""} · incl. {taxRate}% tax</div>
+              <div style={{fontSize:11,color:"#4b6080",marginBottom:12}}>{orderItems.length} item{orderItems.length!==1?"s":""} · incl. tobacco tax</div>
               <button className="btn-amber" style={{width:"100%",justifyContent:"center",padding:"10px"}} onClick={()=>setStep("review")}>Review Order →</button>
             </div>
           )}
@@ -1333,7 +1352,7 @@ export default function OrderPortal() {
           </div>
           <div style={{background:"#0a1628",borderRadius:12,padding:"16px 22px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
             <div style={{display:"flex",gap:22,flexWrap:"wrap"}}>
-              {[{l:"Products",v:orderItems.length},{l:"Subtotal",v:fmt(subtotal)},{l:`Tax ${taxRate}%`,v:fmt(tax)},{l:"TOTAL",v:fmt(total),big:true}].map(k=>(
+              {[{l:"Products",v:orderItems.length},{l:"Subtotal",v:fmt(subtotal)},{l:`Tax · Tobacco only`,v:fmt(tax)},{l:"TOTAL",v:fmt(total),big:true}].map(k=>(
                 <div key={k.l}><div style={{fontSize:9,color:"#4b6080",letterSpacing:".08em"}}>{k.l}</div><div style={{fontFamily:"'Playfair Display',serif",fontSize:k.big?24:16,color:k.big?"#f59e0b":"#fff"}}>{k.v}</div></div>
               ))}
             </div>
@@ -1390,7 +1409,7 @@ export default function OrderPortal() {
           <div style={{position:"sticky",top:76}}>
             <div style={{background:"#0a1628",borderRadius:14,padding:"22px",color:"#fff"}}>
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,marginBottom:14}}>Order Summary</div>
-              {[{l:"Subtotal",v:fmt(subtotal)},{l:`Tax (${taxRate}%)`,v:fmt(tax)},{l:"Order Total",v:fmt(total)}].map(k=>(
+              {[{l:"Subtotal",v:fmt(subtotal)},{l:`Tax · Tobacco only`,v:fmt(tax)},{l:"Order Total",v:fmt(total)}].map(k=>(
                 <div key={k.l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #ffffff10"}}>
                   <span style={{fontSize:12,color:"#4b6080"}}>{k.l}</span>
                   <span style={{fontSize:12,color:"#9ca3af"}}>{k.v}</span>
