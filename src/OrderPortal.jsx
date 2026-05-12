@@ -304,6 +304,14 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const uid = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
   const fmt = v=>`$${parseFloat(v||0).toFixed(2)}`;
 
+  // Refresh customers with latest state data every time sell tab opens
+  useEffect(()=>{
+    supabase.from("customers")
+      .select("id,name,address,phone,email,state,truck_id,notes")
+      .eq("truck_id", driverData.truck.id)
+      .then(({data})=>{ if(data) setDriverData(prev=>({...prev,customers:data})); });
+  },[]);
+
   const loadedItems = driverData.activeLoad?.items||[];
   const availableProducts = products.filter(p=>loadedItems.find(i=>i.pid===p.id));
   // Use selected customer's state for tax (falls back to truck state)
@@ -719,10 +727,10 @@ export default function OrderPortal() {
       if(!profile.truck_id) throw new Error("No truck assigned — contact your admin");
       // Get truck + customers + loads + sales
       const [truckR, custsR, loadsR, salesR, taxesR] = await Promise.all([
-        supabase.from("trucks").select("*").eq("id",profile.truck_id).single(),
-        supabase.from("customers").select("*").eq("truck_id",profile.truck_id),
+        supabase.from("trucks").select("id,driver,plate,route,state,locked").eq("id",profile.truck_id).single(),
+        supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",profile.truck_id),
         supabase.from("loads").select("*").eq("truck_id",profile.truck_id).eq("status","out"),
-        supabase.from("sales").select("*").eq("truck_id",profile.truck_id),
+        supabase.from("sales").select("*").eq("truck_id",profile.truck_id).order("created_at",{ascending:false}),
         supabase.from("state_taxes").select("*"),
       ]);
       setDriverUser(data.user);
@@ -1002,6 +1010,16 @@ export default function OrderPortal() {
                   <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0ea5e9"}}>
                     ${driverData.sales.filter(s=>{const d=new Date(s.created_at);const today=new Date();return d.toDateString()===today.toDateString();}).reduce((a,s)=>a+s.total,0).toFixed(2)}
                   </div>
+                  <button onClick={async()=>{
+                    // Refresh customers and state taxes
+                    const [custsR, taxesR] = await Promise.all([
+                      supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",driverData.truck.id),
+                      supabase.from("state_taxes").select("*"),
+                    ]);
+                    setDriverData(prev=>({...prev, customers:custsR.data||prev.customers, stateTaxes:taxesR.data||prev.stateTaxes}));
+                  }} style={{marginTop:4,background:"transparent",border:"1px solid #1e3050",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#4b6080",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                    ↻ Refresh
+                  </button>
                   <button onClick={()=>{supabase.auth.signOut();setDriverUser(null);setDriverData(null);setDriverTab("dashboard");}}
                     style={{marginTop:8,background:"transparent",border:"1px solid #1e3050",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#4b6080",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
                     Sign Out
