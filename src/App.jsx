@@ -587,7 +587,6 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
 
 // ── SETTLEMENT DOC ────────────────────────────────────────────────────────────
 const SettleDoc=({truck,d,co,customers,payments})=>{
-  const tr=parseFloat(co?.tax_rate||8.25);
   return(
     <div className="sw">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:13,borderBottom:"2px solid #7c3aed",marginBottom:16,flexWrap:"wrap",gap:10}}>
@@ -679,7 +678,7 @@ export default function App(){
   const[coEdit,setCoEdit]=useState(null);
 
   const isAdmin=profile?.role==="admin";
-  const taxRate=parseFloat(co?.tax_rate||8.25);
+  const taxRate=parseFloat(co?.tax_rate||0);
 
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3200);};
 
@@ -736,9 +735,9 @@ export default function App(){
   const isTaxableProd = p => TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
 
   const getStateTaxRate = stateId => {
-    if(!stateId) return parseFloat(co?.tax_rate||8.25);
+    if(!stateId) return parseFloat(co?.tax_rate||0);
     const st = stateTaxes.find(s=>s.id===stateId);
-    if(!st) return parseFloat(co?.tax_rate||8.25);
+    if(!st) return parseFloat(co?.tax_rate||0);
     return st.exempt ? 0 : parseFloat(st.rate||0);
   };
 
