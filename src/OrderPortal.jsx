@@ -718,6 +718,7 @@ export default function OrderPortal() {
   const [driverSaleCust, setDriverSaleCust] = useState(null);
   const [driverViewInv, setDriverViewInv] = useState(null);
   const [showHistoryPayment, setShowHistoryPayment] = useState(false);
+  const [createdSaleForHistory, setCreatedSaleForHistory] = useState(null);
   const [createdSale, setCreatedSale] = useState(null);
   const [showPayment, setShowPayment] = useState(false);
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
