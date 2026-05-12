@@ -2345,6 +2345,7 @@ export default function App(){
                   </div>
                 </div>}
               </div>
+              <div className="card" style={{padding:22,marginBottom:14}}>
                 <div className="sh">Quick Actions</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   <button className="btn ba" onClick={()=>setModal("addProduct")}>{ic.plus} Add Product</button>
@@ -2357,7 +2358,7 @@ export default function App(){
                 <div className="sh">Order Portal Link</div>
                 <div style={{fontSize:12,color:"#6b7280",marginBottom:10}}>Share this link with your gas station customers so they can place orders:</div>
                 <div style={{background:"#f9fafb",border:"1px solid #1a2e40",borderRadius:8,padding:"11px 14px",fontSize:13,color:"#059669",fontFamily:"monospace",wordBreak:"break-all"}}>
-                  {window.location.origin}/order
+                  {window.location.origin+"/order"}
                 </div>
                 <button className="btn bb" style={{marginTop:10}} onClick={()=>{navigator.clipboard.writeText(window.location.origin+"/order");showToast("Link copied!");}}>Copy Link</button>
               </div>
