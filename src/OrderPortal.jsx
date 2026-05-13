@@ -1297,7 +1297,9 @@ export default function OrderPortal() {
       const tax = parseFloat((items.reduce((a,i)=>{
         return isTaxableProd({cat:i.cat,name:i.name})?a+i.price*i.qty:a;
       },0)*stateRate/100).toFixed(2));
-      const gt = sub+tax;
+      const prevBalance = parseFloat(sale.previous_balance||0);
+      const prevInvoiceIds = sale.previous_invoice_ids||"";
+      const gt = sub+tax+prevBalance;
       await fetch(`${SUPABASE_URL}/functions/v1/send-invoice-email`,{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${SUPABASE_ANON_KEY}`,"apikey":SUPABASE_ANON_KEY},
@@ -1308,6 +1310,8 @@ export default function OrderPortal() {
           driverName: driverData?.truck?.driver||"",
           date: sale.date,
           items, subtotal:sub, tax, taxRate, grandTotal:gt,
+          previousBalance: prevBalance,
+          previousInvoiceIds: prevInvoiceIds,
           companyName: co?.name, companyEmail: co?.email,
           companyPhone: co?.phone, companyAddress: co?.address,
           paidStatus: "unpaid",
