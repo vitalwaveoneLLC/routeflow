@@ -327,7 +327,8 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   useEffect(()=>{
     supabase.from("company").select("stripe_payment_link").single()
       .then(({data})=>{ if(data?.stripe_payment_link) setStripeLink(data.stripe_payment_link); });
-  },[]); = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
+  },[co?.stripe_payment_link, driverData.co?.stripe_payment_link]);
+  const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
 
   const handleCustSelect = async (custId) => {
     setSelCust(custId);
