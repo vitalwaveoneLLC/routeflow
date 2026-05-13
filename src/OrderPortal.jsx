@@ -1627,7 +1627,7 @@ export default function OrderPortal() {
               {driverTab==="load"&&<DriverLoadTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co}/>}
 
               {/* ── SELL TAB ── */}
-              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust} payForm={payForm} setPayForm={setPayForm} paymentSaving={paymentSaving} setPaymentSaving={setPaymentSaving} collectPayment={collectPayment} createdSale={createdSale} setCreatedSale={setCreatedSale} showPayment={showPayment} setShowPayment={setShowPayment}/>}
+              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={driverData.co||co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust} payForm={payForm} setPayForm={setPayForm} paymentSaving={paymentSaving} setPaymentSaving={setPaymentSaving} collectPayment={collectPayment} createdSale={createdSale} setCreatedSale={setCreatedSale} showPayment={showPayment} setShowPayment={setShowPayment}/>}
 
               {/* ── EXPENSES TAB ── */}
               {driverTab==="expenses"&&<DriverExpensesTab driverData={driverData} supabase={supabase}/>}
