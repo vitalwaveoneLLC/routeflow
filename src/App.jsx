@@ -733,7 +733,15 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
   },{});
 
   const sub=products.reduce((a,p)=>a+(p.price||0)*(wiItems[p.id]||0),0);
-  const taxRate2=wiCustObj?(()=>{const st=stateTaxes.find(s=>s.id===(wiCustObj.state||""));return st?.exempt?0:parseFloat(st?.rate||0);})():0;
+  const taxRate2=wiCustObj?(()=>{
+    const custState=(wiCustObj.state||"").trim();
+    // Match by code (IN) or name (Indiana) - case insensitive
+    const st=stateTaxes.find(s=>
+      s.id?.toUpperCase()===custState.toUpperCase()||
+      s.name?.toLowerCase()===custState.toLowerCase()
+    );
+    return st?.exempt?0:parseFloat(st?.rate||0);
+  })():0;
   const taxable=products.reduce((a,p)=>isTaxableProd(p)?(a+(p.price||0)*(wiItems[p.id]||0)):a,0);
   const tax=parseFloat((taxable*taxRate2/100).toFixed(2));
   const gt=sub+tax;
@@ -751,7 +759,7 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
     const paidIds=new Set((pm||[]).filter(p=>p.status==="paid").map(p=>p.sale_id));
     const allUnpaid=(cs||[]).filter(s=>!paidIds.has(s.id));
     const bal=parseFloat(allUnpaid.reduce((a,s)=>{
-      const st=stateTaxes.find(x=>x.id===(s.state||""));
+      const custSt=(s.state||"").trim();const st=stateTaxes.find(x=>x.id?.toUpperCase()===custSt.toUpperCase()||x.name?.toLowerCase()===custSt.toLowerCase());
       const rate=st?.exempt?0:parseFloat(st?.rate||0);
       const taxableAmt=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);
       const stax=parseFloat((taxableAmt*rate/100).toFixed(2));
@@ -794,6 +802,10 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
             <option value="">— Select customer —</option>
             {[...customers].sort((a,b)=>a.name.localeCompare(b.name)).map(c=><option key={c.id} value={c.id}>{c.name}{c.state?` · ${c.state}`:""}</option>)}
           </select>
+          {wiCustObj&&<div style={{marginTop:6,fontSize:11,color:"#6b7280"}}>
+            State: <strong>{wiCustObj.state||"Not set"}</strong> · 
+            Tax: <strong style={{color:taxRate2>0?"#7c3aed":"#9ca3af"}}>{taxRate2>0?`${taxRate2}% tobacco`:"exempt/none"}</strong>
+          </div>}
           {wiPrevBal>0&&<div style={{marginTop:8,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px"}}>
             <div style={{fontWeight:700,fontSize:11,color:"#dc2626",marginBottom:4}}>⚠️ Outstanding Balance</div>
             {wiPrevInvs.slice(0,3).map(s=><div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#dc2626",marginBottom:2}}><span>{s.id} · {s.date}</span><span>${calcSaleGrandTotal(s).toFixed(2)}</span></div>)}
