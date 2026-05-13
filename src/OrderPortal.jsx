@@ -312,8 +312,22 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const [newCust, setNewCust] = useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:""});
   const [newCustSaving, setNewCustSaving] = useState(false);
   const [newCustMsg, setNewCustMsg] = useState(null);
-  const [qrLoading, setQrLoading] = useState(false);
-  const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
+  const [stripeLink, setStripeLink] = useState("");
+
+  useEffect(()=>{
+    // Always fetch fresh to ensure we have the latest link
+    supabase.from("company").select("stripe_payment_link").single()
+      .then(({data})=>{
+        const link = data?.stripe_payment_link || co?.stripe_payment_link || driverData.co?.stripe_payment_link || "";
+        setStripeLink(link);
+      });
+  },[co?.stripe_payment_link, driverData.co?.stripe_payment_link]);
+
+  // Fetch stripe payment link directly
+  useEffect(()=>{
+    supabase.from("company").select("stripe_payment_link").single()
+      .then(({data})=>{ if(data?.stripe_payment_link) setStripeLink(data.stripe_payment_link); });
+  },[]); = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
 
   const handleCustSelect = async (custId) => {
     setSelCust(custId);
@@ -541,10 +555,10 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"16px",textAlign:"center"}}>
             <div style={{fontWeight:700,fontSize:13,color:"#7c3aed",marginBottom:4}}>💳 Card Payment via QR</div>
             <div style={{fontSize:11,color:"#6b7280",marginBottom:12}}>Customer scans QR → pays on their phone</div>
-            {(driverData.co||co)?.stripe_payment_link?(
+            {stripeLink?(
               <>
                 <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent((driverData.co||co).stripe_payment_link)}`}
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(stripeLink)}`}
                   alt="Stripe Payment QR"
                   style={{width:200,height:200,borderRadius:8,border:"3px solid #7c3aed"}}
                 />
@@ -566,8 +580,8 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
               </>
             ):(
               <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"12px",fontSize:12,color:"#854d0e"}}>
-                ⚠️ No Stripe Payment Link set up yet.<br/>
-                Ask admin to add it in <strong>Settings → Stripe Payment Link</strong>
+                ⏳ Loading payment link...<br/>
+                If this persists, ask admin to set <strong>Settings → Stripe Payment Link</strong>
               </div>
             )}
           </div>
