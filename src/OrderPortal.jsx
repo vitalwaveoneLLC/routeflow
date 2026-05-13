@@ -600,21 +600,29 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   );
 
   const [showNewCust, setShowNewCust] = useState(false);
-  const [newCust, setNewCust] = useState({name:"",address:"",city:"",state:"",phone:"",email:""});
+  const [newCust, setNewCust] = useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:""});
   const [newCustSaving, setNewCustSaving] = useState(false);
   const [newCustMsg, setNewCustMsg] = useState(null);
 
   const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
 
   const createNewCustomer = async () => {
-    if(!newCust.name.trim()) return setNewCustMsg({t:"error",m:"Shop name is required"});
-    if(!newCust.phone.trim()) return setNewCustMsg({t:"error",m:"Phone number is required"});
-    if(!newCust.address.trim()) return setNewCustMsg({t:"error",m:"Address is required"});
-    if(!newCust.state) return setNewCustMsg({t:"error",m:"State is required"});
+    const required = [
+      [newCust.name.trim(), "Shop / Business name is required"],
+      [newCust.phone.trim(), "Phone number is required"],
+      [newCust.email.trim(), "Email is required"],
+      [newCust.address.trim(), "Street address is required"],
+      [newCust.city.trim(), "City is required"],
+      [newCust.zip.trim(), "ZIP code is required"],
+      [newCust.state, "State is required"],
+    ];
+    for(const [val, msg] of required){
+      if(!val) return setNewCustMsg({t:"error",m:msg});
+    }
     setNewCustSaving(true);
     try{
       const id = "C"+Math.random().toString(36).slice(2,8).toUpperCase();
-      const fullAddress = newCust.address+(newCust.city?`, ${newCust.city}`:"")+(newCust.state?`, ${newCust.state}`:"");
+      const fullAddress = `${newCust.address.trim()}, ${newCust.city.trim()}, ${newCust.state} ${newCust.zip.trim()}`;
       const rec = {
         id,
         name: newCust.name.trim(),
@@ -627,12 +635,10 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       };
       const {error} = await supabase.from("customers").insert(rec);
       if(error) throw error;
-      // Add to local driver data
       setDriverData(prev=>({...prev, customers:[...prev.customers, rec]}));
-      // Auto-select the new customer
       await handleCustSelect(id);
       setShowNewCust(false);
-      setNewCust({name:"",address:"",city:"",state:"",phone:"",email:""});
+      setNewCust({name:"",address:"",city:"",zip:"",state:"",phone:"",email:""});
       setNewCustMsg(null);
     }catch(e){ setNewCustMsg({t:"error",m:e.message}); }
     setNewCustSaving(false);
@@ -661,9 +667,9 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           {[
             {label:"Shop / Business Name *",key:"name",placeholder:"e.g. Corner Gas Station",type:"text"},
             {label:"Phone Number *",key:"phone",placeholder:"e.g. 3175096262",type:"tel"},
-            {label:"Email",key:"email",placeholder:"e.g. shop@email.com",type:"email"},
+            {label:"Email *",key:"email",placeholder:"e.g. shop@email.com",type:"email"},
             {label:"Street Address *",key:"address",placeholder:"e.g. 123 Main Street",type:"text"},
-            {label:"City",key:"city",placeholder:"e.g. Indianapolis",type:"text"},
+            {label:"City *",key:"city",placeholder:"e.g. Indianapolis",type:"text"},
           ].map(f=>(
             <div key={f.key} style={{marginBottom:10}}>
               <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>{f.label}</label>
@@ -672,19 +678,31 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
                 value={newCust[f.key]}
                 onChange={e=>setNewCust(p=>({...p,[f.key]:e.target.value}))}
                 placeholder={f.placeholder}
-                style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box"}}
+                style={{width:"100%",border:`1.5px solid ${newCust[f.key]?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box"}}
               />
             </div>
           ))}
 
-          {/* State Dropdown */}
-          <div style={{marginBottom:12}}>
-            <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>State *</label>
-            <select value={newCust.state} onChange={e=>setNewCust(p=>({...p,state:e.target.value}))}
-              style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}>
-              <option value="">— Select State —</option>
-              {US_STATES.map(s=><option key={s} value={s}>{s}</option>)}
-            </select>
+          {/* ZIP + State row */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+            <div>
+              <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>ZIP Code *</label>
+              <input
+                type="text" maxLength={10}
+                value={newCust.zip}
+                onChange={e=>setNewCust(p=>({...p,zip:e.target.value.replace(/[^0-9-]/g,"")}))}
+                placeholder="e.g. 46201"
+                style={{width:"100%",border:`1.5px solid ${newCust.zip?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box"}}
+              />
+            </div>
+            <div>
+              <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>State *</label>
+              <select value={newCust.state} onChange={e=>setNewCust(p=>({...p,state:e.target.value}))}
+                style={{width:"100%",border:`1.5px solid ${newCust.state?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}>
+                <option value="">— State —</option>
+                {US_STATES.map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
           </div>
 
           {/* Tax info for selected state */}
