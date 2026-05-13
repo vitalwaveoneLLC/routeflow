@@ -306,11 +306,33 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const uid = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
   const fmt = v=>`$${parseFloat(v||0).toFixed(2)}`;
 
+  const [custUnpaidBalance, setCustUnpaidBalance] = useState(0);
+  const [custUnpaidInvs, setCustUnpaidInvs] = useState([]);
+
   const handleCustSelect = async (custId) => {
     setSelCust(custId);
+    setCustUnpaidBalance(0);
+    setCustUnpaidInvs([]);
     if(!custId){setFreshCustState("");return;}
-    const {data} = await supabase.from("customers").select("state").eq("id",custId).single();
-    setFreshCustState(data?.state||"");
+    // Fetch fresh state and unpaid balances in parallel
+    const [{data:custData}, {data:unpaidPmts}, {data:custSales}] = await Promise.all([
+      supabase.from("customers").select("state").eq("id",custId).single(),
+      supabase.from("payments").select("sale_id,status").eq("status","unpaid"),
+      supabase.from("sales").select("id,total,state,items,date").eq("cust_id",custId),
+    ]);
+    setFreshCustState(custData?.state||"");
+    if(custSales && unpaidPmts){
+      const unpaidIds = new Set(unpaidPmts.map(p=>p.sale_id));
+      const unpaidSales = custSales.filter(s=>unpaidIds.has(s.id));
+      // Also include sales with no payment record at all
+      const {data:allPmts} = await supabase.from("payments").select("sale_id").in("sale_id", custSales.map(s=>s.id));
+      const paidSaleIds = new Set((allPmts||[]).filter(p=>p.status!=="unpaid").map(p=>p.sale_id));
+      const noPmtSales = custSales.filter(s=>!(allPmts||[]).find(p=>p.sale_id===s.id));
+      const allUnpaid = [...unpaidSales, ...noPmtSales].filter((s,i,arr)=>arr.findIndex(x=>x.id===s.id)===i);
+      const totalUnpaid = allUnpaid.reduce((a,s)=>a+s.total,0);
+      setCustUnpaidBalance(parseFloat(totalUnpaid.toFixed(2)));
+      setCustUnpaidInvs(allUnpaid);
+    }
   };
 
   const loadedItems = driverData.activeLoad?.items||[];
@@ -400,7 +422,20 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     try{
       const {data:seqData} = await supabase.rpc("next_invoice_number");
       const invId = "INV-" + String(seqData||1).padStart(4,"0");
-      const ns = {id:invId,load_id:driverData.activeLoad?.id,truck_id:driverData.truck?.id,cust_id:selCust,state:freshCustState||selCustObj?.state||driverData.truck?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,created_at:new Date().toISOString()};
+      const ns = {
+        id:invId,
+        load_id:driverData.activeLoad?.id,
+        truck_id:driverData.truck?.id,
+        cust_id:selCust,
+        state:freshCustState||selCustObj?.state||driverData.truck?.state||"",
+        date:new Date().toLocaleDateString(),
+        items:saleItems,
+        total:sub,
+        profit,
+        previous_balance:custUnpaidBalance>0?custUnpaidBalance:0,
+        previous_invoice_ids:custUnpaidBalance>0?custUnpaidInvs.map(s=>s.id).join(","):"",
+        created_at:new Date().toISOString()
+      };
       await supabase.from("sales").insert(ns);
       await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
       setDriverData(prev=>({...prev,sales:[ns,...prev.sales]}));
@@ -446,11 +481,17 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           {saleTax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#059669"}}>
             <span>Tobacco/Vape Tax</span><span>${saleTax.toFixed(2)}</span>
           </div>}
+          {createdSale.previous_balance>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#dc2626",borderTop:"1px dashed #fecaca",marginTop:4,paddingTop:4}}>
+            <span>⚠️ Previous Balance ({createdSale.previous_invoice_ids})</span>
+            <span style={{fontWeight:700}}>${parseFloat(createdSale.previous_balance).toFixed(2)}</span>
+          </div>}
           <div style={{display:"flex",justifyContent:"space-between",fontSize:15,fontWeight:800,color:"#0a1628",borderTop:"1px solid #d1fae5",marginTop:6,paddingTop:6}}>
-            <span>TOTAL (Cash/Zelle)</span><span>${gt.toFixed(2)}</span>
+            <span>TOTAL DUE (Cash/Zelle)</span>
+            <span>${(gt+(createdSale.previous_balance||0)).toFixed(2)}</span>
           </div>
           <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#dc2626",marginTop:3}}>
-            <span>TOTAL (Card +{CARD_FEE}%)</span><span>${cardTotal.toFixed(2)}</span>
+            <span>TOTAL DUE (Card +{CARD_FEE}%)</span>
+            <span>${(cardTotal+(createdSale.previous_balance||0)*(1+CARD_FEE/100)).toFixed(2)}</span>
           </div>
         </div>
 
@@ -557,6 +598,21 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           <option value="">— Select customer —</option>
           {driverData.customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+        {/* Unpaid balance warning */}
+        {custUnpaidBalance>0&&<div style={{marginTop:8,background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px"}}>
+          <div style={{fontWeight:700,fontSize:12,color:"#854d0e",marginBottom:4}}>⚠️ Outstanding Balance</div>
+          {custUnpaidInvs.map(s=>(
+            <div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#92400e",marginBottom:2}}>
+              <span>{s.id} · {s.date}</span>
+              <span style={{fontWeight:700}}>${s.total.toFixed(2)}</span>
+            </div>
+          ))}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,color:"#854d0e",borderTop:"1px solid #fde68a",marginTop:4,paddingTop:4}}>
+            <span>Total Outstanding</span>
+            <span>${custUnpaidBalance.toFixed(2)}</span>
+          </div>
+          <div style={{fontSize:10,color:"#92400e",marginTop:4}}>This balance will be added to the new invoice</div>
+        </div>}
       </div>
       <div style={{display:"flex",gap:6,marginBottom:12}}>
         <button onClick={()=>setScanning(false)} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${!scanning?"#0ea5e9":"#e5e7eb"}`,background:!scanning?"#f0f9ff":"#fff",color:!scanning?"#0ea5e9":"#6b7280",fontWeight:600,cursor:"pointer",fontSize:12,fontFamily:"'Inter',sans-serif"}}>📋 Manual</button>
@@ -605,7 +661,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         })}
       </div>
       {gt>0&&<div style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
-        {[["Subtotal",fmt(sub),""],hasTaxableItems&&tax>0?[`Tobacco/Vape Tax · ${custStateId} (${driverTaxRate}%)`,fmt(tax),"#059669"]:null,["Grand Total",fmt(gt),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].filter(Boolean).map(([l,v,c])=>(
+        {[["Subtotal",fmt(sub),""],hasTaxableItems&&tax>0?[`Tobacco/Vape Tax · ${custStateId} (${driverTaxRate}%)`,fmt(tax),"#059669"]:null,custUnpaidBalance>0?["⚠️ Previous Balance",fmt(custUnpaidBalance),"#dc2626"]:null,["Grand Total",fmt(gt+custUnpaidBalance),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].filter(Boolean).map(([l,v,c])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
             <span style={{fontSize:12,color:"#6b7280"}}>{l}</span>
             <span style={{fontWeight:700,fontSize:l==="Grand Total"?16:13,color:c||"#212121"}}>{v}</span>
@@ -1030,17 +1086,18 @@ export default function OrderPortal() {
   };
 
   // Verify customer by shop name + phone
-  const verifyCustomer = () => {
+  const [custPrevBalance, setCustPrevBalance] = useState(0);
+  const [custPrevInvs, setCustPrevInvs] = useState([]);
+
+  const verifyCustomer = async () => {
     setVerifyError("");
     if(!custSearch.trim()) return setVerifyError("Please enter your business name");
     if(!custPhone.trim()) return setVerifyError("Please enter your phone number");
 
-    // Normalize phone — strip spaces, dashes, brackets for comparison
     const normalize = p => p.replace(/[\s\-\(\)\+\.]/g,"");
     const inputPhone = normalize(custPhone);
     const inputName = custSearch.trim().toLowerCase();
 
-    // Find matching customer
     const match = customers.find(c => {
       const nameMatch = c.name.toLowerCase().includes(inputName) || inputName.includes(c.name.toLowerCase());
       const phoneMatch = normalize(c.phone||"") === inputPhone || normalize(c.phone||"").endsWith(inputPhone) || inputPhone.endsWith(normalize(c.phone||"").slice(-7));
@@ -1051,6 +1108,17 @@ export default function OrderPortal() {
       setVerifyError("No account found with that name and phone number. Please check your details or register below.");
       return;
     }
+
+    // Check unpaid balance
+    const [{data:custSales},{data:pmts}] = await Promise.all([
+      supabase.from("sales").select("id,total,date").eq("cust_id",match.id),
+      supabase.from("payments").select("sale_id,status").eq("status","unpaid"),
+    ]);
+    const unpaidIds = new Set((pmts||[]).map(p=>p.sale_id));
+    const allUnpaid = (custSales||[]).filter(s=>unpaidIds.has(s.id)||!(pmts||[]).find(p=>p.sale_id===s.id));
+    const bal = parseFloat(allUnpaid.reduce((a,s)=>a+s.total,0).toFixed(2));
+    setCustPrevBalance(bal);
+    setCustPrevInvs(allUnpaid);
 
     setSelCust(match);
     setStep("order");
@@ -1790,10 +1858,22 @@ export default function OrderPortal() {
           <div style={{position:"sticky",top:76}}>
             <div style={{background:"#0a1628",borderRadius:14,padding:"22px",color:"#fff"}}>
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,marginBottom:14}}>Order Summary</div>
-              {[{l:"Subtotal",v:fmt(subtotal)},{l:`Tax · Tobacco only`,v:fmt(tax)},{l:"Order Total",v:fmt(total)}].map(k=>(
+              {/* Previous balance warning */}
+              {custPrevBalance>0&&<div style={{background:"#dc2626",borderRadius:8,padding:"10px 12px",marginBottom:12}}>
+                <div style={{fontWeight:700,fontSize:12,color:"#fff",marginBottom:4}}>⚠️ Outstanding Balance</div>
+                {custPrevInvs.slice(0,3).map(s=>(
+                  <div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#fecaca",marginBottom:2}}>
+                    <span>{s.id} · {s.date}</span><span>${s.total.toFixed(2)}</span>
+                  </div>
+                ))}
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,color:"#fff",borderTop:"1px solid #ef4444",marginTop:4,paddingTop:4}}>
+                  <span>Previous Balance</span><span>{fmt(custPrevBalance)}</span>
+                </div>
+              </div>}
+              {[{l:"Subtotal",v:fmt(subtotal)},{l:`Tax · Tobacco only`,v:fmt(tax)},{l:"New Order Total",v:fmt(total)},...(custPrevBalance>0?[{l:"⚠️ Previous Balance",v:fmt(custPrevBalance)}]:[])].map(k=>(
                 <div key={k.l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #ffffff10"}}>
-                  <span style={{fontSize:12,color:"#4b6080"}}>{k.l}</span>
-                  <span style={{fontSize:12,color:"#9ca3af"}}>{k.v}</span>
+                  <span style={{fontSize:12,color:k.l.includes("Balance")?"#fca5a5":"#4b6080"}}>{k.l}</span>
+                  <span style={{fontSize:12,color:k.l.includes("Balance")?"#fca5a5":"#9ca3af"}}>{k.v}</span>
                 </div>
               ))}
               {payMethod==="card"&&<div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #ffffff10"}}>
@@ -1802,7 +1882,7 @@ export default function OrderPortal() {
               </div>}
               <div style={{display:"flex",justifyContent:"space-between",padding:"14px 0",borderTop:"1px solid #ffffff20",marginTop:3}}>
                 <span style={{fontFamily:"'Playfair Display',serif",fontSize:17}}>Total Due</span>
-                <span style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#f59e0b"}}>{fmt(grandTotal)}</span>
+                <span style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#f59e0b"}}>{fmt(grandTotal+custPrevBalance)}</span>
               </div>
 
               {/* Payment method selector */}
