@@ -3027,20 +3027,62 @@ export default function App(){
       </Modal>}
 
       {modal==="addCustomer"&&<Modal title="⛽ Open New Customer Account" onClose={()=>setModal(null)}>
-        <div style={{display:"flex",flexDirection:"column",gap:11}}>
-          <div><label>Business Name *</label><input placeholder="Speedy Gas & Mart" value={nc.name} onChange={e=>setNc(p=>({...p,name:e.target.value}))}/></div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div><label>Phone</label><input placeholder="(713) 555-0100" value={nc.phone} onChange={e=>setNc(p=>({...p,phone:e.target.value}))}/></div>
-            <div><label>Email</label><input placeholder="owner@gasstation.com" value={nc.email} onChange={e=>setNc(p=>({...p,email:e.target.value}))}/></div>
+        <div style={{background:"#f9fafb",border:"1.5px solid #7c3aed",borderRadius:12,padding:"16px"}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#7c3aed",marginBottom:12}}>🏪 New Customer Registration</div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {[
+              {label:"Shop / Business Name *",key:"name",placeholder:"e.g. Corner Gas Station",type:"text"},
+              {label:"Phone Number *",key:"phone",placeholder:"e.g. 3175096262",type:"tel"},
+              {label:"Email *",key:"email",placeholder:"e.g. shop@email.com",type:"email"},
+              {label:"Street Address *",key:"address",placeholder:"e.g. 123 Main Street",type:"text"},
+              {label:"City *",key:"city",placeholder:"e.g. Indianapolis",type:"text"},
+            ].map(f=>(
+              <div key={f.key}>
+                <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>{f.label}</label>
+                <input type={f.type} value={nc[f.key]||""} onChange={e=>setNc(p=>({...p,[f.key]:e.target.value}))} placeholder={f.placeholder}
+                  style={{width:"100%",border:`1.5px solid ${nc[f.key]?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
+              </div>
+            ))}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div>
+                <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>ZIP Code *</label>
+                <input type="text" maxLength={10} value={nc.zip||""} onChange={e=>setNc(p=>({...p,zip:e.target.value.replace(/[^0-9-]/g,"")}))} placeholder="e.g. 46201"
+                  style={{width:"100%",border:`1.5px solid ${nc.zip?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
+              </div>
+              <div>
+                <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>State *</label>
+                <select value={nc.state||""} onChange={e=>setNc(p=>({...p,state:e.target.value}))}
+                  style={{width:"100%",border:`1.5px solid ${nc.state?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"10px 12px",fontSize:13}}>
+                  <option value="">— State —</option>
+                  {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+            {nc.state&&(()=>{const st=stateTaxes.find(x=>x.id===nc.state);return st?(
+              <div style={{fontSize:11,color:st.exempt?"#059669":"#854d0e",background:st.exempt?"#f0fdf4":"#fef9c3",padding:"6px 10px",borderRadius:6}}>
+                {st.exempt?`✅ ${nc.state} — Tax Exempt`:`🏛 ${nc.state} — ${st.rate}% tobacco/vape tax`}
+              </div>
+            ):(
+              <div style={{fontSize:11,color:"#9ca3af"}}>ℹ️ {nc.state} — No tax rate configured yet</div>
+            );})()}
+            <div>
+              <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>Assign to Truck</label>
+              <select value={nc.truck_id||""} onChange={e=>setNc(p=>({...p,truck_id:e.target.value}))} style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13}}>
+                <option value="">— No truck assigned —</option>
+                {trucks.map(t=><option key={t.id} value={t.id}>{t.driver} · {t.plate}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>Notes (optional)</label>
+              <input value={nc.notes||""} onChange={e=>setNc(p=>({...p,notes:e.target.value}))} placeholder="Optional notes..."
+                style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
+            </div>
           </div>
-          <div><label>Full Address</label><input placeholder="1420 N Main St, Houston TX 77001" value={nc.address} onChange={e=>setNc(p=>({...p,address:e.target.value}))}/></div>
-          <div><label>Assigned Driver / Truck</label><select value={nc.truck_id||trucks[0]?.id||""} onChange={e=>setNc(p=>({...p,truck_id:e.target.value}))}>{trucks.map(t=><option key={t.id} value={t.id}>{t.driver} ({t.route||t.plate})</option>)}</select></div>
-          <div><label>Notes (optional)</label><input placeholder="e.g. owner contact, delivery instructions..." value={nc.notes} onChange={e=>setNc(p=>({...p,notes:e.target.value}))}/></div>
-          <Divider/>
-          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-            <button className="btn bgh" onClick={()=>setModal(null)}>Cancel</button>
-            <button className="btn ba" onClick={addCustomer} disabled={saving}>{ic.chk} Open Account</button>
-          </div>
+        </div>
+        <Divider/>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button className="btn bgh" onClick={()=>setModal(null)}>Cancel</button>
+          <button className="btn ba" onClick={addCustomer} disabled={saving}>{ic.chk} Open Account</button>
         </div>
       </Modal>}
 
