@@ -308,6 +308,12 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
 
   const [custUnpaidBalance, setCustUnpaidBalance] = useState(0);
   const [custUnpaidInvs, setCustUnpaidInvs] = useState([]);
+  const [showNewCust, setShowNewCust] = useState(false);
+  const [newCust, setNewCust] = useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:""});
+  const [newCustSaving, setNewCustSaving] = useState(false);
+  const [newCustMsg, setNewCustMsg] = useState(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
 
   const handleCustSelect = async (custId) => {
     setSelCust(custId);
@@ -383,8 +389,6 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     setScanInput("");
     setTimeout(()=>setMsg(null),2000);
   };
-
-  const [qrLoading, setQrLoading] = useState(false);
 
   const generateStripeQR_unused = async (sale) => {
     setQrLoading(true);
@@ -598,13 +602,6 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       <div style={{fontSize:13,color:"#6b7280",marginBottom:16}}>You need to load your truck before making sales</div>
     </div>
   );
-
-  const [showNewCust, setShowNewCust] = useState(false);
-  const [newCust, setNewCust] = useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:""});
-  const [newCustSaving, setNewCustSaving] = useState(false);
-  const [newCustMsg, setNewCustMsg] = useState(null);
-
-  const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
 
   const createNewCustomer = async () => {
     const required = [
