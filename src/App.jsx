@@ -1662,7 +1662,7 @@ export default function App(){
               ]);
               const unpaidIds=new Set((pm||[]).map(p=>p.sale_id));
               const allUnpaid=(cs||[]).filter(s=>unpaidIds.has(s.id)||!(pm||[]).find(p=>p.sale_id===s.id));
-              const bal=parseFloat(allUnpaid.reduce((a,s)=>a+s.total,0).toFixed(2));
+              const bal=parseFloat(allUnpaid.reduce((a,s)=>a+calcSaleGrandTotal(s),0).toFixed(2));
               setWiPrevBal(bal);setWiPrevInvs(allUnpaid);
             };
 

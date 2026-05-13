@@ -329,7 +329,17 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       const paidSaleIds = new Set((allPmts||[]).filter(p=>p.status!=="unpaid").map(p=>p.sale_id));
       const noPmtSales = custSales.filter(s=>!(allPmts||[]).find(p=>p.sale_id===s.id));
       const allUnpaid = [...unpaidSales, ...noPmtSales].filter((s,i,arr)=>arr.findIndex(x=>x.id===s.id)===i);
-      const totalUnpaid = allUnpaid.reduce((a,s)=>a+s.total,0);
+      // Include tax and any nested previous balance in outstanding amount
+      const totalUnpaid = allUnpaid.reduce((a,s)=>{
+        const st = driverData?.stateTaxes?.find(x=>x.id===(s.state||""));
+        const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
+        const taxable = (s.items||[]).reduce((b,i)=>{
+          const p = products.find(x=>x.id===i.pid);
+          return isTaxableProd(p) ? b+(p?.price||0)*i.qty : b;
+        }, 0);
+        const tax = parseFloat((taxable*rate/100).toFixed(2));
+        return a + s.total + tax + parseFloat(s.previous_balance||0);
+      }, 0);
       setCustUnpaidBalance(parseFloat(totalUnpaid.toFixed(2)));
       setCustUnpaidInvs(allUnpaid);
     }
@@ -1118,7 +1128,18 @@ export default function OrderPortal() {
     ]);
     const unpaidIds = new Set((pmts||[]).map(p=>p.sale_id));
     const allUnpaid = (custSales||[]).filter(s=>unpaidIds.has(s.id)||!(pmts||[]).find(p=>p.sale_id===s.id));
-    const bal = parseFloat(allUnpaid.reduce((a,s)=>a+s.total,0).toFixed(2));
+    // Fetch state taxes for accurate balance calculation
+    const {data:staxes} = await supabase.from("state_taxes").select("*");
+    const bal = parseFloat(allUnpaid.reduce((a,s)=>{
+      const st = (staxes||[]).find(x=>x.id===(s.state||""));
+      const rate = st?.exempt ? 0 : parseFloat(st?.rate||co?.tax_rate||0);
+      const taxable = (s.items||[]).reduce((b,i)=>{
+        const p = products.find(x=>x.id===i.pid);
+        return isTaxableProd(p) ? b+(p?.price||0)*i.qty : b;
+      }, 0);
+      const tax = parseFloat((taxable*rate/100).toFixed(2));
+      return a + s.total + tax + parseFloat(s.previous_balance||0);
+    }, 0).toFixed(2));
     setCustPrevBalance(bal);
     setCustPrevInvs(allUnpaid);
 
