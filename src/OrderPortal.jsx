@@ -599,6 +599,45 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     </div>
   );
 
+  const [showNewCust, setShowNewCust] = useState(false);
+  const [newCust, setNewCust] = useState({name:"",address:"",city:"",state:"",phone:"",email:""});
+  const [newCustSaving, setNewCustSaving] = useState(false);
+  const [newCustMsg, setNewCustMsg] = useState(null);
+
+  const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
+
+  const createNewCustomer = async () => {
+    if(!newCust.name.trim()) return setNewCustMsg({t:"error",m:"Shop name is required"});
+    if(!newCust.phone.trim()) return setNewCustMsg({t:"error",m:"Phone number is required"});
+    if(!newCust.address.trim()) return setNewCustMsg({t:"error",m:"Address is required"});
+    if(!newCust.state) return setNewCustMsg({t:"error",m:"State is required"});
+    setNewCustSaving(true);
+    try{
+      const id = "C"+Math.random().toString(36).slice(2,8).toUpperCase();
+      const fullAddress = newCust.address+(newCust.city?`, ${newCust.city}`:"")+(newCust.state?`, ${newCust.state}`:"");
+      const rec = {
+        id,
+        name: newCust.name.trim(),
+        address: fullAddress,
+        phone: newCust.phone.trim(),
+        email: newCust.email.trim(),
+        state: newCust.state,
+        truck_id: driverData.truck?.id,
+        notes: `Created by driver ${driverData.truck?.driver} on ${new Date().toLocaleDateString()}`,
+      };
+      const {error} = await supabase.from("customers").insert(rec);
+      if(error) throw error;
+      // Add to local driver data
+      setDriverData(prev=>({...prev, customers:[...prev.customers, rec]}));
+      // Auto-select the new customer
+      await handleCustSelect(id);
+      setShowNewCust(false);
+      setNewCust({name:"",address:"",city:"",state:"",phone:"",email:""});
+      setNewCustMsg(null);
+    }catch(e){ setNewCustMsg({t:"error",m:e.message}); }
+    setNewCustSaving(false);
+  };
+
   return(
     <div>
       <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:14}}>💳 Record Sale</div>
@@ -608,6 +647,70 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           <option value="">— Select customer —</option>
           {driverData.customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+
+        {/* New Customer Button */}
+        <button onClick={()=>{setShowNewCust(!showNewCust);setNewCustMsg(null);}}
+          style={{marginTop:8,width:"100%",padding:"9px",background:showNewCust?"#f3f4f6":"#0a1628",color:showNewCust?"#6b7280":"#fff",border:"1px solid #e5e7eb",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+          {showNewCust?"✕ Cancel":"➕ New Customer — Register New Station"}
+        </button>
+
+        {/* New Customer Form */}
+        {showNewCust&&<div style={{marginTop:10,background:"#f9fafb",border:"1.5px solid #7c3aed",borderRadius:12,padding:"16px"}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#7c3aed",marginBottom:12}}>🏪 New Customer Registration</div>
+
+          {[
+            {label:"Shop / Business Name *",key:"name",placeholder:"e.g. Corner Gas Station",type:"text"},
+            {label:"Phone Number *",key:"phone",placeholder:"e.g. 3175096262",type:"tel"},
+            {label:"Email",key:"email",placeholder:"e.g. shop@email.com",type:"email"},
+            {label:"Street Address *",key:"address",placeholder:"e.g. 123 Main Street",type:"text"},
+            {label:"City",key:"city",placeholder:"e.g. Indianapolis",type:"text"},
+          ].map(f=>(
+            <div key={f.key} style={{marginBottom:10}}>
+              <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>{f.label}</label>
+              <input
+                type={f.type}
+                value={newCust[f.key]}
+                onChange={e=>setNewCust(p=>({...p,[f.key]:e.target.value}))}
+                placeholder={f.placeholder}
+                style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box"}}
+              />
+            </div>
+          ))}
+
+          {/* State Dropdown */}
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>State *</label>
+            <select value={newCust.state} onChange={e=>setNewCust(p=>({...p,state:e.target.value}))}
+              style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}>
+              <option value="">— Select State —</option>
+              {US_STATES.map(s=><option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          {/* Tax info for selected state */}
+          {newCust.state&&(()=>{
+            const st = driverData.stateTaxes?.find(x=>x.id===newCust.state);
+            return st ? (
+              <div style={{background:st.exempt?"#f0fdf4":"#fef9c3",border:`1px solid ${st.exempt?"#a7f3d0":"#fde68a"}`,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:11}}>
+                {st.exempt
+                  ?<span style={{color:"#065f46"}}>✅ {newCust.state} — Tax Exempt</span>
+                  :<span style={{color:"#854d0e"}}>🏛 {newCust.state} — {st.rate}% tobacco/vape tax applies</span>
+                }
+              </div>
+            ) : (
+              <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:11,color:"#9ca3af"}}>
+                ℹ️ {newCust.state} — No tax rate configured yet
+              </div>
+            );
+          })()}
+
+          {newCustMsg&&<div style={{background:newCustMsg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${newCustMsg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"8px 12px",fontSize:12,color:newCustMsg.t==="success"?"#065f46":"#dc2626",marginBottom:10}}>{newCustMsg.m}</div>}
+
+          <button onClick={createNewCustomer} disabled={newCustSaving}
+            style={{width:"100%",padding:"12px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+            {newCustSaving?"Creating Account...":"✅ Create Account & Select"}
+          </button>
+        </div>}
         {/* Unpaid balance warning */}
         {custUnpaidBalance>0&&<div style={{marginTop:8,background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px"}}>
           <div style={{fontWeight:700,fontSize:12,color:"#854d0e",marginBottom:4}}>⚠️ Outstanding Balance</div>
