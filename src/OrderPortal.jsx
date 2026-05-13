@@ -211,8 +211,8 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
         </table>
         <div style={{display:"flex",justifyContent:"flex-end"}}>
           <div style={{width:220}}>
-            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:12,color:"#6b7280"}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":"#212121"}}>{v}</span></div>)}
-            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${gt.toFixed(2)}</span></div>
+            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null,parseFloat(sale.previous_balance||0)>0?[`⚠️ Prev. Balance (${sale.previous_invoice_ids||""})`,`$${parseFloat(sale.previous_balance||0).toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6",background:l.includes("Prev")?"#fef2f2":"transparent",margin:l.includes("Prev")?"0 -4px":0,padding:l.includes("Prev")?"5px 4px":"5px 0"}}><span style={{fontSize:12,color:l.includes("Prev")?"#dc2626":"#6b7280",fontWeight:l.includes("Prev")?700:400}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":l.includes("Prev")?"#dc2626":"#212121",fontWeight:l.includes("Prev")?700:400}}>{v}</span></div>)}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL DUE</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${(gt+parseFloat(sale.previous_balance||0)).toFixed(2)}</span></div>
           </div>
         </div>
         <div style={{marginTop:12,background:"#f9fafb",borderRadius:7,padding:"10px 12px",fontSize:11,color:"#6b7280"}}>
@@ -988,6 +988,8 @@ export default function OrderPortal() {
         tax,
         total: grandTotal,
         notes: notes+(payMethod==="card"?` | Paid by card online (incl. ${CARD_FEE}% surcharge $${cardSurcharge.toFixed(2)})`:" | Payment on delivery"),
+        previous_balance: custPrevBalance||0,
+        previous_invoice_ids: custPrevInvs.map(s=>s.id).join(",")||"",
         status: "approved",
         payment_method: payMethod,
         created_at: new Date().toISOString(),
@@ -1506,7 +1508,8 @@ export default function OrderPortal() {
                       const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
                       return parseFloat((taxable*rate/100).toFixed(2));
                     })();
-                    const gt=parseFloat((s.total+saleTax).toFixed(2));
+                    const prevBal=parseFloat(s.previous_balance||0);
+                    const gt=parseFloat((s.total+saleTax+prevBal).toFixed(2));
                     return(
                       <div key={s.id} className="card" style={{padding:"14px 16px",marginBottom:10,borderLeft:`4px solid ${isPaid?"#059669":s.email_sent?"#0ea5e9":"#e5e7eb"}`}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -1524,6 +1527,7 @@ export default function OrderPortal() {
                           <div style={{textAlign:"right"}}>
                             <div style={{fontWeight:800,fontSize:18,color:isPaid?"#059669":"#7c3aed"}}>${gt.toFixed(2)}</div>
                             {saleTax>0&&<div style={{fontSize:10,color:"#9ca3af"}}>incl. ${saleTax.toFixed(2)} tax</div>}
+                            {prevBal>0&&<div style={{fontSize:10,color:"#dc2626",fontWeight:600}}>incl. ${prevBal.toFixed(2)} prev. balance</div>}
                             {s.email_sent&&<div style={{fontSize:10,color:"#0ea5e9"}}>✓ Email sent</div>}
                           </div>
                         </div>

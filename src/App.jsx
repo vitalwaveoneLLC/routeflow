@@ -559,6 +559,10 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
               <span style={{fontSize:13,color:"#6b7280"}}>{`Tobacco/Vape Tax · ${stateId} (${stateRate}%)`}</span>
               <span style={{fontSize:13,color:"#059669"}}>{fmt(tax)}</span>
             </div>}
+            {parseFloat(sale.previous_balance||0)>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6",background:"#fef2f2",margin:"0 -4px",padding:"6px 4px"}}>
+              <span style={{fontSize:13,color:"#dc2626",fontWeight:600}}>⚠️ Previous Balance ({sale.previous_invoice_ids})</span>
+              <span style={{fontSize:13,color:"#dc2626",fontWeight:700}}>{fmt(parseFloat(sale.previous_balance||0))}</span>
+            </div>}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111",marginTop:3}}>
               <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#111"}}>💵 CASH / CHECK TOTAL</span>
               <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#059669"}}>{fmt(gt)}</span>
@@ -614,7 +618,7 @@ const SettleDoc=({truck,d,co,customers,payments,products,stateTaxes})=>{
       </div>
       {d.truckSales.length>0&&<><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>INVOICE DETAIL</div>
       <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Invoice","Customer","Units","Subtotal","Tax","Total","Status"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#9ca3af",borderBottom:"1px solid #e5e7eb",background:"transparent"}}>{h}</th>)}</tr></thead>
-      <tbody>{d.truckSales.map(s=>{const cust=customers.find(c=>c.id===s.cust_id);const pmt=payments.find(p=>p.sale_id===s.id);return(<tr key={s.id}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,fontWeight:700,color:"#2563eb"}}>{s.id}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{cust?.name}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{fmt(s.total)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,color:"#7c3aed"}}>{fmt(calcSettleTax(s,products,stateTaxes))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:700}}>{fmt(s.total+calcSettleTax(s,products,stateTaxes))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb"}}><span style={{background:pmt?.status==="paid"?"#dcfce7":"#fef9c3",color:pmt?.status==="paid"?"#166534":"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:700}}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td></tr>);})}</tbody></table></>}
+      <tbody>{d.truckSales.map(s=>{const cust=customers.find(c=>c.id===s.cust_id);const pmt=payments.find(p=>p.sale_id===s.id);return(<tr key={s.id}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,fontWeight:700,color:"#2563eb"}}>{s.id}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{cust?.name}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{fmt(s.total)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,color:"#7c3aed"}}>{fmt(calcSettleTax(s,products,stateTaxes))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:700}}>{fmt(s.total+calcSettleTax(s,products,stateTaxes)+parseFloat(s.previous_balance||0))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb"}}><span style={{background:pmt?.status==="paid"?"#dcfce7":"#fef9c3",color:pmt?.status==="paid"?"#166534":"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:700}}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td></tr>);})}</tbody></table></>}
       <div style={{marginTop:20,paddingTop:10,borderTop:"1px solid #e5e7eb",fontSize:10,color:"#9ca3af",textAlign:"center"}}>{co?.name} · {co?.phone} · {dateLabel()}</div>
     </div>
   );
@@ -840,7 +844,7 @@ export default function App(){
     return parseFloat((taxableSubtotal * rate / 100).toFixed(2));
   };
 
-  const calcSaleGrandTotal = sale => sale.total + calcSaleTax(sale);
+  const calcSaleGrandTotal = sale => sale.total + calcSaleTax(sale) + parseFloat(sale.previous_balance||0);
   const getSaleState = sale => {
     const cust = getC(sale.cust_id);
     return sale.state || cust?.state || "";
@@ -1366,6 +1370,7 @@ export default function App(){
   const navItems=[
     {id:"dashboard",label:"Dashboard",icon:ic.dash},
     {id:"inventory",label:"Inventory",icon:ic.box},
+    {id:"walkin",label:"Walk-in Sale",icon:"🏪"},
     {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
     {id:"taxinvoices",label:"Tax Invoices",icon:ic.inv},
@@ -1605,6 +1610,222 @@ export default function App(){
               )}
             </div>
           </div>}
+
+          {/* ══ WALK-IN SALE ══ */}
+          {tab==="walkin"&&(()=>{
+            const [wiCust,setWiCust]=React.useState("");
+            const [wiSearch,setWiSearch]=React.useState("");
+            const [wiItems,setWiItems]=React.useState({});
+            const [wiSaving,setWiSaving]=React.useState(false);
+            const [wiMsg,setWiMsg]=React.useState(null);
+            const [wiPayMethod,setWiPayMethod]=React.useState("cash");
+            const [wiCheckNum,setWiCheckNum]=React.useState("");
+            const [wiZelle,setWiZelle]=React.useState("");
+            const [wiPrevBal,setWiPrevBal]=React.useState(0);
+            const [wiPrevInvs,setWiPrevInvs]=React.useState([]);
+            const [wiCatFilter,setWiCatFilter]=React.useState("All");
+
+            const wiCustObj=customers.find(c=>c.id===wiCust);
+            const cats=["All",...new Set(products.map(p=>p.cat).filter(Boolean))];
+            const filtered=products.filter(p=>{
+              if(p.shelf<=0) return false;
+              if(wiCatFilter!=="All"&&p.cat!==wiCatFilter) return false;
+              if(wiSearch&&!p.name.toLowerCase().includes(wiSearch.toLowerCase())&&!p.sku?.toLowerCase().includes(wiSearch.toLowerCase())) return false;
+              return true;
+            });
+            const grouped=cats.filter(c=>c!=="All"&&(wiCatFilter==="All"||wiCatFilter===c)).reduce((acc,cat)=>{
+              const items=filtered.filter(p=>p.cat===cat);
+              if(items.length) acc[cat]=items;
+              return acc;
+            },{});
+            if(wiCatFilter!=="All") grouped[wiCatFilter]=filtered;
+
+            const sub=products.reduce((a,p)=>a+(p.price||0)*(wiItems[p.id]||0),0);
+            const taxRate2=wiCustObj?(()=>{
+              const stateId=wiCustObj.state||"";
+              const st=stateTaxes.find(s=>s.id===stateId);
+              return st?.exempt?0:parseFloat(st?.rate||0);
+            })():0;
+            const taxable=products.reduce((a,p)=>isTaxableProd(p)?(a+(p.price||0)*(wiItems[p.id]||0)):a,0);
+            const tax=parseFloat((taxable*taxRate2/100).toFixed(2));
+            const gt=sub+tax;
+            const cardFee=3;
+            const cardTotal=parseFloat((gt*(1+cardFee/100)).toFixed(2));
+            const totalDue=(wiPayMethod==="card"?cardTotal:gt)+wiPrevBal;
+
+            const handleWiCust=async(cid)=>{
+              setWiCust(cid);setWiPrevBal(0);setWiPrevInvs([]);
+              if(!cid) return;
+              const [{data:cs},{data:pm}]=await Promise.all([
+                supabase.from("sales").select("id,total,date").eq("cust_id",cid),
+                supabase.from("payments").select("sale_id,status").eq("status","unpaid"),
+              ]);
+              const unpaidIds=new Set((pm||[]).map(p=>p.sale_id));
+              const allUnpaid=(cs||[]).filter(s=>unpaidIds.has(s.id)||!(pm||[]).find(p=>p.sale_id===s.id));
+              const bal=parseFloat(allUnpaid.reduce((a,s)=>a+s.total,0).toFixed(2));
+              setWiPrevBal(bal);setWiPrevInvs(allUnpaid);
+            };
+
+            const createWiSale=async()=>{
+              if(!wiCust) return setWiMsg({t:"error",m:"Select a customer"});
+              const saleItems=products.filter(p=>wiItems[p.id]>0).map(p=>({pid:p.id,qty:wiItems[p.id]}));
+              if(!saleItems.length) return setWiMsg({t:"error",m:"Add at least one product"});
+              setWiSaving(true);
+              try{
+                const {data:seq}=await supabase.rpc("next_invoice_number");
+                const invId="INV-"+String(seq||1).padStart(4,"0");
+                const profit=saleItems.reduce((a,i)=>{const p=getP(i.pid);return a+((p.price||0)-(p.cost||0))*i.qty;},0);
+                const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),created_at:new Date().toISOString()};
+                await supabase.from("sales").insert(ns);
+                // Deduct from shelf
+                for(const i of saleItems){const p=getP(i.pid);if(p)await supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id);}
+                // Record payment
+                const payData={id:"PMT-"+uid(),sale_id:invId,status:"paid",method:wiPayMethod,amount:totalDue,check_number:wiCheckNum||"",zelle_ref:wiZelle||"",note:"Walk-in sale",collected_at:new Date().toISOString()};
+                await supabase.from("payments").insert(payData);
+                setSales(prev=>[ns,...prev]);
+                setProducts(prev=>prev.map(p=>{const fi=saleItems.find(i=>i.pid===p.id);return fi?{...p,shelf:p.shelf-fi.qty}:p;}));
+                setWiItems({});setWiCust("");setWiPrevBal(0);setWiPrevInvs([]);setWiCheckNum("");setWiZelle("");
+                setWiMsg({t:"success",m:`✅ Invoice ${invId} created & payment recorded!`});
+              }catch(e){setWiMsg({t:"error",m:e.message});}
+              setWiSaving(false);
+            };
+
+            return(
+              <div style={{display:"flex",gap:0,height:"calc(100vh - 120px)",overflow:"hidden"}}>
+
+                {/* ── LEFT SIDEBAR ── */}
+                <div style={{width:300,flexShrink:0,borderRight:"1px solid #e5e7eb",display:"flex",flexDirection:"column",background:"#f9fafb",overflowY:"auto"}}>
+
+                  {/* Header */}
+                  <div style={{padding:"14px 16px",borderBottom:"1px solid #e5e7eb",background:"#fff"}}>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#212121"}}>🏪 Walk-in Sale</div>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>Warehouse direct — deducts from shelf</div>
+                  </div>
+
+                  {/* Customer */}
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb"}}>
+                    <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:6}}>CUSTOMER</label>
+                    <select value={wiCust} onChange={e=>handleWiCust(e.target.value)} style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"9px 12px",fontSize:13,background:"#fff",color:"#212121"}}>
+                      <option value="">— Select customer —</option>
+                      {[...customers].sort((a,b)=>a.name.localeCompare(b.name)).map(c=><option key={c.id} value={c.id}>{c.name} {c.state?`· ${c.state}`:""}</option>)}
+                    </select>
+                    {wiPrevBal>0&&<div style={{marginTop:8,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px"}}>
+                      <div style={{fontWeight:700,fontSize:11,color:"#dc2626",marginBottom:4}}>⚠️ Outstanding Balance</div>
+                      {wiPrevInvs.slice(0,3).map(s=><div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#dc2626",marginBottom:2}}><span>{s.id} · {s.date}</span><span>${s.total.toFixed(2)}</span></div>)}
+                      {wiPrevInvs.length>3&&<div style={{fontSize:10,color:"#dc2626"}}>+{wiPrevInvs.length-3} more</div>}
+                      <div style={{display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#dc2626",borderTop:"1px solid #fecaca",marginTop:4,paddingTop:4}}><span>Total</span><span>{fmt(wiPrevBal)}</span></div>
+                    </div>}
+                  </div>
+
+                  {/* Summary */}
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb"}}>
+                    <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:8}}>ORDER SUMMARY</label>
+                    {[
+                      ["Subtotal",fmt(sub),"#212121"],
+                      tax>0?["Tobacco Tax ("+(wiCustObj?.state||"")+") "+taxRate2+"%",fmt(tax),"#7c3aed"]:null,
+                      wiPrevBal>0?["Prev. Balance",fmt(wiPrevBal),"#dc2626"]:null,
+                      wiPayMethod==="card"?["Card Fee ("+cardFee+"%)",fmt(parseFloat(((gt)*(cardFee/100)).toFixed(2))),"#f59e0b"]:null,
+                      ["Total Due",fmt(totalDue),"#059669"],
+                    ].filter(Boolean).map(([l,v,c])=>(
+                      <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:6,paddingBottom:l==="Total Due"?0:6,borderBottom:l==="Total Due"?"none":"1px solid #f3f4f6"}}>
+                        <span style={{fontSize:11,color:l==="Total Due"?"#212121":"#6b7280",fontWeight:l==="Total Due"?700:400}}>{l}</span>
+                        <span style={{fontSize:l==="Total Due"?15:12,fontWeight:l==="Total Due"?800:600,color:c}}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Payment Method */}
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb"}}>
+                    <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:8}}>PAYMENT</label>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                      {[["cash","💵 Cash"],["check","🧾 Check"],["zelle","⚡ Zelle"],["money_order","📮 M.O."],["card","💳 Card"]].map(([id,label])=>(
+                        <button key={id} onClick={()=>setWiPayMethod(id)}
+                          style={{padding:"7px 6px",borderRadius:7,border:`1.5px solid ${wiPayMethod===id?"#7c3aed":"#e5e7eb"}`,background:wiPayMethod===id?"#f5f3ff":"#fff",color:wiPayMethod===id?"#7c3aed":"#6b7280",fontSize:11,fontWeight:wiPayMethod===id?700:400,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {wiPayMethod==="check"&&<input value={wiCheckNum} onChange={e=>setWiCheckNum(e.target.value)} placeholder="Check number" style={{width:"100%",marginTop:8,border:"1.5px solid #e5e7eb",borderRadius:7,padding:"8px 10px",fontSize:12,boxSizing:"border-box"}}/>}
+                    {wiPayMethod==="zelle"&&<input value={wiZelle} onChange={e=>setWiZelle(e.target.value)} placeholder="Zelle reference" style={{width:"100%",marginTop:8,border:"1.5px solid #e5e7eb",borderRadius:7,padding:"8px 10px",fontSize:12,boxSizing:"border-box"}}/>}
+                  </div>
+
+                  {/* Action */}
+                  <div style={{padding:"12px 16px"}}>
+                    {wiMsg&&<div style={{background:wiMsg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${wiMsg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"8px 12px",fontSize:12,color:wiMsg.t==="success"?"#065f46":"#dc2626",marginBottom:10}}>{wiMsg.m}</div>}
+                    <button onClick={createWiSale} disabled={wiSaving||!wiCust||sub===0}
+                      style={{width:"100%",padding:"11px",background:!wiCust||sub===0?"#9ca3af":"#7c3aed",color:"#fff",border:"none",borderRadius:9,fontWeight:700,fontSize:14,cursor:!wiCust||sub===0?"not-allowed":"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:".04em"}}>
+                      {wiSaving?"Creating...":"🧾 Create Invoice & Record Payment"}
+                    </button>
+                  </div>
+
+                </div>
+
+                {/* ── MAIN PRODUCT AREA ── */}
+                <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+
+                  {/* Search + Filter bar */}
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",background:"#fff",display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                    <input value={wiSearch} onChange={e=>setWiSearch(e.target.value)} placeholder="🔍 Search products by name or SKU..."
+                      style={{flex:1,minWidth:200,border:"1.5px solid #e5e7eb",borderRadius:8,padding:"9px 14px",fontSize:13}}/>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {cats.map(c=>(
+                        <button key={c} onClick={()=>setWiCatFilter(c)}
+                          style={{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${wiCatFilter===c?"#7c3aed":"#e5e7eb"}`,background:wiCatFilter===c?"#7c3aed":"#fff",color:wiCatFilter===c?"#fff":"#6b7280",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={()=>{setWiItems({});setWiMsg(null);}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid #e5e7eb",background:"#fff",color:"#6b7280",fontSize:11,cursor:"pointer"}}>
+                      Clear
+                    </button>
+                  </div>
+
+                  {/* Product Grid */}
+                  <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
+                    {Object.keys(wiCatFilter==="All"?grouped:{[wiCatFilter]:filtered}).map(cat=>(
+                      <div key={cat} style={{marginBottom:20}}>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:12,color:"#9ca3af",letterSpacing:".1em",marginBottom:10,display:"flex",alignItems:"center",gap:8}}>
+                          {cat.toUpperCase()}
+                          <div style={{flex:1,height:1,background:"#e5e7eb"}}/>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:8}}>
+                          {(wiCatFilter==="All"?grouped[cat]:filtered).map(p=>{
+                            const qty=wiItems[p.id]||0;
+                            const isSelected=qty>0;
+                            return(
+                              <div key={p.id} style={{background:"#fff",border:`1.5px solid ${isSelected?"#7c3aed":"#e5e7eb"}`,borderRadius:10,padding:"10px 12px",transition:"border .15s",position:"relative"}}>
+                                {isSelected&&<div style={{position:"absolute",top:6,right:8,background:"#7c3aed",color:"#fff",borderRadius:10,fontSize:10,fontWeight:700,padding:"2px 7px"}}>{qty}</div>}
+                                <div style={{fontWeight:600,fontSize:13,color:"#212121",marginBottom:2,paddingRight:24}}>{p.name}</div>
+                                <div style={{fontSize:10,color:"#9ca3af",marginBottom:6}}>{p.sku&&`SKU: ${p.sku} · `}{p.unit}</div>
+                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                                  <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#059669"}}>{fmt(p.price)}</span>
+                                  <span style={{fontSize:11,color:p.shelf<5?"#dc2626":"#9ca3af",fontWeight:p.shelf<5?700:400}}>{p.shelf} left{p.shelf<5?" ⚠️":""}</span>
+                                </div>
+                                {isTaxableProd(p)&&<div style={{fontSize:9,background:"#fef3c7",color:"#92400e",padding:"2px 6px",borderRadius:4,display:"inline-block",marginBottom:6,fontWeight:700}}>TOBACCO TAX</div>}
+                                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                  <button onClick={()=>setWiItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))}
+                                    style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#f9fafb",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"#212121"}}>−</button>
+                                  <input type="number" min="0" max={p.shelf} value={qty||""} placeholder="0"
+                                    onChange={e=>setWiItems(prev=>({...prev,[p.id]:Math.min(p.shelf,Math.max(0,parseInt(e.target.value)||0))}))}
+                                    style={{flex:1,textAlign:"center",border:`1.5px solid ${isSelected?"#7c3aed":"#e5e7eb"}`,borderRadius:7,padding:"5px 4px",fontSize:13,fontWeight:700}}/>
+                                  <button onClick={()=>setWiItems(prev=>({...prev,[p.id]:Math.min(p.shelf,(prev[p.id]||0)+1)}))}
+                                    disabled={qty>=p.shelf}
+                                    style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#f9fafb",cursor:qty>=p.shelf?"not-allowed":"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"#212121"}}>+</button>
+                                </div>
+                                {isSelected&&<div style={{fontSize:11,color:"#7c3aed",marginTop:5,textAlign:"right",fontWeight:600}}>{fmt(qty*p.price)}{isTaxableProd(p)?" +tax":""}</div>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    {filtered.length===0&&<div style={{textAlign:"center",padding:"40px",color:"#9ca3af",fontSize:13}}>No products match your search</div>}
+                  </div>
+
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ══ INVENTORY ══ */}
           {tab==="inventory"&&<div className="fu">
@@ -1855,7 +2076,7 @@ export default function App(){
               {visSales.length===0?<Empty icon="📄" msg="NO INVOICES YET"/>:(
                 <div className="tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Driver</th><th>Subtotal</th><th>Tax</th><th>Grand Total</th><th>Profit</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody>{visSales.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id);return(
-                  <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td>{fmt(s.total)}</td><td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td><td><span className="bdg bb2">{fmt(gt)}</span></td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(s.profit)}</td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
+                  <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver||"Walk-in"}</td><td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} prev</span>}</td><td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td><td><span className="bdg bb2">{fmt(gt)}</span></td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(s.profit)}</td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
                   <td><div style={{display:"flex",gap:5}}><button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt} Invoice</button>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}{isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}</div></td>
                 </tr>);})}
                 </tbody></table></div>
