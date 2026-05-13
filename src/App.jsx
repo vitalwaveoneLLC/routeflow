@@ -954,7 +954,7 @@ export default function App(){
   const[formItems,setFormItems]=useState([]);
   const[np,setNp]=useState({name:"",sku:"",cat:"Beverage",unit:"Case/24",cost:"",price:"",shelf:""});
   const[nt,setNt]=useState({driver:"",plate:"",route:""});
-  const[nc,setNc]=useState({name:"",address:"",phone:"",email:"",notes:"",truck_id:""});
+  const[nc,setNc]=useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:""});
   const[rsPid,setRsPid]=useState("");
   const[rsQty,setRsQty]=useState("");
   const[coEdit,setCoEdit]=useState(null);
@@ -1221,7 +1221,7 @@ export default function App(){
     const rec={id:"C"+uid(),name:nc.name,address:nc.address||"",phone:nc.phone||"",email:nc.email||"",notes:nc.notes||"",truck_id:nc.truck_id||trucks[0]?.id||null};
     const{error}=await supabase.from("customers").insert(rec);
     if(error)showToast(error.message,"error");
-    else{setCustomers(prev=>[...prev,rec]);showToast(`${nc.name} account opened`);setModal(null);setNc({name:"",address:"",phone:"",email:"",notes:"",truck_id:""});}
+    else{setCustomers(prev=>[...prev,rec]);showToast(`${nc.name} account opened`);setModal(null);setNc({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:""});}
     setSaving(false);
   };
 
