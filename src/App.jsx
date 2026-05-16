@@ -132,11 +132,22 @@ const MFAGate=({onVerified})=>{
   const[stage,setStage]=useState("checking");
 
   const callMfa=async(action,params={})=>{
-    const{data:{session}}=await supabase.auth.getSession();
-    if(!session?.access_token) throw new Error("No active session");
+    // Retry — session may take a moment to restore from storage on page load
+    let token=null;
+    for(let i=0;i<10;i++){
+      const{data:{session}}=await supabase.auth.getSession();
+      if(session?.access_token){token=session.access_token;break;}
+      await new Promise(r=>setTimeout(r,300));
+    }
+    if(!token){
+      // Try refresh as last resort
+      const{data}=await supabase.auth.refreshSession();
+      token=data?.session?.access_token;
+    }
+    if(!token) throw new Error("No active session — please sign in");
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${session.access_token}`,"apikey":SUPABASE_ANON_KEY},
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`,"apikey":SUPABASE_ANON_KEY},
       body:JSON.stringify({action,...params}),
     });
     const result=await res.json();
