@@ -142,7 +142,7 @@ const MFAGate=({onVerified})=>{
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":`Bearer ${session.access_token}`,"apikey":SUPABASE_ANON_KEY},
-      body:JSON.stringify({action,...params}),
+      body:JSON.stringify({action,...params,refreshToken:session.refresh_token}),
     });
     const result=await res.json();
     if(result.error)throw new Error(result.error);
@@ -322,7 +322,7 @@ const Login=({})=>{
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":`Bearer ${session.access_token}`,"apikey":SUPABASE_ANON_KEY},
-      body:JSON.stringify({action,...params}),
+      body:JSON.stringify({action,...params,refreshToken:session.refresh_token}),
     });
     const result=await res.json();
     if(result.error)throw new Error(result.error);
