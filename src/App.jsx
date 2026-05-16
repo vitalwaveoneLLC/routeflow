@@ -160,15 +160,24 @@ const MFAGate=({onVerified})=>{
           setStage("verify");
         } else {
           // Enroll directly from browser — browser has real session
-          const{data:existing}=await supabase.auth.mfa.listFactors();
-          for(const f of (existing?.totp||[]).filter(f=>f.status==="unverified")){
-            await supabase.auth.mfa.unenroll({factorId:f.id});
+          const{data:lf3}=await supabase.auth.mfa.listFactors();
+          const allF=lf3?.totp||[];
+          const unverF=allF.filter(f=>f.status==="unverified");
+          const verF=allF.filter(f=>f.status==="verified");
+          if(verF.length>0){
+            // Already verified — go to verify stage
+            setStage("verify");
+          } else {
+            // Unenroll stale unverified if any (ignore 403)
+            if(unverF.length>0){
+              await supabase.auth.mfa.unenroll({factorId:unverF[0].id}).catch(()=>{});
+            }
+            const{data,error:ee}=await supabase.auth.mfa.enroll({factorType:"totp"});
+            if(ee)throw ee;
+            setSecret(data.totp.secret);
+            setOtpauth(data.totp.qr_code);
+            setStage("enroll");
           }
-          const{data,error:ee}=await supabase.auth.mfa.enroll({factorType:"totp"});
-          if(ee)throw ee;
-          setSecret(data.totp.secret);
-          setOtpauth(data.totp.qr_code);
-          setStage("enroll");
         }
       }catch(e){
         setErr(e.message);
@@ -388,16 +397,26 @@ const Login=({})=>{
         setStage("verify");
       } else {
         // Enroll directly from browser — supabase client has real session
-        // Clean up stale unverified factors first
-        const{data:existing}=await supabase.auth.mfa.listFactors();
-        for(const f of (existing?.totp||[]).filter(f=>f.status==="unverified")){
-          await supabase.auth.mfa.unenroll({factorId:f.id});
+        const{data:lf2}=await supabase.auth.mfa.listFactors();
+        const allFactors=lf2?.totp||[];
+        const unverified=allFactors.filter(f=>f.status==="unverified");
+        const verified2=allFactors.filter(f=>f.status==="verified");
+        if(verified2.length>0){
+          // Already has verified factor — go straight to verify
+          setStage("verify");
+        } else {
+          // Try to reuse existing unverified factor or enroll new one
+          let enrollData=null;
+          if(unverified.length>0){
+            // Try unenrolling stale factor (may fail if no AAL2 - ignore)
+            await supabase.auth.mfa.unenroll({factorId:unverified[0].id}).catch(()=>{});
+          }
+          const{data,error:ee}=await supabase.auth.mfa.enroll({factorType:"totp"});
+          if(ee)throw ee;
+          setSecret(data.totp.secret);
+          setOtpauth(data.totp.qr_code);
+          setStage("enroll");
         }
-        const{data,error:ee}=await supabase.auth.mfa.enroll({factorType:"totp"});
-        if(ee)throw ee;
-        setSecret(data.totp.secret);
-        setOtpauth(data.totp.qr_code);
-        setStage("enroll");
       }
     }catch(e){
       setErr(e.message);
