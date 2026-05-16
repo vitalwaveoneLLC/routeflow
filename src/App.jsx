@@ -128,12 +128,16 @@ const MFAGate=({onVerified})=>{
   const[stage,setStage]=useState("checking"); // checking | enroll | verify
 
   const callMfa=async(action,params={})=>{
-    let{data:{session}}=await supabase.auth.getSession();
-    if(!session?.access_token){
-      const{data:r}=await supabase.auth.refreshSession();
-      session=r?.session;
+    const SUPABASE_URL=import.meta.env.VITE_SUPABASE_URL;
+    const SUPABASE_ANON_KEY=import.meta.env.VITE_SUPABASE_ANON_KEY;
+    // Retry getting session — may need a moment after page refresh
+    let session=null;
+    for(let i=0;i<5;i++){
+      const{data:{session:s}}=await supabase.auth.getSession();
+      if(s?.access_token){session=s;break;}
+      await new Promise(r=>setTimeout(r,300));
     }
-    if(!session?.access_token)throw new Error("No active session — please sign in again");
+    if(!session?.access_token)throw new Error("Session expired — please sign in again");
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":`Bearer ${session.access_token}`,"apikey":SUPABASE_ANON_KEY},
@@ -306,12 +310,14 @@ const Login=({})=>{
   const[otp,setOtp]=useState("");
 
   const callMfa=async(action,params={})=>{
-    let{data:{session}}=await supabase.auth.getSession();
-    if(!session?.access_token){
-      const{data:r}=await supabase.auth.refreshSession();
-      session=r?.session;
+    // Retry getting session up to 5 times — signInWithPassword may need a moment
+    let session=null;
+    for(let i=0;i<5;i++){
+      const{data:{session:s}}=await supabase.auth.getSession();
+      if(s?.access_token){session=s;break;}
+      await new Promise(r=>setTimeout(r,300));
     }
-    if(!session?.access_token)throw new Error("No active session — please sign in again");
+    if(!session?.access_token)throw new Error("Session not ready — please try signing in again");
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":`Bearer ${session.access_token}`,"apikey":SUPABASE_ANON_KEY},
@@ -351,8 +357,19 @@ const Login=({})=>{
     e.preventDefault();
     setLoading(true);setErr("");
     try{
-      const{error}=await supabase.auth.signInWithPassword({email,password:pw});
+      const{data:signData,error}=await supabase.auth.signInWithPassword({email,password:pw});
       if(error)throw error;
+      // Wait for session to be fully set before calling edge function
+      let session=signData?.session;
+      if(!session?.access_token){
+        // Retry up to 5 times with 300ms delay
+        for(let i=0;i<5;i++){
+          await new Promise(r=>setTimeout(r,300));
+          const{data:s}=await supabase.auth.getSession();
+          if(s?.session?.access_token){session=s.session;break;}
+        }
+      }
+      if(!session?.access_token)throw new Error("Session not ready — please try again");
       const{hasTotp}=await callMfa("check");
       if(hasTotp){
         setStage("verify");
