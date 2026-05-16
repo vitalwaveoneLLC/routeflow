@@ -589,10 +589,31 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         </div>}
 
         {/* Notes */}
-        <div style={{marginBottom:14}}>
+        <div style={{marginBottom:12}}>
           <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>NOTES (optional)</label>
           <input value={payForm.notes} onChange={e=>setPayForm(p=>({...p,notes:e.target.value}))}
             placeholder="Any notes..." style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
+        </div>
+
+        {/* Receipt Upload */}
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>RECEIPT / PAYMENT PROOF</label>
+          <div style={{border:"2px dashed #e5e7eb",borderRadius:10,padding:"14px",textAlign:"center",background:"#f9fafb",cursor:"pointer"}}
+            onClick={()=>document.getElementById("drvReceiptInput").click()}>
+            {receiptPreview?(
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+                <img src={receiptPreview} alt="receipt" style={{maxHeight:100,maxWidth:"100%",borderRadius:8}}/>
+                <span style={{fontSize:11,color:"#059669",fontWeight:600}}>✅ Attached — tap to change</span>
+              </div>
+            ):(
+              <div style={{color:"#9ca3af",fontSize:12}}>
+                <div style={{fontSize:24,marginBottom:4}}>📸</div>
+                <div>Tap to take photo or upload</div>
+              </div>
+            )}
+            <input id="drvReceiptInput" type="file" accept="image/*,application/pdf" capture="environment" style={{display:"none"}}
+              onChange={e=>{const f=e.target.files[0];if(f){setReceiptFile(f);setReceiptPreview(URL.createObjectURL(f));}}}/>
+          </div>
         </div>
 
         {/* Action Buttons */}
@@ -920,6 +941,8 @@ export default function OrderPortal() {
   const [createdSaleForHistory, setCreatedSaleForHistory] = useState(null);
   const [createdSale, setCreatedSale] = useState(null);
   const [showPayment, setShowPayment] = useState(false);
+  const [receiptFile, setReceiptFile] = useState(null);
+  const [receiptPreview, setReceiptPreview] = useState("");
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
   const [paymentSaving, setPaymentSaving] = useState(false);
 
@@ -933,9 +956,18 @@ export default function OrderPortal() {
         return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
       }, 0);
       const saleTax = parseFloat((taxable*rate/100).toFixed(2));
-      const gt = parseFloat((sale.total+saleTax).toFixed(2));
+      const prevBal = parseFloat(sale.previous_balance||0);
+      const gt = parseFloat((sale.total+saleTax+prevBal).toFixed(2));
       const surcharge = method==="card" ? parseFloat((gt*CARD_FEE/100).toFixed(2)) : 0;
       const total = parseFloat((gt+surcharge).toFixed(2));
+      // Upload receipt if provided
+      let recUrl = "";
+      if(receiptFile){
+        const ext = receiptFile.name.split(".").pop();
+        const path = `receipts/DRV-${Math.random().toString(36).slice(2,8)}.${ext}`;
+        const {error:upErr} = await supabase.storage.from("receipts").upload(path, receiptFile, {upsert:true});
+        if(!upErr) recUrl = supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
+      }
       // Try update first, then insert if no existing record
       const {data:existing} = await supabase.from("payments").select("id,sale_id").eq("sale_id",sale.id).maybeSingle();
       const payData = {
@@ -946,17 +978,18 @@ export default function OrderPortal() {
         bank_name:payForm.bankName||"",
         zelle_ref:payForm.zelleRef||"",
         note:payForm.notes||"",
+        receipt_url:recUrl,
         collected_at:new Date().toISOString(),
       };
       if(existing){
-        // Update existing payment record
         await supabase.from("payments").update(payData).eq("sale_id",sale.id);
       } else {
-        // Insert new payment record
         await supabase.from("payments").insert({sale_id:sale.id,...payData});
       }
       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
       setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
+      setReceiptFile(null);
+      setReceiptPreview("");
     }catch(e){console.error("Payment error:",e.message);}
     setPaymentSaving(false);
   };
@@ -1758,6 +1791,20 @@ export default function OrderPortal() {
                       {payForm.method==="check"&&<input value={payForm.checkNum} onChange={e=>setPayForm(p=>({...p,checkNum:e.target.value}))} placeholder="Check number" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,marginBottom:10,boxSizing:"border-box"}}/>}
                       {payForm.method==="zelle"&&<input value={payForm.zelleRef} onChange={e=>setPayForm(p=>({...p,zelleRef:e.target.value}))} placeholder="Zelle reference" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,marginBottom:10,boxSizing:"border-box"}}/>}
                       {payForm.method==="money_order"&&<input value={payForm.checkNum} onChange={e=>setPayForm(p=>({...p,checkNum:e.target.value}))} placeholder="Money order number" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,marginBottom:10,boxSizing:"border-box"}}/>}
+                      {/* Receipt upload */}
+                      <div style={{border:"2px dashed #e5e7eb",borderRadius:9,padding:"12px",textAlign:"center",background:"#f9fafb",cursor:"pointer",marginBottom:10}}
+                        onClick={()=>document.getElementById("histReceiptInput").click()}>
+                        {receiptPreview?(
+                          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                            <img src={receiptPreview} alt="r" style={{maxHeight:70,maxWidth:"100%",borderRadius:6}}/>
+                            <span style={{fontSize:10,color:"#059669",fontWeight:600}}>✅ Receipt attached</span>
+                          </div>
+                        ):(
+                          <div style={{color:"#9ca3af",fontSize:11}}>📸 Tap to attach receipt</div>
+                        )}
+                        <input id="histReceiptInput" type="file" accept="image/*,application/pdf" capture="environment" style={{display:"none"}}
+                          onChange={e=>{const f=e.target.files[0];if(f){setReceiptFile(f);setReceiptPreview(URL.createObjectURL(f));}}}/>
+                      </div>
                       <button onClick={async()=>{
                         await collectPayment(s,payForm.method);
                         setDriverData(prev=>({...prev,sales:prev.sales.map(x=>x.id===s.id?{...x,_paid:true}:x)}));

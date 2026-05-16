@@ -716,6 +716,8 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
   const [wiPrevBal,setWiPrevBal]=useState(0);
   const [wiPrevInvs,setWiPrevInvs]=useState([]);
   const [wiCatFilter,setWiCatFilter]=useState("All");
+  const [wiReceiptFile,setWiReceiptFile]=useState(null);
+  const [wiReceiptUrl,setWiReceiptUrl]=useState("");
 
   const wiCustObj=customers.find(c=>c.id===wiCust);
   const cats=["All",...new Set(products.map(p=>p.cat).filter(Boolean))];
@@ -780,9 +782,17 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
       const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       for(const i of saleItems){const p=products.find(x=>x.id===i.pid);if(p)await supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id);}
-      await supabase.from("payments").insert({id:"PMT-"+uid(),sale_id:invId,status:"paid",method:wiPayMethod,amount:totalDue,check_number:wiCheckNum||"",zelle_ref:wiZelle||"",note:"Walk-in sale",collected_at:new Date().toISOString()});
+      // Upload receipt if provided
+      let wiRecUrl = "";
+      if(wiReceiptFile){
+        const ext = wiReceiptFile.name.split(".").pop();
+        const path = `receipts/WI-${uid()}.${ext}`;
+        const {data:upD,error:upE} = await supabase.storage.from("receipts").upload(path, wiReceiptFile, {upsert:true});
+        if(!upE) wiRecUrl = supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
+      }
+      await supabase.from("payments").insert({id:"PMT-"+uid(),sale_id:invId,status:"paid",method:wiPayMethod,amount:totalDue,check_number:wiCheckNum||"",zelle_ref:wiZelle||"",note:"Walk-in sale",receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
       onSaleCreated(ns);
-      setWiItems({});setWiCust("");setWiPrevBal(0);setWiPrevInvs([]);setWiCheckNum("");setWiZelle("");
+      setWiItems({});setWiCust("");setWiPrevBal(0);setWiPrevInvs([]);setWiCheckNum("");setWiZelle("");setWiReceiptFile(null);setWiReceiptUrl("");
       setWiMsg({t:"success",m:`✅ Invoice ${invId} created & payment recorded!`});
     }catch(e){setWiMsg({t:"error",m:e.message});}
     setWiSaving(false);
@@ -832,6 +842,28 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
           {wiPayMethod==="check"&&<input value={wiCheckNum} onChange={e=>setWiCheckNum(e.target.value)} placeholder="Check number" style={{width:"100%",marginTop:8,border:"1.5px solid #e5e7eb",borderRadius:7,padding:"8px 10px",fontSize:12,boxSizing:"border-box"}}/>}
           {wiPayMethod==="zelle"&&<input value={wiZelle} onChange={e=>setWiZelle(e.target.value)} placeholder="Zelle reference" style={{width:"100%",marginTop:8,border:"1.5px solid #e5e7eb",borderRadius:7,padding:"8px 10px",fontSize:12,boxSizing:"border-box"}}/>}
         </div>
+
+        {/* Receipt Upload */}
+        <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb"}}>
+          <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:8}}>RECEIPT / PAYMENT PROOF</label>
+          <div style={{border:"2px dashed #e5e7eb",borderRadius:9,padding:"12px",textAlign:"center",background:"#fff",cursor:"pointer"}}
+            onClick={()=>document.getElementById("wiReceiptInput").click()}>
+            {wiReceiptUrl?(
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                <img src={wiReceiptUrl} alt="receipt" style={{maxHeight:80,maxWidth:"100%",borderRadius:6}}/>
+                <span style={{fontSize:10,color:"#059669",fontWeight:600}}>✅ Attached — click to change</span>
+              </div>
+            ):(
+              <div style={{color:"#9ca3af",fontSize:11}}>
+                <div style={{fontSize:20,marginBottom:2}}>📸</div>
+                <div>Tap to snap or upload receipt</div>
+              </div>
+            )}
+            <input id="wiReceiptInput" type="file" accept="image/*,application/pdf" capture="environment" style={{display:"none"}}
+              onChange={e=>{const f=e.target.files[0];if(f){setWiReceiptFile(f);setWiReceiptUrl(URL.createObjectURL(f));}}}/>
+          </div>
+        </div>
+
         <div style={{padding:"12px 16px"}}>
           {wiMsg&&<div style={{background:wiMsg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${wiMsg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"8px 12px",fontSize:12,color:wiMsg.t==="success"?"#065f46":"#dc2626",marginBottom:10}}>{wiMsg.m}</div>}
           <button onClick={createWiSale} disabled={wiSaving||!wiCust||sub===0}
@@ -893,6 +925,511 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
           ))}
           {filtered.length===0&&<div style={{textAlign:"center",padding:"40px",color:"#9ca3af",fontSize:13}}>No products match your search</div>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── IRS REPORTS COMPONENT ─────────────────────────────────────────────────────
+function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expenses,stateTaxes,calcSaleTax,calcSaleGrandTotal,isTaxableProd,pmtFor,fmt,supabase,showToast}){
+  const [irsTab,setIrsTab] = useState("overview");
+  const [period,setPeriod] = useState("all");
+  const [depositFilter,setDepositFilter] = useState("all");
+  const [viewReceipt,setViewReceipt] = useState(null);
+
+  // Period filter
+  const now = new Date();
+  const filterSales = (arr) => {
+    if(period==="all") return arr;
+    return arr.filter(s=>{
+      const d = new Date(s.created_at);
+      if(period==="q1") return d.getMonth()<3 && d.getFullYear()===now.getFullYear();
+      if(period==="q2") return d.getMonth()>=3 && d.getMonth()<6 && d.getFullYear()===now.getFullYear();
+      if(period==="q3") return d.getMonth()>=6 && d.getMonth()<9 && d.getFullYear()===now.getFullYear();
+      if(period==="q4") return d.getMonth()>=9 && d.getFullYear()===now.getFullYear();
+      if(period==="ytd") return d.getFullYear()===now.getFullYear();
+      if(period==="last30") return (now-d)/(1000*60*60*24)<=30;
+      return true;
+    });
+  };
+
+  const filteredSales = filterSales(sales);
+  const paidSales = filteredSales.filter(s=>pmtFor(s.id)?.status==="paid");
+
+  // Core financials
+  const grossRevenue = filteredSales.reduce((a,s)=>a+s.total,0);
+  const taxCollected = filteredSales.reduce((a,s)=>a+calcSaleTax(s),0);
+  const netRevenue = grossRevenue + taxCollected;
+  const cogs = filteredSales.reduce((a,s)=>{
+    return a+(s.items||[]).reduce((b,i)=>{
+      const p = products.find(x=>x.id===i.pid);
+      return b+(p?.cost||0)*i.qty;
+    },0);
+  },0);
+  const grossProfit = grossRevenue - cogs;
+  const grossMargin = grossRevenue>0?((grossProfit/grossRevenue)*100).toFixed(1):"0";
+  const totalExpenses = expenses.reduce((a,e)=>a+parseFloat(e.amount||0),0);
+  const netProfit = grossProfit - totalExpenses;
+  const collected = paidSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+  const outstanding = filteredSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+
+  // Tax by state
+  const taxByState = stateTaxes.filter(st=>!st.exempt).map(st=>{
+    const stSales = filteredSales.filter(s=>(s.state||"")===st.id);
+    const tax = stSales.reduce((a,s)=>a+calcSaleTax(s),0);
+    const taxable = stSales.reduce((a,s)=>{
+      return a+(s.items||[]).reduce((b,i)=>{
+        const p=products.find(x=>x.id===i.pid);
+        return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;
+      },0);
+    },0);
+    return {state:st.id,name:st.name,rate:st.rate,tax,taxable,count:stSales.length};
+  }).filter(x=>x.count>0);
+
+  // Payment method breakdown
+  const byMethod = {};
+  filteredSales.forEach(s=>{
+    const pm = pmtFor(s.id);
+    if(pm?.status==="paid"){
+      const m = pm.method||"cash";
+      if(!byMethod[m]) byMethod[m]={count:0,amount:0};
+      byMethod[m].count++;
+      byMethod[m].amount += calcSaleGrandTotal(s);
+    }
+  });
+
+  // All collected payments with receipts for deposit ledger
+  const allCollected = payments.filter(p=>p.status==="paid").sort((a,b)=>new Date(b.collected_at||b.created_at)-new Date(a.collected_at||a.created_at));
+  const filteredDeposits = depositFilter==="all"?allCollected:allCollected.filter(p=>p.method===depositFilter);
+  const totalDeposits = filteredDeposits.reduce((a,p)=>a+parseFloat(p.amount||0),0);
+  const depositsWithReceipt = filteredDeposits.filter(p=>p.receipt_url);
+
+  // Quarterly breakdown
+  const quarters = ["Q1 (Jan-Mar)","Q2 (Apr-Jun)","Q3 (Jul-Sep)","Q4 (Oct-Dec)"];
+  const qData = [0,1,2,3].map(q=>{
+    const qSales = sales.filter(s=>{
+      const d=new Date(s.created_at);
+      return d.getFullYear()===now.getFullYear()&&Math.floor(d.getMonth()/3)===q;
+    });
+    const rev = qSales.reduce((a,s)=>a+s.total,0);
+    const tax = qSales.reduce((a,s)=>a+calcSaleTax(s),0);
+    const col = qSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+    return {label:quarters[q],rev,tax,col,count:qSales.length};
+  });
+
+  // Export CSV
+  const exportIRS = () => {
+    const rows = [
+      ["VitalWaveOne LLC — IRS Report"],
+      ["Period",period.toUpperCase()],
+      ["Generated",new Date().toLocaleDateString()],
+      [],
+      ["INCOME SUMMARY"],
+      ["Gross Revenue",grossRevenue.toFixed(2)],
+      ["Tobacco/Vape Tax",taxCollected.toFixed(2)],
+      ["Total Gross Receipts",netRevenue.toFixed(2)],
+      ["COGS",cogs.toFixed(2)],
+      ["Gross Profit",grossProfit.toFixed(2)],
+      ["Gross Margin %",grossMargin+"%"],
+      ["Total Expenses",totalExpenses.toFixed(2)],
+      ["Net Profit",netProfit.toFixed(2)],
+      [],
+      ["COLLECTIONS"],
+      ["Total Collected",collected.toFixed(2)],
+      ["Outstanding AR",outstanding.toFixed(2)],
+      [],
+      ["TAX BY STATE"],
+      ["State","Rate","Taxable Sales","Tax Collected","# Invoices"],
+      ...taxByState.map(t=>[t.state,t.rate+"%",t.taxable.toFixed(2),t.tax.toFixed(2),t.count]),
+      [],
+      ["PAYMENT METHODS"],
+      ["Method","Count","Amount"],
+      ...Object.entries(byMethod).map(([m,d])=>[m,d.count,d.amount.toFixed(2)]),
+      [],
+      ["QUARTERLY BREAKDOWN"],
+      ["Quarter","Revenue","Tax","Collected","Invoices"],
+      ...qData.map(q=>[q.label,q.rev.toFixed(2),q.tax.toFixed(2),q.col.toFixed(2),q.count]),
+      [],
+      ["EXPENSES"],
+      ["Date","Driver","Category","Amount","Description"],
+      ...expenses.map(e=>[e.date,e.driver_name,e.category,parseFloat(e.amount).toFixed(2),e.description]),
+      [],
+      ["DEPOSIT LEDGER"],
+      ["Sale ID","Method","Amount","Date","Check#","Bank","Receipt"],
+      ...allCollected.map(p=>[p.sale_id,p.method,parseFloat(p.amount).toFixed(2),p.collected_at?.slice(0,10)||"",p.check_number||"",p.bank_name||"",p.receipt_url?"YES":"NO"]),
+    ];
+    const csv = rows.map(r=>r.join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = "data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+    a.download = `IRS_Report_${period}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    showToast("IRS report exported!");
+  };
+
+  const tabs2 = [
+    {id:"overview",label:"📊 Overview"},
+    {id:"quarterly",label:"📅 Quarterly"},
+    {id:"tax",label:"🏛 Tax by State"},
+    {id:"methods",label:"💳 Payment Methods"},
+    {id:"expenses",label:"🚗 Expenses"},
+    {id:"deposits",label:"💰 Deposit Ledger"},
+  ];
+
+  const Card2 = ({label,value,sub,color="#212121"}) => (
+    <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px"}}>
+      <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:".08em",marginBottom:4}}>{label}</div>
+      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color}}>{value}</div>
+      {sub&&<div style={{fontSize:10,color:"#6b7280",marginTop:2}}>{sub}</div>}
+    </div>
+  );
+
+  return(
+    <div style={{display:"flex",height:"calc(100vh - 120px)",overflow:"hidden",gap:0}}>
+
+      {/* ── LEFT SIDEBAR ── */}
+      <div style={{width:220,flexShrink:0,borderRight:"1px solid #e5e7eb",background:"#f9fafb",display:"flex",flexDirection:"column"}}>
+        <div style={{padding:"14px 16px",borderBottom:"1px solid #e5e7eb"}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#212121"}}>🏛 IRS Reports</div>
+          <div style={{fontSize:10,color:"#9ca3af",marginTop:2}}>Audit-ready documentation</div>
+        </div>
+
+        {/* Period filter */}
+        <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb"}}>
+          <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:6}}>PERIOD</label>
+          <select value={period} onChange={e=>setPeriod(e.target.value)}
+            style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:7,padding:"8px 10px",fontSize:12,background:"#fff"}}>
+            <option value="all">All Time</option>
+            <option value="ytd">Year to Date</option>
+            <option value="last30">Last 30 Days</option>
+            <option value="q1">Q1 (Jan–Mar)</option>
+            <option value="q2">Q2 (Apr–Jun)</option>
+            <option value="q3">Q3 (Jul–Sep)</option>
+            <option value="q4">Q4 (Oct–Dec)</option>
+          </select>
+        </div>
+
+        {/* Quick stats */}
+        <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb"}}>
+          {[
+            ["Gross Receipts",fmt(netRevenue),"#059669"],
+            ["Tax Collected",fmt(taxCollected),"#7c3aed"],
+            ["Net Profit",fmt(netProfit),netProfit>=0?"#059669":"#dc2626"],
+            ["Outstanding AR",fmt(outstanding),"#dc2626"],
+          ].map(([l,v,c])=>(
+            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6"}}>
+              <span style={{fontSize:10,color:"#6b7280"}}>{l}</span>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:c}}>{v}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Section nav */}
+        <div style={{flex:1,overflowY:"auto",padding:"8px"}}>
+          {tabs2.map(t=>(
+            <button key={t.id} onClick={()=>setIrsTab(t.id)}
+              style={{width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:8,border:"none",background:irsTab===t.id?"#7c3aed":"transparent",color:irsTab===t.id?"#fff":"#374151",fontSize:12,fontWeight:irsTab===t.id?700:400,cursor:"pointer",marginBottom:2,fontFamily:"'Barlow',sans-serif"}}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Export button */}
+        <div style={{padding:"12px 16px",borderTop:"1px solid #e5e7eb"}}>
+          <button onClick={exportIRS}
+            style={{width:"100%",padding:"10px",background:"#0a1628",color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:".04em"}}>
+            📥 EXPORT IRS CSV
+          </button>
+        </div>
+      </div>
+
+      {/* ── MAIN CONTENT ── */}
+      <div style={{flex:1,overflowY:"auto",padding:"20px"}}>
+
+        {/* OVERVIEW */}
+        {irsTab==="overview"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:16}}>
+            Income Summary — Schedule C / 1120S
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10,marginBottom:20}}>
+            <Card2 label="GROSS REVENUE" value={fmt(grossRevenue)} sub={`${filteredSales.length} invoices`} color="#059669"/>
+            <Card2 label="TOBACCO/VAPE TAX" value={fmt(taxCollected)} sub="collected from customers" color="#7c3aed"/>
+            <Card2 label="TOTAL GROSS RECEIPTS" value={fmt(netRevenue)} sub="Line 1 — Gross receipts" color="#0ea5e9"/>
+            <Card2 label="COGS" value={fmt(cogs)} sub="Cost of goods sold" color="#dc2626"/>
+            <Card2 label="GROSS PROFIT" value={fmt(grossProfit)} sub={`${grossMargin}% margin`} color="#059669"/>
+            <Card2 label="TOTAL EXPENSES" value={fmt(totalExpenses)} sub="Driver + operating" color="#f59e0b"/>
+            <Card2 label="NET PROFIT" value={fmt(netProfit)} sub="Before income tax" color={netProfit>=0?"#059669":"#dc2626"}/>
+            <Card2 label="COLLECTED" value={fmt(collected)} sub="Cash actually received" color="#059669"/>
+          </div>
+
+          {/* Schedule C rows */}
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden",marginBottom:16}}>
+            <div style={{background:"#0a1628",color:"#fff",padding:"12px 16px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,letterSpacing:".06em"}}>
+              SCHEDULE C — PROFIT OR LOSS FROM BUSINESS
+            </div>
+            {[
+              ["Line 1","Gross receipts or sales",fmt(netRevenue),"#212121",false],
+              ["Line 4","Cost of goods sold",fmt(cogs),"#dc2626",false],
+              ["Line 5","Gross profit (Line 1 − Line 4)",fmt(grossProfit),"#059669",true],
+              ["Line 28","Total deductible expenses",fmt(totalExpenses),"#f59e0b",false],
+              ["Line 31","Net profit (Line 5 − Line 28)",fmt(netProfit),netProfit>=0?"#059669":"#dc2626",true],
+            ].map(([code,label,value,color,bold])=>(
+              <div key={code} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid #f3f4f6",background:bold?"#f9fafb":"#fff"}}>
+                <div style={{display:"flex",gap:16,alignItems:"center"}}>
+                  <span style={{fontSize:10,color:"#9ca3af",fontFamily:"monospace",minWidth:45}}>{code}</span>
+                  <span style={{fontSize:13,color:"#374151",fontWeight:bold?600:400}}>{label}</span>
+                </div>
+                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:bold?800:600,fontSize:bold?18:14,color}}>{value}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Inventory note */}
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e"}}>
+            <strong>⚠️ Inventory Note for IRS:</strong> Beginning inventory value = {fmt(products.reduce((a,p)=>a+p.shelf*p.cost,0))} (cost basis).
+            Maintain purchase invoices from suppliers to document COGS. Tobacco excise tax collected ({fmt(taxCollected)}) should be remitted per state schedule.
+          </div>
+        </>}
+
+        {/* QUARTERLY */}
+        {irsTab==="quarterly"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:16}}>
+            Quarterly Revenue Breakdown — {now.getFullYear()}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
+            {qData.map(q=>(
+              <div key={q.label} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"16px"}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#0a1628",marginBottom:12}}>{q.label}</div>
+                {[["Revenue",fmt(q.rev),"#059669"],["Tax Collected",fmt(q.tax),"#7c3aed"],["Collected",fmt(q.col),"#0ea5e9"],["Invoices",q.count+" invoices","#6b7280"]].map(([l,v,c])=>(
+                  <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
+                    <span style={{fontSize:12,color:"#6b7280"}}>{l}</span>
+                    <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:c}}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+            <div style={{background:"#0a1628",color:"#fff",padding:"10px 16px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12}}>ANNUAL TOTALS</div>
+            {[["Total Revenue",fmt(qData.reduce((a,q)=>a+q.rev,0)),"#059669"],["Total Tax",fmt(qData.reduce((a,q)=>a+q.tax,0)),"#7c3aed"],["Total Collected",fmt(qData.reduce((a,q)=>a+q.col,0)),"#0ea5e9"],["Total Invoices",qData.reduce((a,q)=>a+q.count,0)+" invoices","#6b7280"]].map(([l,v,c])=>(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
+                <span style={{fontSize:13,color:"#374151",fontWeight:600}}>{l}</span>
+                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:c}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </>}
+
+        {/* TAX BY STATE */}
+        {irsTab==="tax"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:16}}>
+            Tobacco/Vape Excise Tax by State
+          </div>
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e",marginBottom:16}}>
+            <strong>IRS Note:</strong> These amounts represent tobacco excise taxes collected from customers.
+            They must be remitted to each state per schedule. Keep copies of state tax remittance receipts.
+          </div>
+          {taxByState.length===0?(
+            <div style={{textAlign:"center",color:"#9ca3af",fontSize:13,padding:"40px"}}>No taxable sales in this period</div>
+          ):(
+            <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                  {["State","Rate","Invoices","Taxable Sales","Tax Collected"].map(h=>(
+                    <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700,letterSpacing:".06em"}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {taxByState.map(t=>(
+                    <tr key={t.state} style={{borderBottom:"1px solid #f3f4f6"}}>
+                      <td style={{padding:"12px 14px",fontWeight:700,color:"#0a1628"}}>{t.state} — {t.name}</td>
+                      <td style={{padding:"12px 14px",color:"#7c3aed",fontWeight:700}}>{t.rate}%</td>
+                      <td style={{padding:"12px 14px",color:"#6b7280"}}>{t.count}</td>
+                      <td style={{padding:"12px 14px",color:"#212121"}}>{fmt(t.taxable)}</td>
+                      <td style={{padding:"12px 14px"}}><span style={{background:"#f5f3ff",color:"#7c3aed",padding:"4px 10px",borderRadius:6,fontSize:12,fontWeight:700}}>{fmt(t.tax)}</span></td>
+                    </tr>
+                  ))}
+                  <tr style={{background:"#f9fafb",borderTop:"2px solid #e5e7eb"}}>
+                    <td colSpan={3} style={{padding:"12px 14px",fontWeight:800,color:"#212121"}}>TOTAL</td>
+                    <td style={{padding:"12px 14px",fontWeight:800,color:"#212121"}}>{fmt(taxByState.reduce((a,t)=>a+t.taxable,0))}</td>
+                    <td style={{padding:"12px 14px"}}><span style={{background:"#7c3aed",color:"#fff",padding:"4px 10px",borderRadius:6,fontSize:13,fontWeight:800}}>{fmt(taxByState.reduce((a,t)=>a+t.tax,0))}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>}
+
+        {/* PAYMENT METHODS */}
+        {irsTab==="methods"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:16}}>
+            Payment Method Breakdown
+          </div>
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e",marginBottom:16}}>
+            <strong>IRS Note:</strong> Cash transactions over $10,000 require Form 8300. Maintain records of all check numbers and bank info.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:10,marginBottom:20}}>
+            {Object.entries(byMethod).map(([m,d])=>(
+              <div key={m} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"16px",textAlign:"center"}}>
+                <div style={{fontSize:28,marginBottom:8}}>{{cash:"💵",check:"🏦",money_order:"📋",credit_card:"💳",debit_card:"🏧",zelle:"📱",card:"💳"}[m]||"💳"}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#9ca3af",letterSpacing:".1em",marginBottom:4}}>{m.replace("_"," ").toUpperCase()}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#059669"}}>{fmt(d.amount)}</div>
+                <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>{d.count} transactions</div>
+              </div>
+            ))}
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"16px"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#9ca3af",marginBottom:10,letterSpacing:".08em"}}>TOTAL COLLECTED BY METHOD</div>
+            {Object.entries(byMethod).map(([m,d])=>{
+              const pct = collected>0?((d.amount/collected)*100).toFixed(1):"0";
+              return(
+                <div key={m} style={{marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                    <span style={{fontSize:12,color:"#374151"}}>{m.replace("_"," ")}</span>
+                    <span style={{fontSize:12,fontWeight:700,color:"#059669"}}>{fmt(d.amount)} ({pct}%)</span>
+                  </div>
+                  <div style={{height:6,background:"#f3f4f6",borderRadius:3,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:pct+"%",background:"#7c3aed",borderRadius:3}}/>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>}
+
+        {/* EXPENSES */}
+        {irsTab==="expenses"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:16}}>
+            Business Expense Deductions
+          </div>
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e",marginBottom:16}}>
+            <strong>Schedule C Deductions:</strong> All driver expenses are potentially deductible.
+            Keep all receipts. Gas/mileage = Line 9, Other = Line 22. Total deductible: <strong>{fmt(totalExpenses)}</strong>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10,marginBottom:16}}>
+            {Object.entries(expenses.reduce((acc,e)=>{const c=e.category||"other";acc[c]=(acc[c]||0)+parseFloat(e.amount||0);return acc;},{})).map(([cat,amt])=>(
+              <div key={cat} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px"}}>
+                <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:".08em",marginBottom:4}}>{cat.toUpperCase()}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#f59e0b"}}>{fmt(amt)}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                {["Date","Driver","Category","Amount","Description","Receipt"].map(h=>(
+                  <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {expenses.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e=>(
+                  <tr key={e.id} style={{borderBottom:"1px solid #f3f4f6"}}>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{e.date}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#212121"}}>{e.driver_name}</td>
+                    <td style={{padding:"10px 14px"}}><span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:700}}>{e.category}</span></td>
+                    <td style={{padding:"10px 14px",fontWeight:700,color:"#f59e0b"}}>{fmt(parseFloat(e.amount||0))}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{e.description||"—"}</td>
+                    <td style={{padding:"10px 14px"}}>
+                      {e.receipt_url?(
+                        <button onClick={()=>setViewReceipt(e.receipt_url)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700}}>View</button>
+                      ):(
+                        <span style={{fontSize:11,color:"#d1d5db"}}>None</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{background:"#f9fafb",borderTop:"2px solid #e5e7eb"}}>
+                  <td colSpan={3} style={{padding:"12px 14px",fontWeight:800,color:"#212121"}}>TOTAL DEDUCTIBLE</td>
+                  <td style={{padding:"12px 14px"}}><span style={{background:"#f59e0b",color:"#fff",padding:"4px 10px",borderRadius:6,fontSize:13,fontWeight:800}}>{fmt(totalExpenses)}</span></td>
+                  <td colSpan={2}/>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </>}
+
+        {/* DEPOSIT LEDGER */}
+        {irsTab==="deposits"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:8}}>
+            Deposit Ledger — All Collected Payments
+          </div>
+          <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+            <select value={depositFilter} onChange={e=>setDepositFilter(e.target.value)}
+              style={{border:"1.5px solid #e5e7eb",borderRadius:7,padding:"7px 12px",fontSize:12,background:"#fff"}}>
+              <option value="all">All Methods</option>
+              <option value="cash">💵 Cash</option>
+              <option value="check">🏦 Check</option>
+              <option value="money_order">📋 Money Order</option>
+              <option value="zelle">📱 Zelle</option>
+              <option value="card">💳 Card</option>
+              <option value="credit_card">💳 Credit Card</option>
+            </select>
+            <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:8,padding:"7px 14px",fontSize:12,color:"#065f46",fontWeight:700}}>
+              {filteredDeposits.length} payments · {fmt(totalDeposits)} total · {depositsWithReceipt.length} receipts attached
+            </div>
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                {["Invoice","Date Collected","Method","Amount","Check/Ref #","Bank","Receipt"].map(h=>(
+                  <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {filteredDeposits.length===0?(
+                  <tr><td colSpan={7} style={{padding:"30px",textAlign:"center",color:"#9ca3af"}}>No deposits found</td></tr>
+                ):filteredDeposits.map(p=>(
+                  <tr key={p.id||p.sale_id} style={{borderBottom:"1px solid #f3f4f6"}}>
+                    <td style={{padding:"10px 14px"}}><span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:700}}>{p.sale_id}</span></td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{p.collected_at?new Date(p.collected_at).toLocaleDateString():"—"}</td>
+                    <td style={{padding:"10px 14px"}}><span style={{background:"#f9fafb",border:"1px solid #e5e7eb",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:600,color:"#374151"}}>{p.method}</span></td>
+                    <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontSize:15}}>{fmt(parseFloat(p.amount||0))}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{p.check_number||"—"}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{p.bank_name||"—"}</td>
+                    <td style={{padding:"10px 14px"}}>
+                      {p.receipt_url?(
+                        <button onClick={()=>setViewReceipt(p.receipt_url)}
+                          style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700,display:"flex",alignItems:"center",gap:4}}>
+                          📸 View
+                        </button>
+                      ):(
+                        <span style={{fontSize:11,color:"#d1d5db"}}>No receipt</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {filteredDeposits.length>0&&(
+                  <tr style={{background:"#f9fafb",borderTop:"2px solid #e5e7eb"}}>
+                    <td colSpan={3} style={{padding:"12px 14px",fontWeight:800,color:"#212121"}}>TOTAL DEPOSITED</td>
+                    <td style={{padding:"12px 14px"}}><span style={{background:"#059669",color:"#fff",padding:"4px 12px",borderRadius:6,fontSize:14,fontWeight:800}}>{fmt(totalDeposits)}</span></td>
+                    <td colSpan={3}/>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>}
+
+        {/* Receipt viewer modal */}
+        {viewReceipt&&(
+          <div style={{position:"fixed",inset:0,background:"#00000080",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{background:"#fff",borderRadius:16,padding:20,maxWidth:600,width:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <div style={{fontWeight:700,fontSize:15}}>📸 Receipt</div>
+                <button onClick={()=>setViewReceipt(null)} style={{background:"#f3f4f6",border:"none",borderRadius:7,padding:"6px 12px",cursor:"pointer",fontWeight:700}}>✕ Close</button>
+              </div>
+              {viewReceipt.toLowerCase().includes(".pdf")?(
+                <iframe src={viewReceipt} style={{width:"100%",height:500,border:"none",borderRadius:8}}/>
+              ):(
+                <img src={viewReceipt} alt="receipt" style={{width:"100%",borderRadius:8,border:"1px solid #e5e7eb"}}/>
+              )}
+              <a href={viewReceipt} target="_blank" rel="noreferrer"
+                style={{display:"block",marginTop:10,textAlign:"center",background:"#0a1628",color:"#fff",padding:"10px",borderRadius:8,fontSize:13,fontWeight:700,textDecoration:"none"}}>
+                🔗 Open Full Size
+              </a>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
@@ -1354,7 +1891,7 @@ export default function App(){
   // ── PAYMENT STATE ──────────────────────────────────────────────────────────
   const[paymentsLog,setPaymentsLog]=useState([]);
   const[pmModal,setPmModal]=useState(false);
-  const[pmForm,setPmForm]=useState({method:"cash",amount:"",check_number:"",bank_name:"",note:"",cust_id:"",truck_id:"",invoice_ids:[]});
+  const[pmForm,setPmForm]=useState({method:"cash",amount:"",check_number:"",bank_name:"",note:"",cust_id:"",truck_id:"",invoice_ids:[],receipt_url:""});
   const[pmTab,setPmTab]=useState("log"); // "log" | "collect"
 
   // Load payments log
@@ -1364,14 +1901,15 @@ export default function App(){
     }
   },[authReady,session,profile]);
 
-  const markPaid=async(sid,method="cash",amount=0,checkNum="",note="",collectedBy="")=>{
+  const markPaid=async(sid,method="cash",amount=0,checkNum="",note="",collectedBy="",receiptUrl="")=>{
     const ex=pmtFor(sid);
     const sale=sales.find(s=>s.id===sid);
     const gt=sale?calcSaleGrandTotal(sale):0;
     const paidAmt=amount||gt;
-    if(ex)await supabase.from("payments").update({status:"paid",method,amount:paidAmt,check_number:checkNum,note,collected_by:collectedBy,paid_at:new Date().toISOString()}).eq("sale_id",sid);
-    else await supabase.from("payments").insert({sale_id:sid,status:"paid",method,amount:paidAmt,check_number:checkNum,note,collected_by:collectedBy,paid_at:new Date().toISOString()});
-    setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"paid",method,amount:paidAmt}:p));
+    const payRec={status:"paid",method,amount:paidAmt,check_number:checkNum,note,collected_by:collectedBy,paid_at:new Date().toISOString(),receipt_url:receiptUrl||""};
+    if(ex)await supabase.from("payments").update(payRec).eq("sale_id",sid);
+    else await supabase.from("payments").insert({sale_id:sid,...payRec});
+    setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"paid",method,amount:paidAmt,receipt_url:receiptUrl||""}:p));
     showToast("Payment recorded ✓");
   };
   const markUnpaid=async sid=>{await supabase.from("payments").update({status:"unpaid",paid_at:null}).eq("sale_id",sid);setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"unpaid"}:p));showToast("Marked unpaid");};
@@ -1417,6 +1955,14 @@ export default function App(){
       const surcharge=calcSurcharge(base,pmForm.method);
       const totalCollected=parseFloat((base+surcharge).toFixed(2));
       const surchargeNote=surcharge>0?` | Card surcharge $${surcharge.toFixed(2)} (${CARD_FEE_PCT}%)`:"";
+      // Upload receipt if provided
+      let receiptUrl = "";
+      if(pmForm.receipt_file){
+        const ext = pmForm.receipt_file.name.split(".").pop();
+        const path = `receipts/PMT-${uid()}.${ext}`;
+        const {data:upData,error:upErr} = await supabase.storage.from("receipts").upload(path, pmForm.receipt_file, {upsert:true});
+        if(!upErr) receiptUrl = supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
+      }
       const rec={
         id:"PMT-"+uid(),
         truck_id:pmForm.truck_id||null,
@@ -1428,17 +1974,18 @@ export default function App(){
         bank_name:pmForm.bank_name||"",
         note:(pmForm.note||"")+surchargeNote,
         invoice_ids:pmForm.invoice_ids,
+        receipt_url:receiptUrl,
         date:nowStr(),
         created_at:new Date().toISOString(),
       };
       await supabase.from("payments_log").insert(rec);
       for(const sid of pmForm.invoice_ids){
-        await markPaid(sid,pmForm.method,totalCollected,pmForm.check_number,rec.note,rec.collected_by);
+        await markPaid(sid,pmForm.method,totalCollected,pmForm.check_number,rec.note,rec.collected_by,receiptUrl);
       }
       setPaymentsLog(prev=>[rec,...prev]);
       showToast(`${methodIcon(pmForm.method)} $${totalCollected.toFixed(2)} recorded${surcharge>0?` (incl. $${surcharge.toFixed(2)} card fee)`:""}`);
       setPmModal(false);
-      setPmForm({method:"cash",amount:"",check_number:"",bank_name:"",note:"",cust_id:"",truck_id:"",invoice_ids:[]});
+      setPmForm({method:"cash",amount:"",check_number:"",bank_name:"",note:"",cust_id:"",truck_id:"",invoice_ids:[],receipt_url:""});
     }catch(e){showToast(e.message,"error");}
     setSaving(false);
   };
@@ -1573,6 +2120,7 @@ export default function App(){
     {id:"payments",label:"Payments",icon:ic.settle,badge:visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length||0},
     {id:"settlement",label:"Daily Settlement",icon:ic.settle},
     ...(isAdmin?[{id:"pl",label:"P&L Report",icon:ic.pl}]:[]),
+    ...(isAdmin?[{id:"irs",label:"IRS Reports",icon:"🏛"}]:[]),
     {id:"customers",label:"Customers",icon:ic.users},
     ...(isAdmin?[{id:"settings",label:"Settings",icon:ic.gear}]:[]),
   ];
@@ -2700,6 +3248,35 @@ export default function App(){
                 <input placeholder="e.g. partial payment, split between cash and check..." value={pmForm.note} onChange={e=>setPmForm(f=>({...f,note:e.target.value}))}/>
               </div>
 
+              {/* Receipt Photo Upload */}
+              <div>
+                <label>Receipt / Payment Proof (photo or scan)</label>
+                <div style={{marginTop:6,border:"2px dashed #e5e7eb",borderRadius:10,padding:"14px",textAlign:"center",background:"#f9fafb",cursor:"pointer",position:"relative"}}
+                  onClick={()=>document.getElementById("pmReceiptInput").click()}>
+                  {pmForm.receipt_url?(
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+                      <img src={pmForm.receipt_url} alt="receipt" style={{maxHeight:120,maxWidth:"100%",borderRadius:8,border:"1px solid #e5e7eb"}}/>
+                      <span style={{fontSize:11,color:"#059669",fontWeight:600}}>✅ Receipt attached — click to change</span>
+                    </div>
+                  ):(
+                    <div style={{color:"#9ca3af",fontSize:12}}>
+                      <div style={{fontSize:24,marginBottom:4}}>📸</div>
+                      <div>Click to take photo or upload receipt</div>
+                      <div style={{fontSize:10,marginTop:2}}>JPG, PNG, PDF accepted</div>
+                    </div>
+                  )}
+                  <input id="pmReceiptInput" type="file" accept="image/*,application/pdf" capture="environment"
+                    style={{display:"none"}}
+                    onChange={e=>{
+                      const file=e.target.files[0];
+                      if(file){
+                        const url=URL.createObjectURL(file);
+                        setPmForm(f=>({...f,receipt_url:url,receipt_file:file}));
+                      }
+                    }}/>
+                </div>
+              </div>
+
               {/* Surcharge summary */}
               {pmForm.amount&&<div style={{background:hasSurcharge(pmForm.method)?"#faf5ff":"#f0fdf4",border:`1px solid ${hasSurcharge(pmForm.method)?"#ddd6fe":"#a7f3d0"}`,borderRadius:9,padding:"12px 16px"}}>
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -2771,6 +3348,16 @@ export default function App(){
             <tbody>{products.map(p=>{const ps=sales.flatMap(s=>(s.items||[]).filter(i=>i.pid===p.id));const units=ps.reduce((a,i)=>a+i.qty,0),rev=units*p.price,cogs=units*p.cost,prof=rev-cogs;const mg=rev>0?((prof/rev)*100).toFixed(1):((p.price-p.cost)/p.price*100).toFixed(1);return(<tr key={p.id}><td style={{color:"#212121",fontWeight:600}}>{p.name}</td><td><span className="bdg bt">{p.cat}</span></td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:"#6b7280"}}>{units}</td><td><span className="bdg bg2">{fmt(rev)}</span></td><td style={{color:"#dc2626"}}>{fmt(cogs)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(prof)}</td><td><span className="bdg ba2">{mg}%</span></td><td style={{color:"#6b7280"}}>{p.shelf}</td></tr>);})}</tbody></table></div>
             </div>
           </div>}
+
+          {/* ══ IRS REPORTS ══ */}
+          {tab==="irs"&&isAdmin&&<IRSReports
+            sales={sales} payments={payments} paymentsLog={paymentsLog}
+            products={products} customers={customers} trucks={trucks}
+            expenses={expenses} stateTaxes={stateTaxes}
+            calcSaleTax={calcSaleTax} calcSaleGrandTotal={calcSaleGrandTotal}
+            isTaxableProd={isTaxableProd} pmtFor={pmtFor}
+            fmt={fmt} supabase={supabase} showToast={showToast}
+          />}
 
           {/* ══ CUSTOMERS ══ */}
           {tab==="customers"&&<div className="fu">
