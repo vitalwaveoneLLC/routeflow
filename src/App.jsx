@@ -1452,6 +1452,7 @@ export default function App(){
   const[returns,setReturns]=useState([]);
   const[payments,setPayments]=useState([]);
   const[orders,setOrders]=useState([]);
+  const[expenses,setExpenses]=useState([]);
   const[loading,setLoading]=useState(true);
 
   // UI
@@ -1515,7 +1516,7 @@ export default function App(){
   const loadAll=useCallback(async()=>{
     setLoading(true);
     try{
-      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR]=await Promise.all([
+      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR]=await Promise.all([
         supabase.from("company").select("*").single(),
         supabase.from("products").select("*").order("name"),
         supabase.from("trucks").select("*").order("driver"),
@@ -1526,6 +1527,7 @@ export default function App(){
         supabase.from("payments").select("*"),
         supabase.from("orders").select("*").order("created_at",{ascending:false}),
         supabase.from("state_taxes").select("*").order("name"),
+        supabase.from("expenses").select("*").order("created_at",{ascending:false}),
       ]);
       if(coR.data){setCo(coR.data);setCoEdit(coR.data);}
       if(prR.data)setProducts(prR.data);
@@ -1537,6 +1539,7 @@ export default function App(){
       if(pmR.data)setPayments(pmR.data);
       if(orR.data)setOrders(orR.data);
       if(stR.data)setStateTaxes(stR.data);
+      if(exR.data)setExpenses(exR.data);
     }catch(e){showToast("Error loading data","error");}
     setLoading(false);
   },[profile]);
