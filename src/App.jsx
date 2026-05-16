@@ -1086,7 +1086,7 @@ let ALL_STATES_TAX = [
   {id:"DC",name:"Washington DC",  otp:96,   cig:4.50, due:"20th",    form:"FR-800",                  note:"OTP 96% — highest overall"},
 ];
 
-function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expenses,stateTaxes,calcSaleTax,calcSaleGrandTotal,isTaxableProd,pmtFor,fmt,supabase,showToast}){
+function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expenses,stateTaxes,setStateTaxes,calcSaleTax,calcSaleGrandTotal,isTaxableProd,pmtFor,fmt,supabase,showToast}){
   const [irsTab,setIrsTab]=useState("overview");
   const [period,setPeriod]=useState("all");
   const [depositFilter,setDepositFilter]=useState("all");
@@ -1359,9 +1359,882 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
         {/* ALL STATES */}
         {irsTab==="allstates"&&<IRSAllStates
             stateTaxes={stateTaxes}
+            setStateTaxes={setStateTaxes}
             activeStateIds={activeStateIds}
             stateSearch={stateSearch}
             setStateSearch={setStateSearch}
+            supabase={supabase}
+            showToast={showToast}
+          />}
+
+        {/* TAX BY STATE */}
+        {irsTab==="tax"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:12}}>Tax by State — Your Active States</div>
+
+          {/* OTP Section */}
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e",marginBottom:12}}>
+            <strong>🚬 OTP Tax</strong> collected from customers must be remitted to each state monthly.
+            Keep remittance receipts as proof. This is the tax your invoices calculate.
+          </div>
+          {taxByState.length===0?(
+            <div style={{textAlign:"center",color:"#9ca3af",padding:"30px",background:"#fff",borderRadius:12,border:"1px solid #e5e7eb",marginBottom:16}}>No OTP taxable sales for this period</div>
+          ):(
+            <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden",marginBottom:20}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                  {["State","Your OTP Rate","Invoices","Taxable Sales","OTP Tax Collected","Filing Due","Form"].map(h=>(
+                    <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {taxByState.map(t=>(
+                    <tr key={t.state} style={{borderBottom:"1px solid #f3f4f6"}}>
+                      <td style={{padding:"12px 14px",fontWeight:700,color:"#0a1628"}}>{t.state} — {t.name}</td>
+                      <td style={{padding:"12px 14px",color:"#7c3aed",fontWeight:700}}>{t.rate}% wholesale</td>
+                      <td style={{padding:"12px 14px",color:"#6b7280"}}>{t.count}</td>
+                      <td style={{padding:"12px 14px"}}>{fmt(t.taxable)}</td>
+                      <td style={{padding:"12px 14px"}}><span style={{background:"#fef9c3",color:"#854d0e",padding:"4px 10px",borderRadius:6,fontSize:12,fontWeight:700}}>{fmt(t.tax)}</span></td>
+                      <td style={{padding:"12px 14px",fontSize:12,color:"#7c3aed",fontWeight:600}}>{t.due}</td>
+                      <td style={{padding:"12px 14px",fontSize:11,color:"#6b7280",fontFamily:"monospace"}}>{t.form}</td>
+                    </tr>
+                  ))}
+                  <tr style={{background:"#f9fafb",borderTop:"2px solid #e5e7eb"}}>
+                    <td colSpan={4} style={{padding:"12px 14px",fontWeight:800}}>TOTAL OTP TO REMIT</td>
+                    <td style={{padding:"12px 14px"}}><span style={{background:"#dc2626",color:"#fff",padding:"4px 12px",borderRadius:6,fontSize:13,fontWeight:800}}>{fmt(taxByState.reduce((a,t)=>a+t.tax,0))}</span></td>
+                    <td colSpan={2}/>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Cigarette Section */}
+          <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#1e40af",marginBottom:12}}>
+            <strong>🏷 Cigarette Tax ($/pack)</strong> — reference rates for your active states.
+            This is a separate per-pack stamp tax paid when purchasing cigarettes from manufacturers/distributors.
+            Not calculated per invoice — shown for planning and compliance awareness.
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:"#1e40af",color:"#fff"}}>
+                {["State","Cigarette Tax","Filing Form","Note"].map(h=>(
+                  <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {activeStateIds.map(sid=>{
+                  const stInfo=ALL_STATES_TAX.find(x=>x.id===sid);
+                  if(!stInfo)return null;
+                  return(
+                    <tr key={sid} style={{borderBottom:"1px solid #f3f4f6"}}>
+                      <td style={{padding:"11px 14px",fontWeight:700,color:"#1e40af"}}>{sid} — {stInfo.name}</td>
+                      <td style={{padding:"11px 14px"}}>
+                        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:stInfo.cig>=3?"#dc2626":stInfo.cig>=1.5?"#f59e0b":"#059669"}}>${stInfo.cig.toFixed(2)}/pack</span>
+                      </td>
+                      <td style={{padding:"11px 14px",fontSize:11,color:"#6b7280",fontFamily:"monospace"}}>{stInfo.form}</td>
+                      <td style={{padding:"11px 14px",fontSize:10,color:"#9ca3af"}}>{stInfo.note}</td>
+                    </tr>
+                  );
+                })}
+                {activeStateIds.length===0&&<tr><td colSpan={4} style={{padding:"24px",textAlign:"center",color:"#9ca3af"}}>No active states configured</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </>}
+
+        {/* PAYMENT METHODS */}
+        {irsTab==="methods"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:16}}>Payment Method Breakdown</div>
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e",marginBottom:16}}>
+            <strong>⚠️ Form 8300:</strong> Cash transactions over $10,000 (single or related) require filing Form 8300 within 15 days.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10,marginBottom:16}}>
+            {Object.entries(byMethod).map(([m,d])=>(
+              <div key={m} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"16px",textAlign:"center"}}>
+                <div style={{fontSize:28,marginBottom:8}}>{{cash:"💵",check:"🏦",money_order:"📋",credit_card:"💳",debit_card:"🏧",zelle:"📱",card:"💳"}[m]||"💳"}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:10,color:"#9ca3af",letterSpacing:".1em",marginBottom:4}}>{m.replace(/_/g," ").toUpperCase()}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#059669"}}>{fmt(d.amount)}</div>
+                <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>{d.count} transactions</div>
+              </div>
+            ))}
+          </div>
+          {Object.keys(byMethod).length>0&&<div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"16px"}}>
+            {Object.entries(byMethod).map(([m,d])=>{
+              const pct=collected>0?((d.amount/collected)*100).toFixed(1):"0";
+              return(
+                <div key={m} style={{marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                    <span style={{fontSize:12,color:"#374151"}}>{m.replace(/_/g," ")}</span>
+                    <span style={{fontSize:12,fontWeight:700,color:"#059669"}}>{fmt(d.amount)} ({pct}%)</span>
+                  </div>
+                  <div style={{height:6,background:"#f3f4f6",borderRadius:3,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:pct+"%",background:"#7c3aed",borderRadius:3}}/>
+                  </div>
+                </div>
+              );
+            })}
+          </div>}
+        </>}
+
+        {/* EXPENSES */}
+        {irsTab==="expenses"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:16}}>Business Expense Deductions</div>
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e",marginBottom:16}}>
+            <strong>Schedule C:</strong> Gas/mileage → Line 9. Other → Line 22. Total deductible: <strong>{fmt(totalExpenses2)}</strong>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:16}}>
+            {Object.entries(localExpenses.reduce((acc,e)=>{const c=e.category||"other";acc[c]=(acc[c]||0)+parseFloat(e.amount||0);return acc;},{})).map(([cat,amt])=>(
+              <div key={cat} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px"}}>
+                <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:".08em",marginBottom:4}}>{cat.toUpperCase()}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#f59e0b"}}>{fmt(amt)}</div>
+              </div>
+            ))}
+          </div>
+          {localExpenses.length===0?<div style={{textAlign:"center",color:"#9ca3af",padding:"30px"}}>No expenses recorded</div>:(
+            <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                  {["Date","Driver","Category","Amount","Description","Receipt / Action"].map(h=>(
+                    <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {localExpenses.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e=>(
+                    <tr key={e.id} style={{borderBottom:"1px solid #f3f4f6"}}>
+                      <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{e.date}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:"#212121"}}>{e.driver_name}</td>
+                      <td style={{padding:"10px 14px"}}><span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:700}}>{e.category}</span></td>
+                      <td style={{padding:"10px 14px",fontWeight:700,color:"#f59e0b"}}>{fmt(parseFloat(e.amount||0))}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{e.description||"—"}</td>
+                      <td style={{padding:"10px 14px"}}>
+                        <div style={{display:"flex",gap:6}}>
+                          {e.receipt_url?<button onClick={()=>setViewReceipt(e.receipt_url)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700}}>📸 View</button>:<span style={{fontSize:11,color:"#d1d5db"}}>None</span>}
+                          <button onClick={()=>deleteExpense(e.id)} style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#dc2626",cursor:"pointer",fontWeight:700}}>🗑</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{background:"#f9fafb",borderTop:"2px solid #e5e7eb"}}>
+                    <td colSpan={3} style={{padding:"12px 14px",fontWeight:800}}>TOTAL DEDUCTIBLE</td>
+                    <td style={{padding:"12px 14px"}}><span style={{background:"#f59e0b",color:"#fff",padding:"4px 10px",borderRadius:6,fontSize:13,fontWeight:800}}>{fmt(totalExpenses2)}</span></td>
+                    <td colSpan={2}/>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>}
+
+        {/* DEPOSIT LEDGER */}
+        {irsTab==="deposits"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:8}}>Deposit Ledger — All Collected Payments</div>
+          <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+            <select value={depositFilter} onChange={e=>setDepositFilter(e.target.value)} style={{border:"1.5px solid #e5e7eb",borderRadius:7,padding:"7px 12px",fontSize:12,background:"#fff"}}>
+              <option value="all">All Methods</option>
+              <option value="cash">💵 Cash</option>
+              <option value="check">🏦 Check</option>
+              <option value="money_order">📋 Money Order</option>
+              <option value="zelle">📱 Zelle</option>
+              <option value="card">💳 Card</option>
+            </select>
+            <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:8,padding:"7px 14px",fontSize:12,color:"#065f46",fontWeight:700}}>
+              {filteredDeposits.length} payments · {fmt(totalDeposits)} total · {filteredDeposits.filter(p=>p.receipt_url).length} receipts
+            </div>
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                {["Invoice","Date Collected","Method","Amount","Check/Ref#","Bank","Receipt"].map(h=>(
+                  <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {filteredDeposits.length===0?<tr><td colSpan={7} style={{padding:"30px",textAlign:"center",color:"#9ca3af"}}>No deposits found</td></tr>:filteredDeposits.map(p=>(
+                  <tr key={p.id||p.sale_id} style={{borderBottom:"1px solid #f3f4f6"}}>
+                    <td style={{padding:"10px 14px"}}><span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:700}}>{p.sale_id}</span></td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{p.collected_at?new Date(p.collected_at).toLocaleDateString():"—"}</td>
+                    <td style={{padding:"10px 14px"}}><span style={{background:"#f9fafb",border:"1px solid #e5e7eb",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:600,color:"#374151"}}>{p.method}</span></td>
+                    <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontSize:15}}>{fmt(parseFloat(p.amount||0))}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{p.check_number||"—"}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{p.bank_name||"—"}</td>
+                    <td style={{padding:"10px 14px"}}>
+                      {p.receipt_url?<button onClick={()=>setViewReceipt(p.receipt_url)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700}}>📸 View</button>:<span style={{fontSize:11,color:"#d1d5db"}}>No receipt</span>}
+                    </td>
+                  </tr>
+                ))}
+                {filteredDeposits.length>0&&(
+                  <tr style={{background:"#f9fafb",borderTop:"2px solid #e5e7eb"}}>
+                    <td colSpan={3} style={{padding:"12px 14px",fontWeight:800}}>TOTAL DEPOSITED</td>
+                    <td style={{padding:"12px 14px"}}><span style={{background:"#059669",color:"#fff",padding:"4px 12px",borderRadius:6,fontSize:14,fontWeight:800}}>{fmt(totalDeposits)}</span></td>
+                    <td colSpan={3}/>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>}
+
+        {/* Receipt viewer */}
+        {viewReceipt&&(
+          <div style={{position:"fixed",inset:0,background:"#00000080",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{background:"#fff",borderRadius:16,padding:20,maxWidth:600,width:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <div style={{fontWeight:700,fontSize:15}}>📸 Receipt</div>
+                <button onClick={()=>setViewReceipt(null)} style={{background:"#f3f4f6",border:"none",borderRadius:7,padding:"6px 12px",cursor:"pointer",fontWeight:700}}>✕ Close</button>
+              </div>
+              {viewReceipt.toLowerCase().includes(".pdf")?<iframe src={viewReceipt} style={{width:"100%",height:500,border:"none",borderRadius:8}}/>:<img src={viewReceipt} alt="receipt" style={{width:"100%",borderRadius:8,border:"1px solid #e5e7eb"}}/>}
+              <a href={viewReceipt} target="_blank" rel="noreferrer" style={{display:"block",marginTop:10,textAlign:"center",background:"#0a1628",color:"#fff",padding:"10px",borderRadius:8,fontSize:13,fontWeight:700,textDecoration:"none"}}>🔗 Open Full Size</a>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── STATE ACTIVATION COMPONENT ───────────────────────────────────────────────
+// Simple: activate/deactivate states only. Rate config is in IRS Reports > All States
+function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
+  const [search,setSearch]=useState("");
+  const [adding,setAdding]=useState(false);
+
+  const activeIds=new Set(stateTaxes.map(s=>s.id));
+  const ref=(id)=>ALL_STATES_TAX.find(s=>s.id===id)||{otp:0,cig:0,due:"20th",form:"OTP Return"};
+
+  const activate=async(stData,exempt=false)=>{
+    const r=ref(stData.id);
+    const rec={id:stData.id,name:stData.name,rate:exempt?0:r.otp,cig_tax:r.cig,exempt};
+    const{error}=await supabase.from("state_taxes").upsert(rec);
+    if(error){showToast(error.message,"error");return;}
+    setStateTaxes(prev=>{
+      const exists=prev.find(s=>s.id===rec.id);
+      return exists?prev.map(s=>s.id===rec.id?rec:s):[...prev,rec];
+    });
+    showToast(`✅ ${stData.id} — ${stData.name} ${exempt?"added as exempt":"activated"}`);
+    setAdding(false);
+  };
+
+  const remove=async(id)=>{
+    if(!window.confirm(`Remove ${id} from active states?`))return;
+    await supabase.from("state_taxes").delete().eq("id",id);
+    setStateTaxes(prev=>prev.filter(s=>s.id!==id));
+    showToast(`${id} removed`);
+  };
+
+  const notAdded=ALL_STATES_TAX.filter(s=>
+    !activeIds.has(s.id)&&
+    (!search||s.name.toLowerCase().includes(search.toLowerCase())||s.id.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  return(
+    <div className="fu">
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,color:"#212121"}}>⚙️ State Activation</div>
+          <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>
+            Activate states where you operate. To edit OTP &amp; cigarette tax rates, go to <strong>IRS Reports → 🗺 All States</strong>.
+          </div>
+        </div>
+        <button onClick={()=>setAdding(!adding)}
+          style={{padding:"9px 16px",background:adding?"#f3f4f6":"#0a1628",color:adding?"#6b7280":"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+          {adding?"✕ Cancel":"+ Add State"}
+        </button>
+      </div>
+
+      {/* Connected note */}
+      <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:10,padding:"10px 16px",fontSize:11,color:"#065f46",marginBottom:16,display:"flex",gap:8,alignItems:"center"}}>
+        <span style={{fontSize:16}}>✅</span>
+        <span>Activated states are automatically used across <strong>all platforms</strong>: driver invoices · walk-in sales · customer orders · IRS reports · emails</span>
+      </div>
+
+      {/* Active States list */}
+      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#9ca3af",letterSpacing:".1em",marginBottom:10}}>
+        ACTIVE STATES ({stateTaxes.length})
+      </div>
+
+      {stateTaxes.length===0&&!adding&&(
+        <div style={{background:"#f9fafb",border:"1px dashed #e5e7eb",borderRadius:10,padding:"24px",textAlign:"center",color:"#9ca3af",fontSize:13,marginBottom:16}}>
+          No states activated yet. Click <strong>"+ Add State"</strong> to begin.
+        </div>
+      )}
+
+      <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
+        {stateTaxes.map(st=>(
+          <div key={st.id} style={{background:"#fff",border:"1.5px solid #e5e7eb",borderRadius:12,padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
+            {/* State badge */}
+            <div style={{background:"#0a1628",color:"#fff",borderRadius:8,padding:"6px 12px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,flexShrink:0,minWidth:44,textAlign:"center"}}>
+              {st.id}
+            </div>
+            {/* Name + status */}
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:14,color:"#212121"}}>{st.name}</div>
+              <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>
+                {ref(st.id).due} of month · {ref(st.id).form}
+              </div>
+            </div>
+            {/* Status badge */}
+            {st.exempt
+              ?<span style={{background:"#dcfce7",color:"#166534",padding:"4px 12px",borderRadius:6,fontSize:12,fontWeight:700}}>✅ Exempt</span>
+              :<span style={{background:"#fef9c3",color:"#854d0e",padding:"4px 12px",borderRadius:6,fontSize:12,fontWeight:700}}>🏛 Active</span>
+            }
+            {/* Remove */}
+            <button onClick={()=>remove(st.id)}
+              style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"6px 10px",fontSize:12,color:"#dc2626",cursor:"pointer",fontWeight:700}}>
+              🗑
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Add State Panel */}
+      {adding&&<>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#9ca3af",letterSpacing:".1em",marginBottom:10}}>
+          SELECT STATE TO ACTIVATE
+        </div>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search state..."
+          style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"9px 14px",fontSize:13,marginBottom:12,boxSizing:"border-box"}}/>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:8}}>
+          {notAdded.map(s=>(
+            <div key={s.id} style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#0a1628",minWidth:28}}>{s.id}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:12,fontWeight:600,color:"#212121"}}>{s.name}</div>
+                <div style={{fontSize:10,color:"#9ca3af"}}>OTP {s.otp}% · Cig ${s.cig.toFixed(2)}/pack</div>
+              </div>
+              <div style={{display:"flex",gap:4}}>
+                <button onClick={()=>activate(s,false)}
+                  style={{background:"#0a1628",color:"#fff",border:"none",borderRadius:6,padding:"5px 10px",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                  Activate
+                </button>
+                <button onClick={()=>activate(s,true)}
+                  style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"5px 8px",fontSize:10,fontWeight:700,color:"#065f46",cursor:"pointer"}}>
+                  Exempt
+                </button>
+              </div>
+            </div>
+          ))}
+          {notAdded.length===0&&<div style={{color:"#9ca3af",fontSize:13,padding:"10px"}}>All states already added</div>}
+        </div>
+      </>}
+
+      <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"12px 16px",fontSize:11,color:"#6b7280",marginTop:16}}>
+        <strong>📌 Note:</strong> To edit OTP rates and cigarette tax rates, go to <strong>IRS Reports → 🗺 All States</strong> and click ✏️ on any state.
+      </div>
+    </div>
+  );
+}
+
+
+// ── IRS ALL STATES COMPONENT ─────────────────────────────────────────────────
+function IRSAllStates({stateTaxes,setStateTaxes,activeStateIds,stateSearch,setStateSearch,supabase,showToast}){
+  const [irsStateTab,setIrsStateTab]=useState("otp");
+  const [editingId,setEditingId]=useState(null);
+  const [editField,setEditField]=useState(null); // "otp" or "cig"
+  const [editVal,setEditVal]=useState("");
+
+  const filtered2=ALL_STATES_TAX.filter(s=>
+    !stateSearch||
+    s.name.toLowerCase().includes(stateSearch.toLowerCase())||
+    s.id.toLowerCase().includes(stateSearch.toLowerCase())
+  );
+
+  const startEdit=(id,field,currentVal)=>{
+    setEditingId(id);
+    setEditField(field);
+    setEditVal(String(currentVal));
+  };
+
+  const saveEdit=async(id,field)=>{
+    const n=parseFloat(editVal);
+    if(isNaN(n)||n<0){setEditingId(null);return;}
+    // Update in state_taxes if this state is configured
+    const configured=stateTaxes.find(s=>s.id===id);
+    if(configured){
+      const updates=field==="otp"?{rate:n}:{cig_tax:n};
+      const{error}=await supabase.from("state_taxes").update(updates).eq("id",id);
+      if(!error){
+        setStateTaxes(prev=>prev.map(s=>s.id===id?{...s,...updates}:s));
+      }
+    }
+    // Always update ALL_STATES_TAX reference in memory
+    const idx=ALL_STATES_TAX.findIndex(s=>s.id===id);
+    if(idx>=0){
+      if(field==="otp") ALL_STATES_TAX[idx].otp=n;
+      else ALL_STATES_TAX[idx].cig=n;
+    }
+    showToast(`✅ ${id} ${field==="otp"?"OTP":"cigarette"} rate updated`);
+    setEditingId(null);
+    setEditField(null);
+  };
+
+  const EditCell=({id,field,value,color,suffix})=>{
+    const isEditing=editingId===id&&editField===field;
+    return isEditing?(
+      <div style={{display:"flex",alignItems:"center",gap:4}}>
+        {suffix==="$/pack"&&<span style={{fontSize:12,color:"#6b7280"}}>$</span>}
+        <input type="number" min="0" step={suffix==="$/pack"?"0.01":"0.1"} value={editVal}
+          autoFocus onChange={e=>setEditVal(e.target.value)}
+          onKeyDown={e=>{if(e.key==="Enter")saveEdit(id,field);if(e.key==="Escape")setEditingId(null);}}
+          style={{width:60,border:`1.5px solid ${color}`,borderRadius:6,padding:"3px 6px",fontSize:13,fontWeight:700}}/>
+        <span style={{fontSize:11,color:"#6b7280"}}>{suffix==="$/pack"?"/pack":"%"}</span>
+        <button onClick={()=>saveEdit(id,field)}
+          style={{background:color,color:"#fff",border:"none",borderRadius:5,padding:"3px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}}>✓</button>
+        <button onClick={()=>setEditingId(null)}
+          style={{background:"#f3f4f6",border:"none",borderRadius:5,padding:"3px 6px",fontSize:11,cursor:"pointer",color:"#6b7280"}}>✕</button>
+      </div>
+    ):(
+      <div style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}} onClick={()=>startEdit(id,field,value)}>
+        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color}}>
+          {suffix==="$/pack"?`$${parseFloat(value).toFixed(2)}/pack`:`${value}%`}
+        </span>
+        <span style={{fontSize:11,color:"#9ca3af",opacity:0.7}}>✏️</span>
+      </div>
+    );
+  };
+
+  return(<>
+    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:8}}>All States — Tax Reference &amp; Configuration</div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+      <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"10px 14px",fontSize:11,color:"#854d0e"}}>
+        <strong>🚬 OTP Tax (% of wholesale)</strong> — vapes, e-cigarettes, disposables, nicotine pouches, cigars, hookah, smokeless tobacco.
+        Click ✏️ to edit any rate.
+      </div>
+      <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"10px 14px",fontSize:11,color:"#1e40af"}}>
+        <strong>🏷 Cigarette Tax ($/pack)</strong> — per-pack stamp tax on cigarettes only.
+        Reference only — not calculated in invoices. Click ✏️ to edit.
+      </div>
+    </div>
+
+    {/* Tab switcher */}
+    <div style={{display:"flex",gap:0,marginBottom:14,border:"1.5px solid #e5e7eb",borderRadius:10,overflow:"hidden",width:"fit-content"}}>
+      {[["otp","🚬 OTP / Vape / Nicotine"],["cig","🏷 Cigarette ($/pack)"]].map(([id,label])=>(
+        <button key={id} onClick={()=>setIrsStateTab(id)}
+          style={{padding:"9px 18px",border:"none",background:irsStateTab===id?"#0a1628":"#fff",color:irsStateTab===id?"#fff":"#6b7280",fontWeight:irsStateTab===id?700:400,fontSize:12,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+          {label}
+        </button>
+      ))}
+    </div>
+
+    <input value={stateSearch} onChange={e=>setStateSearch(e.target.value)} placeholder="🔍 Search state..."
+      style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"9px 14px",fontSize:13,marginBottom:12,boxSizing:"border-box"}}/>
+
+    {/* OTP TABLE */}
+    {irsStateTab==="otp"&&<div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+          {["State","OTP Rate — click ✏️ to edit","Status in your system","Filing Due","Form","Note"].map(h=>(
+            <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:10,fontWeight:700,letterSpacing:".06em",whiteSpace:"nowrap"}}>{h}</th>
+          ))}
+        </tr></thead>
+        <tbody>
+          {filtered2.map(s=>{
+            const isActive=activeStateIds.includes(s.id);
+            const configured=stateTaxes.find(st=>st.id===s.id);
+            const displayRate=configured?configured.rate:s.otp;
+            return(
+              <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6",background:isActive?"#fefce8":configured?"#f5f3ff":"#fff"}}>
+                <td style={{padding:"10px 14px"}}>
+                  <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                    <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#0a1628"}}>{s.id}</span>
+                    <span style={{fontSize:12,color:"#6b7280"}}>{s.name}</span>
+                    {isActive&&<span style={{background:"#f59e0b",color:"#fff",padding:"1px 6px",borderRadius:4,fontSize:9,fontWeight:700}}>ACTIVE</span>}
+                    {configured&&!isActive&&<span style={{background:"#7c3aed",color:"#fff",padding:"1px 6px",borderRadius:4,fontSize:9,fontWeight:700}}>CONFIGURED</span>}
+                  </div>
+                </td>
+                <td style={{padding:"10px 14px"}}>
+                  <EditCell id={s.id} field="otp" value={displayRate}
+                    color={displayRate>=50?"#dc2626":displayRate>=25?"#f59e0b":"#059669"} suffix="%"/>
+                </td>
+                <td style={{padding:"10px 14px"}}>
+                  {configured?(configured.exempt
+                    ?<span style={{background:"#dcfce7",color:"#166534",padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:700}}>✅ Exempt</span>
+                    :<span style={{background:"#fef9c3",color:"#854d0e",padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:700}}>🏛 {configured.rate}% active</span>)
+                  :<span style={{fontSize:11,color:"#9ca3af"}}>Not activated</span>}
+                </td>
+                <td style={{padding:"10px 14px"}}><span style={{background:"#f5f3ff",color:"#7c3aed",padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:600}}>{s.due}</span></td>
+                <td style={{padding:"10px 14px",fontSize:11,color:"#6b7280",fontFamily:"monospace"}}>{s.form}</td>
+                <td style={{padding:"10px 14px",fontSize:10,color:"#9ca3af"}}>{s.note}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>}
+
+    {/* CIGARETTE TABLE */}
+    {irsStateTab==="cig"&&<div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr style={{background:"#1e40af",color:"#fff"}}>
+          {["State","Cigarette Tax — click ✏️ to edit","Filing Form","Note"].map(h=>(
+            <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:10,fontWeight:700,letterSpacing:".06em"}}>{h}</th>
+          ))}
+        </tr></thead>
+        <tbody>
+          {[...filtered2].sort((a,b)=>b.cig-a.cig).map(s=>{
+            const configured=stateTaxes.find(st=>st.id===s.id);
+            const displayCig=configured?.cig_tax!=null?configured.cig_tax:s.cig;
+            return(
+              <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6"}}>
+                <td style={{padding:"10px 14px"}}>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#1e40af"}}>{s.id}</span>
+                    <span style={{fontSize:12,color:"#6b7280"}}>{s.name}</span>
+                  </div>
+                </td>
+                <td style={{padding:"10px 14px"}}>
+                  <EditCell id={s.id} field="cig" value={displayCig}
+                    color={displayCig>=3?"#dc2626":displayCig>=1.5?"#f59e0b":"#059669"} suffix="$/pack"/>
+                </td>
+                <td style={{padding:"10px 14px",fontSize:11,color:"#6b7280",fontFamily:"monospace"}}>{s.form}</td>
+                <td style={{padding:"10px 14px",fontSize:10,color:"#9ca3af"}}>{s.note}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>}
+  </>);
+}
+
+
+// ── IRS REPORTS COMPONENT ─────────────────────────────────────────────────────
+// All 50 states + DC OTP (Other Tobacco Products) tax rates
+// Source: State revenue departments, Tax Foundation 2025
+// OTP rates = % of wholesale price (how wholesalers are taxed)
+let ALL_STATES_TAX = [
+  {id:"AL",name:"Alabama",        otp:10,   cig:0.68, due:"20th",    form:"Tobacco Tax Return",      note:"OTP 10% wholesale"},
+  {id:"AK",name:"Alaska",         otp:75,   cig:2.00, due:"Last day",form:"OTP Tax Return",          note:"OTP 75% wholesale"},
+  {id:"AZ",name:"Arizona",        otp:65,   cig:2.00, due:"20th",    form:"TPT Return",              note:"OTP 65% wholesale"},
+  {id:"AR",name:"Arkansas",       otp:68,   cig:1.15, due:"20th",    form:"ET-1 Return",             note:"OTP 68% manufacturer"},
+  {id:"CA",name:"California",     otp:61.74,cig:2.87, due:"25th",    form:"BOE-501-T",               note:"OTP 61.74% wholesale"},
+  {id:"CO",name:"Colorado",       otp:50,   cig:1.94, due:"20th",    form:"DR 0225",                 note:"OTP 50% manufacturer"},
+  {id:"CT",name:"Connecticut",    otp:50,   cig:4.35, due:"Last day",form:"TPTP Return",             note:"OTP 50% wholesale"},
+  {id:"DE",name:"Delaware",       otp:30,   cig:2.10, due:"15th",    form:"OTP Return",              note:"OTP 30% wholesale"},
+  {id:"FL",name:"Florida",        otp:85,   cig:1.34, due:"20th",    form:"DR-15TOB",                note:"OTP 85% wholesale"},
+  {id:"GA",name:"Georgia",        otp:23,   cig:0.37, due:"20th",    form:"TP-1 Return",             note:"OTP 23% wholesale"},
+  {id:"HI",name:"Hawaii",         otp:70,   cig:3.20, due:"20th",    form:"OTP Return",              note:"OTP 70% wholesale"},
+  {id:"ID",name:"Idaho",          otp:40,   cig:0.57, due:"20th",    form:"Tobacco Products Return", note:"OTP 40% wholesale"},
+  {id:"IL",name:"Illinois",       otp:36,   cig:2.98, due:"15th",    form:"TP-1",                    note:"OTP 36% wholesale"},
+  {id:"IN",name:"Indiana",        otp:24,   cig:1.00, due:"20th",    form:"TF-1 / OTP Return",       note:"OTP 24% wholesale"},
+  {id:"IA",name:"Iowa",           otp:50,   cig:1.36, due:"Last day",form:"IA 81-018",               note:"OTP 50% wholesale"},
+  {id:"KS",name:"Kansas",         otp:10,   cig:1.29, due:"25th",    form:"CT-10U",                  note:"OTP 10% wholesale"},
+  {id:"KY",name:"Kentucky",       otp:15,   cig:1.10, due:"20th",    form:"72A190",                  note:"OTP 15% wholesale"},
+  {id:"LA",name:"Louisiana",      otp:20,   cig:1.08, due:"20th",    form:"R-5604",                  note:"OTP 20% cost price"},
+  {id:"ME",name:"Maine",          otp:43,   cig:2.00, due:"15th",    form:"Tobacco Products Return", note:"OTP 43% wholesale"},
+  {id:"MD",name:"Maryland",       otp:30,   cig:3.00, due:"21st",    form:"MW508",                   note:"OTP 30% wholesale"},
+  {id:"MA",name:"Massachusetts",  otp:40,   cig:3.51, due:"20th",    form:"Excise Return",           note:"OTP 40% wholesale"},
+  {id:"MI",name:"Michigan",       otp:32,   cig:2.00, due:"20th",    form:"Form 4600",               note:"OTP 32% wholesale"},
+  {id:"MN",name:"Minnesota",      otp:95,   cig:3.04, due:"18th",    form:"Tobacco Products Return", note:"OTP 95% — highest"},
+  {id:"MS",name:"Mississippi",    otp:15,   cig:0.68, due:"20th",    form:"Tobacco Tax Return",      note:"OTP 15% wholesale"},
+  {id:"MO",name:"Missouri",       otp:10,   cig:0.17, due:"15th",    form:"MO-860",                  note:"OTP 10% manufacturer"},
+  {id:"MT",name:"Montana",        otp:50,   cig:1.70, due:"Last day",form:"Tobacco Return",          note:"OTP 50% wholesale"},
+  {id:"NE",name:"Nebraska",       otp:20,   cig:0.64, due:"Last day",form:"Form 69",                 note:"OTP 20% wholesale"},
+  {id:"NV",name:"Nevada",         otp:30,   cig:1.80, due:"Last day",form:"TXR-025",                note:"OTP 30% wholesale"},
+  {id:"NH",name:"New Hampshire",  otp:19,   cig:1.78, due:"15th",    form:"OTP Return",              note:"OTP 19% wholesale"},
+  {id:"NJ",name:"New Jersey",     otp:30,   cig:2.70, due:"20th",    form:"OTP-100",                 note:"OTP 30% wholesale"},
+  {id:"NM",name:"New Mexico",     otp:25,   cig:2.00, due:"25th",    form:"TRD-41413",               note:"OTP 25% wholesale"},
+  {id:"NY",name:"New York",       otp:75,   cig:5.35, due:"20th",    form:"MT-203",                  note:"OTP 75% wholesale"},
+  {id:"NC",name:"North Carolina", otp:12.8, cig:0.45, due:"20th",    form:"NC-TP Return",            note:"OTP 12.8% wholesale"},
+  {id:"ND",name:"North Dakota",   otp:28,   cig:0.44, due:"25th",    form:"SFN 21999",               note:"OTP 28% wholesale"},
+  {id:"OH",name:"Ohio",           otp:17,   cig:1.60, due:"23rd",    form:"OTP Tax Return",          note:"OTP 17% wholesale"},
+  {id:"OK",name:"Oklahoma",       otp:36,   cig:2.03, due:"20th",    form:"OTC 900",                 note:"OTP 36% manufacturer"},
+  {id:"OR",name:"Oregon",         otp:65,   cig:1.34, due:"Last day",form:"OR-CIGT",                 note:"OTP 65% wholesale"},
+  {id:"PA",name:"Pennsylvania",   otp:55,   cig:2.60, due:"20th",    form:"REV-1200",                note:"OTP 55% wholesale"},
+  {id:"RI",name:"Rhode Island",   otp:80,   cig:4.25, due:"20th",    form:"OTP Return",              note:"OTP 80% wholesale"},
+  {id:"SC",name:"South Carolina", otp:5,    cig:0.57, due:"20th",    form:"SC Tobacco Return",       note:"OTP 5% wholesale"},
+  {id:"SD",name:"South Dakota",   otp:35,   cig:1.53, due:"Last day",form:"OTP Return",              note:"OTP 35% wholesale"},
+  {id:"TN",name:"Tennessee",      otp:6.6,  cig:0.62, due:"20th",    form:"Tobacco Tax Return",      note:"OTP 6.6% wholesale"},
+  {id:"TX",name:"Texas",          otp:1,    cig:1.41, due:"25th",    form:"AP-143",                  note:"OTP 1% manufacturer"},
+  {id:"UT",name:"Utah",           otp:86,   cig:1.70, due:"Last day",form:"TC-105",                  note:"OTP 86% manufacturer"},
+  {id:"VT",name:"Vermont",        otp:92,   cig:3.08, due:"25th",    form:"Tobacco Products Return", note:"OTP 92% wholesale"},
+  {id:"VA",name:"Virginia",       otp:10,   cig:0.30, due:"20th",    form:"TT-1",                    note:"OTP 10% manufacturer"},
+  {id:"WA",name:"Washington",     otp:95,   cig:3.03, due:"25th",    form:"Excise Tax Return",       note:"OTP 95% — tied highest"},
+  {id:"WV",name:"West Virginia",  otp:12,   cig:1.20, due:"20th",    form:"WV/TFR-1",               note:"OTP 12% wholesale"},
+  {id:"WI",name:"Wisconsin",      otp:71,   cig:2.52, due:"15th",    form:"TF-100",                  note:"OTP 71% manufacturer"},
+  {id:"WY",name:"Wyoming",        otp:20,   cig:0.60, due:"Last day",form:"Tobacco Return",          note:"OTP 20% wholesale"},
+  {id:"DC",name:"Washington DC",  otp:96,   cig:4.50, due:"20th",    form:"FR-800",                  note:"OTP 96% — highest overall"},
+];
+
+function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expenses,stateTaxes,setStateTaxes,calcSaleTax,calcSaleGrandTotal,isTaxableProd,pmtFor,fmt,supabase,showToast}){
+  const [irsTab,setIrsTab]=useState("overview");
+  const [period,setPeriod]=useState("all");
+  const [depositFilter,setDepositFilter]=useState("all");
+  const [viewReceipt,setViewReceipt]=useState(null);
+  const [localExpenses,setLocalExpenses]=useState(expenses);
+  const [stateSearch,setStateSearch]=useState("");
+  useEffect(()=>{setLocalExpenses(expenses);},[expenses]);
+
+  const now=new Date();
+  const filterByPeriod=(arr)=>{
+    if(period==="all")return arr;
+    return arr.filter(s=>{
+      const d=new Date(s.created_at);
+      if(period==="q1")return d.getMonth()<3&&d.getFullYear()===now.getFullYear();
+      if(period==="q2")return d.getMonth()>=3&&d.getMonth()<6&&d.getFullYear()===now.getFullYear();
+      if(period==="q3")return d.getMonth()>=6&&d.getMonth()<9&&d.getFullYear()===now.getFullYear();
+      if(period==="q4")return d.getMonth()>=9&&d.getFullYear()===now.getFullYear();
+      if(period==="ytd")return d.getFullYear()===now.getFullYear();
+      if(period==="last30")return(now-d)/(1000*60*60*24)<=30;
+      return true;
+    });
+  };
+
+  const filteredSales=filterByPeriod(sales);
+  const paidSales=filteredSales.filter(s=>pmtFor(s.id)?.status==="paid");
+
+  // CORRECT financials
+  const grossRevenue=filteredSales.reduce((a,s)=>a+parseFloat(s.total||0),0);
+  const taxCollected=filteredSales.reduce((a,s)=>a+calcSaleTax(s),0);
+  const grossReceipts=grossRevenue+taxCollected; // Schedule C Line 1
+  const cogs=filteredSales.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return b+(p?.cost||0)*i.qty;},0),0);
+  const grossProfit=grossRevenue-cogs; // Line 5
+  const grossMargin=grossRevenue>0?((grossProfit/grossRevenue)*100).toFixed(1):"0";
+  const totalExpenses2=localExpenses.reduce((a,e)=>a+parseFloat(e.amount||0),0);
+  const netProfit=grossProfit-totalExpenses2; // Line 31
+  const collected=paidSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+  const outstanding=filteredSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+
+  // Tax by state (your configured states)
+  const taxByState=stateTaxes.filter(st=>!st.exempt).map(st=>{
+    const stSales=filteredSales.filter(s=>(s.state||"")===st.id);
+    const tax=stSales.reduce((a,s)=>a+calcSaleTax(s),0);
+    const taxable=stSales.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0),0);
+    const allInfo=ALL_STATES_TAX.find(x=>x.id===st.id);
+    return{state:st.id,name:st.name,rate:st.rate,tax,taxable,count:stSales.length,due:allInfo?.due||"20th",form:allInfo?.form||"OTP Return"};
+  }).filter(x=>x.count>0);
+
+  const activeStateIds=[...new Set(filteredSales.map(s=>s.state).filter(Boolean))];
+  const thisMonth=now.toLocaleString("default",{month:"long",year:"numeric"});
+
+  const byMethod={};
+  filteredSales.forEach(s=>{const pm=pmtFor(s.id);if(pm?.status==="paid"){const m=pm.method||"cash";if(!byMethod[m])byMethod[m]={count:0,amount:0};byMethod[m].count++;byMethod[m].amount+=calcSaleGrandTotal(s);}});
+
+  const allCollected=payments.filter(p=>p.status==="paid").sort((a,b)=>new Date(b.collected_at||0)-new Date(a.collected_at||0));
+  const filteredDeposits=depositFilter==="all"?allCollected:allCollected.filter(p=>p.method===depositFilter);
+  const totalDeposits=filteredDeposits.reduce((a,p)=>a+parseFloat(p.amount||0),0);
+
+  const qData=[0,1,2,3].map(q=>{
+    const qS=sales.filter(s=>{const d=new Date(s.created_at);return d.getFullYear()===now.getFullYear()&&Math.floor(d.getMonth()/3)===q;});
+    return{label:["Q1 (Jan-Mar)","Q2 (Apr-Jun)","Q3 (Jul-Sep)","Q4 (Oct-Dec)"][q],rev:qS.reduce((a,s)=>a+parseFloat(s.total||0),0),tax:qS.reduce((a,s)=>a+calcSaleTax(s),0),col:qS.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),count:qS.length};
+  });
+
+  const deleteExpense=async(id)=>{
+    if(!window.confirm("Delete this expense?"))return;
+    const{error}=await supabase.from("expenses").delete().eq("id",id);
+    if(error){showToast(error.message,"error");return;}
+    setLocalExpenses(prev=>prev.filter(e=>e.id!==id));
+    showToast("Expense deleted");
+  };
+
+  const exportIRS=()=>{
+    const rows=[
+      ["VitalWaveOne LLC — IRS Report"],["Period",period.toUpperCase()],["Generated",new Date().toLocaleDateString()],[],
+      ["SCHEDULE C"],
+      ["Line 1 — Gross receipts or sales",grossReceipts.toFixed(2)],
+      ["Line 4 — Cost of goods sold",cogs.toFixed(2)],
+      ["Line 5 — Gross profit",grossProfit.toFixed(2)],
+      ["Line 23 — Tobacco excise tax remitted",taxCollected.toFixed(2)],
+      ["Line 28 — Total expenses",totalExpenses2.toFixed(2)],
+      ["Line 31 — Net profit",netProfit.toFixed(2)],[],
+      ["COLLECTIONS"],["Collected",collected.toFixed(2)],["Outstanding",outstanding.toFixed(2)],[],
+      ["TAX BY STATE"],["State","Rate","Taxable","Tax Collected","Invoices","Due","Form"],
+      ...taxByState.map(t=>[t.state,t.rate+"%",t.taxable.toFixed(2),t.tax.toFixed(2),t.count,t.due,t.form]),
+      [],["EXPENSES"],["Date","Driver","Category","Amount","Description"],
+      ...localExpenses.map(e=>[e.date,e.driver_name,e.category,parseFloat(e.amount).toFixed(2),e.description||""]),
+      [],["DEPOSIT LEDGER"],["Sale ID","Method","Amount","Date","Check#","Receipt"],
+      ...allCollected.map(p=>[p.sale_id,p.method,parseFloat(p.amount).toFixed(2),p.collected_at?.slice(0,10)||"",p.check_number||"",p.receipt_url?"YES":"NO"]),
+    ];
+    const csv=rows.map(r=>r.join(",")).join("\n");
+    const a=document.createElement("a");
+    a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+    a.download="IRS_Report_"+period+"_"+new Date().toISOString().slice(0,10)+".csv";
+    a.click();
+    showToast("IRS report exported!");
+  };
+
+  const tabs2=[{id:"overview",label:"📊 Overview"},{id:"quarterly",label:"📅 Quarterly"},{id:"monthly",label:"📋 Monthly Filing"},{id:"allstates",label:"🗺 All States"},{id:"tax",label:"🏛 Tax by State"},{id:"methods",label:"💳 Payment Methods"},{id:"expenses",label:"🚗 Expenses"},{id:"deposits",label:"💰 Deposit Ledger"}];
+
+  const Card2=({label,value,sub,color="#212121"})=>(
+    <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px"}}>
+      <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:".08em",marginBottom:4}}>{label}</div>
+      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color}}>{value}</div>
+      {sub&&<div style={{fontSize:10,color:"#6b7280",marginTop:2}}>{sub}</div>}
+    </div>
+  );
+
+  return(
+    <div style={{display:"flex",height:"calc(100vh - 120px)",overflow:"hidden"}}>
+
+      {/* LEFT SIDEBAR */}
+      <div style={{width:220,flexShrink:0,borderRight:"1px solid #e5e7eb",background:"#f9fafb",display:"flex",flexDirection:"column"}}>
+        <div style={{padding:"14px 16px",borderBottom:"1px solid #e5e7eb"}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#212121"}}>🏛 IRS Reports</div>
+          <div style={{fontSize:10,color:"#9ca3af",marginTop:2}}>Audit-ready documentation</div>
+        </div>
+        <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb"}}>
+          <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:6}}>PERIOD</label>
+          <select value={period} onChange={e=>setPeriod(e.target.value)} style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:7,padding:"8px 10px",fontSize:12,background:"#fff"}}>
+            <option value="all">All Time</option>
+            <option value="ytd">Year to Date</option>
+            <option value="last30">Last 30 Days</option>
+            <option value="q1">Q1 (Jan–Mar)</option>
+            <option value="q2">Q2 (Apr–Jun)</option>
+            <option value="q3">Q3 (Jul–Sep)</option>
+            <option value="q4">Q4 (Oct–Dec)</option>
+          </select>
+        </div>
+        <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb"}}>
+          {[["Gross Receipts",fmt(grossReceipts),"#059669"],["Tax to Remit",fmt(taxCollected),"#dc2626"],["Net Profit",fmt(netProfit),netProfit>=0?"#059669":"#dc2626"],["AR Outstanding",fmt(outstanding),"#f59e0b"]].map(([l,v,c])=>(
+            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6"}}>
+              <span style={{fontSize:10,color:"#6b7280"}}>{l}</span>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:c}}>{v}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{flex:1,overflowY:"auto",padding:"8px"}}>
+          {tabs2.map(t=>(
+            <button key={t.id} onClick={()=>setIrsTab(t.id)}
+              style={{width:"100%",textAlign:"left",padding:"9px 12px",borderRadius:8,border:"none",background:irsTab===t.id?"#7c3aed":"transparent",color:irsTab===t.id?"#fff":"#374151",fontSize:12,fontWeight:irsTab===t.id?700:400,cursor:"pointer",marginBottom:2,fontFamily:"'Barlow',sans-serif"}}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div style={{padding:"12px 16px",borderTop:"1px solid #e5e7eb"}}>
+          <button onClick={exportIRS} style={{width:"100%",padding:"10px",background:"#0a1628",color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:".04em"}}>
+            📥 EXPORT IRS CSV
+          </button>
+        </div>
+      </div>
+
+      {/* MAIN CONTENT */}
+      <div style={{flex:1,overflowY:"auto",padding:"20px"}}>
+
+        {/* OVERVIEW */}
+        {irsTab==="overview"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:12}}>Income Summary — Schedule C / Form 1120S</div>
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e",marginBottom:16}}>
+            <strong>⚠️ Schedule C Note:</strong> Tobacco tax collected from customers ({fmt(taxCollected)}) is included in
+            Gross Receipts (Line 1). You deduct the same amount on <strong>Line 23</strong> when remitted to states. Net effect on profit = $0.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:10,marginBottom:20}}>
+            <Card2 label="GROSS REVENUE" value={fmt(grossRevenue)} sub={filteredSales.length+" invoices"} color="#059669"/>
+            <Card2 label="TOBACCO TAX COLLECTED" value={fmt(taxCollected)} sub="Remit to states monthly" color="#dc2626"/>
+            <Card2 label="GROSS RECEIPTS (Line 1)" value={fmt(grossReceipts)} sub="Revenue + tax" color="#0ea5e9"/>
+            <Card2 label="COGS (Line 4)" value={fmt(cogs)} sub="Cost of goods sold" color="#dc2626"/>
+            <Card2 label="GROSS PROFIT (Line 5)" value={fmt(grossProfit)} sub={grossMargin+"% margin"} color="#059669"/>
+            <Card2 label="EXPENSES (Line 28)" value={fmt(totalExpenses2)} sub="Driver + operating" color="#f59e0b"/>
+            <Card2 label="NET PROFIT (Line 31)" value={fmt(netProfit)} sub="Before income tax" color={netProfit>=0?"#059669":"#dc2626"}/>
+            <Card2 label="TOTAL COLLECTED" value={fmt(collected)} sub="Cash received" color="#059669"/>
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden",marginBottom:16}}>
+            <div style={{background:"#0a1628",color:"#fff",padding:"12px 16px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,letterSpacing:".06em"}}>SCHEDULE C — PROFIT OR LOSS FROM BUSINESS</div>
+            {[
+              ["Line 1","Gross receipts or sales",fmt(grossReceipts),"#212121",false],
+              ["Line 4","Cost of goods sold (COGS)",fmt(cogs),"#dc2626",false],
+              ["Line 5","Gross profit",fmt(grossProfit),"#059669",true],
+              ["Line 23","Tobacco excise tax remitted to states",fmt(taxCollected),"#dc2626",false],
+              ["Line 28","Total deductible expenses",fmt(totalExpenses2),"#f59e0b",false],
+              ["Line 31","Net profit",fmt(netProfit),netProfit>=0?"#059669":"#dc2626",true],
+            ].map(([code,label,value,color,bold])=>(
+              <div key={code} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid #f3f4f6",background:bold?"#f9fafb":"#fff"}}>
+                <div style={{display:"flex",gap:16,alignItems:"center"}}>
+                  <span style={{fontSize:10,color:"#9ca3af",fontFamily:"monospace",minWidth:50}}>{code}</span>
+                  <span style={{fontSize:13,color:"#374151",fontWeight:bold?600:400}}>{label}</span>
+                </div>
+                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:bold?800:600,fontSize:bold?18:14,color}}>{value}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#065f46"}}>
+            <strong>📦 Inventory Note:</strong> Current inventory at cost = {fmt(products.reduce((a,p)=>a+p.shelf*(p.cost||0),0))}. Keep all supplier invoices to support COGS.
+          </div>
+        </>}
+
+        {/* QUARTERLY */}
+        {irsTab==="quarterly"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:16}}>Quarterly Revenue — {now.getFullYear()}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+            {qData.map(q=>(
+              <div key={q.label} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"16px"}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#0a1628",marginBottom:12}}>{q.label}</div>
+                {[["Revenue",fmt(q.rev),"#059669"],["Tax Collected",fmt(q.tax),"#dc2626"],["Collected",fmt(q.col),"#0ea5e9"],[q.count+" invoices","","#6b7280"]].map(([l,v,c])=>l&&(
+                  <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
+                    <span style={{fontSize:12,color:"#6b7280"}}>{l}</span>
+                    <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:c}}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"16px"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#9ca3af",letterSpacing:".1em",marginBottom:10}}>ANNUAL TOTALS</div>
+            {[["Total Revenue",fmt(qData.reduce((a,q)=>a+q.rev,0)),"#059669"],["Total Tax",fmt(qData.reduce((a,q)=>a+q.tax,0)),"#dc2626"],["Total Collected",fmt(qData.reduce((a,q)=>a+q.col,0)),"#0ea5e9"],["Total Invoices",qData.reduce((a,q)=>a+q.count,0)+" invoices","#6b7280"]].map(([l,v,c])=>(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid #f3f4f6"}}>
+                <span style={{fontSize:13,color:"#374151",fontWeight:600}}>{l}</span>
+                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:c}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </>}
+
+        {/* MONTHLY FILING */}
+        {irsTab==="monthly"&&<>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:8}}>Monthly Filing Checklist — {thisMonth}</div>
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e",marginBottom:16}}>
+            <strong>📋 Rule:</strong> File a state OTP return + pay tax for every state where you sold tobacco/vape products last month.
+            Due by the date shown. Late filing = 5–25% penalty per state.
+          </div>
+          {activeStateIds.length===0?(
+            <div style={{textAlign:"center",color:"#9ca3af",padding:"40px"}}>No sales recorded for this period</div>
+          ):(
+            <>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#9ca3af",letterSpacing:".1em",marginBottom:10}}>STATES WITH ACTIVE SALES — FILING REQUIRED</div>
+              <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+                {activeStateIds.map(sid=>{
+                  const stInfo=ALL_STATES_TAX.find(x=>x.id===sid);
+                  const taxInfo=taxByState.find(x=>x.state===sid);
+                  const configSt=stateTaxes.find(s=>s.id===sid);
+                  return(
+                    <div key={sid} style={{background:"#fff",border:"2px solid #e5e7eb",borderRadius:12,padding:"16px",display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
+                      <div style={{background:"#0a1628",color:"#fff",borderRadius:8,padding:"8px 14px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,flexShrink:0}}>{sid}</div>
+                      <div style={{flex:1,minWidth:160}}>
+                        <div style={{fontWeight:700,fontSize:14,color:"#212121"}}>{stInfo?.name||sid}</div>
+                        <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>Form: <strong>{stInfo?.form||configSt?.form||"OTP Return"}</strong></div>
+                        <div style={{fontSize:11,color:"#6b7280"}}>OTP Rate: <strong>{stInfo?.otp||configSt?.rate||"?"}%</strong> wholesale · {stInfo?.note||""}</div>
+                      </div>
+                      <div style={{textAlign:"center",minWidth:110}}>
+                        <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:".08em"}}>TAX COLLECTED</div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#dc2626"}}>{fmt(taxInfo?.tax||0)}</div>
+                        <div style={{fontSize:10,color:"#9ca3af"}}>{taxInfo?.count||0} invoices</div>
+                      </div>
+                      <div style={{textAlign:"center",minWidth:110}}>
+                        <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:".08em"}}>DUE DATE</div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:"#7c3aed"}}>{stInfo?.due||"20th"} of month</div>
+                      </div>
+                      <span style={{background:"#fef9c3",color:"#854d0e",padding:"6px 12px",borderRadius:8,fontSize:11,fontWeight:700}}>⏳ File by {stInfo?.due||"20th"}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{background:"#fff",border:"2px solid #dc2626",borderRadius:12,padding:"16px"}}>
+                <div style={{fontSize:12,color:"#6b7280",marginBottom:4}}>TOTAL TAX TO REMIT THIS MONTH</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:32,color:"#dc2626"}}>{fmt(taxCollected)}</div>
+                <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>Across {activeStateIds.length} state{activeStateIds.length!==1?"s":""}</div>
+              </div>
+            </>
+          )}
+        </>}
+
+        {/* ALL STATES */}
+        {irsTab==="allstates"&&<IRSAllStates
+            stateTaxes={stateTaxes}
+            setStateTaxes={setStateTaxes}
+            activeStateIds={activeStateIds}
+            stateSearch={stateSearch}
+            setStateSearch={setStateSearch}
+            supabase={supabase}
+            showToast={showToast}
           />}
 
         {/* TAX BY STATE */}
@@ -2517,7 +3390,7 @@ export default function App(){
     {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
     {id:"taxinvoices",label:"Tax Invoices",icon:ic.inv},
-    {id:"statetax",label:"State Config",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>⚙️</span>},
+    {id:"statetax",label:"State Activation",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>⚙️</span>},
     {id:"ar",label:"Accounts Receivable",icon:ic.ar},
     {id:"payments",label:"Payments",icon:ic.settle,badge:visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length||0},
     {id:"settlement",label:"Daily Settlement",icon:ic.settle},
@@ -3539,7 +4412,7 @@ export default function App(){
             </div>
           </div>}
 
-          {/* ══ STATE CONFIG ══ */}
+          {/* ══ STATE ACTIVATION ══ */}
           {tab==="statetax"&&<StateTaxManager
             stateTaxes={stateTaxes}
             setStateTaxes={setStateTaxes}
@@ -3551,7 +4424,7 @@ export default function App(){
           {tab==="irs"&&isAdmin&&<IRSReports
             sales={sales} payments={payments} paymentsLog={paymentsLog}
             products={products} customers={customers} trucks={trucks}
-            expenses={expenses} stateTaxes={stateTaxes}
+            expenses={expenses} stateTaxes={stateTaxes} setStateTaxes={setStateTaxes}
             calcSaleTax={calcSaleTax} calcSaleGrandTotal={calcSaleGrandTotal}
             isTaxableProd={isTaxableProd} pmtFor={pmtFor}
             fmt={fmt} supabase={supabase} showToast={showToast}
