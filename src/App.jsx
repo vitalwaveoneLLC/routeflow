@@ -132,13 +132,8 @@ const MFAGate=({onVerified})=>{
   const[stage,setStage]=useState("checking");
 
   const callMfa=async(action,params={})=>{
-    let session=null;
-    for(let i=0;i<8;i++){
-      const{data:{session:s}}=await supabase.auth.getSession();
-      if(s?.access_token){session=s;break;}
-      await new Promise(r=>setTimeout(r,200));
-    }
-    if(!session?.access_token) throw new Error("No session");
+    const{data:{session}}=await supabase.auth.getSession();
+    if(!session?.access_token) throw new Error("No active session");
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":`Bearer ${session.access_token}`,"apikey":SUPABASE_ANON_KEY},
@@ -230,23 +225,24 @@ const Login=({})=>{
   const[secret,setSecret]=useState("");
   const[otp,setOtp]=useState("");
 
-  // callMfa — waits for valid session before calling edge function
-  const callMfa=async(action,params={})=>{
-    let session=null;
-    for(let i=0;i<10;i++){
-      const{data:{session:s}}=await supabase.auth.getSession();
-      if(s?.access_token){session=s;break;}
-      await new Promise(r=>setTimeout(r,200));
-    }
-    if(!session?.access_token) throw new Error("Session not ready — please try again");
+  // callMfaWithToken — uses token directly (no session polling)
+  const callMfaWithToken=async(token,action,params={})=>{
+    if(!token) throw new Error("No session token");
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${session.access_token}`,"apikey":SUPABASE_ANON_KEY},
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`,"apikey":SUPABASE_ANON_KEY},
       body:JSON.stringify({action,...params}),
     });
     const result=await res.json();
     if(result.error) throw new Error(result.error);
     return result;
+  };
+
+  // callMfa — gets session then calls edge function
+  const callMfa=async(action,params={})=>{
+    const{data:{session}}=await supabase.auth.getSession();
+    if(!session?.access_token) throw new Error("No active session — please sign in");
+    return callMfaWithToken(session.access_token,action,params);
   };
 
   // Render QR code when otpauth changes
@@ -274,15 +270,17 @@ const Login=({})=>{
     e.preventDefault();
     setLoading(true); setErr("");
     try{
-      const{error}=await supabase.auth.signInWithPassword({email,password:pw});
+      const{data:signData,error}=await supabase.auth.signInWithPassword({email,password:pw});
       if(error) throw error;
+      // Session is in signData — use it directly, no polling needed
+      if(!signData?.session?.access_token) throw new Error("Sign in failed — no session returned");
       // Check MFA status
-      const{hasTotp,alreadyVerified}=await callMfa("check");
+      const{hasTotp,alreadyVerified}=await callMfaWithToken(signData.session.access_token,"check");
       if(hasTotp){
         setStage("verify");
       } else {
         // Enroll via edge function (idempotent — handles duplicates)
-        const result=await callMfa("enroll");
+        const result=await callMfaWithToken(signData.session.access_token,"enroll");
         if(result.alreadyVerified){
           setStage("verify");
         } else {
