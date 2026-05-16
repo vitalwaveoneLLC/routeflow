@@ -2132,7 +2132,7 @@ export default function App(){
   const navItems=[
     {id:"dashboard",label:"Dashboard",icon:ic.dash},
     {id:"inventory",label:"Inventory",icon:ic.box},
-    {id:"walkin",label:"Walk-in Sale",icon:"🏪"},
+    {id:"walkin",label:"Walk-in Sale",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13,marginRight:0}}>🏪</span>},
     {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
     {id:"taxinvoices",label:"Tax Invoices",icon:ic.inv},
@@ -2140,7 +2140,7 @@ export default function App(){
     {id:"payments",label:"Payments",icon:ic.settle,badge:visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length||0},
     {id:"settlement",label:"Daily Settlement",icon:ic.settle},
     ...(isAdmin?[{id:"pl",label:"P&L Report",icon:ic.pl}]:[]),
-    ...(isAdmin?[{id:"irs",label:" IRS Reports",icon:"🏛"}]:[]),
+    ...(isAdmin?[{id:"irs",label:"IRS Reports",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13,marginRight:0}}>🏛</span>}]:[]),
     {id:"customers",label:"Customers",icon:ic.users},
     ...(isAdmin?[{id:"settings",label:"Settings",icon:ic.gear}]:[]),
   ];
