@@ -160,14 +160,18 @@ const MFAGate=({onVerified})=>{
       try{
         const{hasTotp}=await callMfa("check");
         if(hasTotp){
+          // Has verified TOTP — show verify screen
           setStage("verify");
         } else {
-          onVerified();
+          // No TOTP set up — must enroll via Login flow
+          // Sign out and let Login handle enrollment
+          await supabase.auth.signOut();
+          // User will be redirected to Login which handles enrollment
         }
       }catch(e){
         console.error("MFAGate check failed:",e.message);
-        // On any error — pass through. Don't lock user out.
-        onVerified();
+        // On error, sign out for security
+        await supabase.auth.signOut();
       }
     };
     init();
