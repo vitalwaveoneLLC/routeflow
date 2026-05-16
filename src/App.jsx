@@ -940,16 +940,16 @@ function IRSAllStates({stateTaxes, activeStateIds, stateSearch, setStateSearch})
     <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:8}}>All States — Tax Reference Tables</div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
       <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"10px 14px",fontSize:11,color:"#854d0e"}}>
-        <strong>🚬 OTP Tax (% of wholesale)</strong> — vapes, e-cigarettes, disposables, nicotine pouches, cigars, hookah, smokeless tobacco.
+        <strong>🔋 OTP Tax (% of wholesale)</strong> — vapes, e-cigarettes, disposables, nicotine pouches, cigars, hookah, smokeless tobacco.
         <strong> Calculated in your invoices.</strong>
       </div>
       <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"10px 14px",fontSize:11,color:"#1e40af"}}>
-        <strong>🏷 Cigarette Tax ($/pack)</strong> — separate per-pack stamp tax on cigarettes only.
+        <strong>🚬 Cigarette Tax ($/pack)</strong> — separate per-pack stamp tax on cigarettes only.
         <strong> Reference only — not in invoices.</strong>
       </div>
     </div>
     <div style={{display:"flex",gap:0,marginBottom:14,border:"1.5px solid #e5e7eb",borderRadius:10,overflow:"hidden",width:"fit-content"}}>
-      {[["otp","🚬 OTP / Vape / Nicotine"],["cig","🏷 Cigarette ($/pack)"]].map(([id,label])=>(
+      {[["otp","🔋 OTP / Vape / Nicotine"],["cig","🚬 Cigarette ($/pack)"]].map(([id,label])=>(
         <button key={id} onClick={()=>setIrsStateTab(id)}
           style={{padding:"9px 18px",border:"none",background:irsStateTab===id?"#0a1628":"#fff",color:irsStateTab===id?"#fff":"#6b7280",fontWeight:irsStateTab===id?700:400,fontSize:12,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
           {label}
@@ -1410,7 +1410,7 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
 
           {/* Cigarette Section */}
           <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#1e40af",marginBottom:12}}>
-            <strong>🏷 Cigarette Tax ($/pack)</strong> — reference rates for your active states.
+            <strong>🚬 Cigarette Tax ($/pack)</strong> — reference rates for your active states.
             This is a separate per-pack stamp tax paid when purchasing cigarettes from manufacturers/distributors.
             Not calculated per invoice — shown for planning and compliance awareness.
           </div>
@@ -1797,18 +1797,18 @@ function IRSAllStates({stateTaxes,setStateTaxes,activeStateIds,stateSearch,setSt
     <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:8}}>All States — Tax Reference &amp; Configuration</div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
       <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"10px 14px",fontSize:11,color:"#854d0e"}}>
-        <strong>🚬 OTP Tax (% of wholesale)</strong> — vapes, e-cigarettes, disposables, nicotine pouches, cigars, hookah, smokeless tobacco.
+        <strong>🔋 OTP Tax (% of wholesale)</strong> — vapes, e-cigarettes, disposables, nicotine pouches, cigars, hookah, smokeless tobacco.
         Click ✏️ to edit any rate.
       </div>
       <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"10px 14px",fontSize:11,color:"#1e40af"}}>
-        <strong>🏷 Cigarette Tax ($/pack)</strong> — per-pack stamp tax on cigarettes only.
+        <strong>🚬 Cigarette Tax ($/pack)</strong> — per-pack stamp tax on cigarettes only.
         Reference only — not calculated in invoices. Click ✏️ to edit.
       </div>
     </div>
 
     {/* Tab switcher */}
     <div style={{display:"flex",gap:0,marginBottom:14,border:"1.5px solid #e5e7eb",borderRadius:10,overflow:"hidden",width:"fit-content"}}>
-      {[["otp","🚬 OTP / Vape / Nicotine"],["cig","🏷 Cigarette ($/pack)"]].map(([id,label])=>(
+      {[["otp","🔋 OTP / Vape / Nicotine"],["cig","🚬 Cigarette ($/pack)"]].map(([id,label])=>(
         <button key={id} onClick={()=>setIrsStateTab(id)}
           style={{padding:"9px 18px",border:"none",background:irsStateTab===id?"#0a1628":"#fff",color:irsStateTab===id?"#fff":"#6b7280",fontWeight:irsStateTab===id?700:400,fontSize:12,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
           {label}
@@ -2280,7 +2280,7 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
 
           {/* Cigarette Section */}
           <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#1e40af",marginBottom:12}}>
-            <strong>🏷 Cigarette Tax ($/pack)</strong> — reference rates for your active states.
+            <strong>🚬 Cigarette Tax ($/pack)</strong> — reference rates for your active states.
             This is a separate per-pack stamp tax paid when purchasing cigarettes from manufacturers/distributors.
             Not calculated per invoice — shown for planning and compliance awareness.
           </div>
@@ -2464,235 +2464,6 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
 
 // ── STATE CONFIG COMPONENT ────────────────────────────────────────────────────
 // Simple: activate states, set OTP rate + cigarette tax per state
-function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
-  const [search,setSearch]=useState("");
-  const [adding,setAdding]=useState(false);
-  const [editId,setEditId]=useState(null);
-  const [editForm,setEditForm]=useState({rate:"",cig_tax:"",exempt:false});
-
-  const activeIds=new Set(stateTaxes.map(s=>s.id));
-
-  // Get reference data for a state
-  const ref=(id)=>ALL_STATES_TAX.find(s=>s.id===id)||{otp:0,cig:0,due:"20th",form:"OTP Return"};
-
-  // Save inline edit
-  const saveEdit=async(id)=>{
-    const st=stateTaxes.find(s=>s.id===id);
-    if(!st)return;
-    const rec={
-      ...st,
-      rate:editForm.exempt?0:parseFloat(editForm.rate||0),
-      cig_tax:parseFloat(editForm.cig_tax||0),
-      exempt:editForm.exempt,
-    };
-    const{error}=await supabase.from("state_taxes").update({
-      rate:rec.rate, cig_tax:rec.cig_tax, exempt:rec.exempt
-    }).eq("id",id);
-    if(error){showToast(error.message,"error");return;}
-    setStateTaxes(prev=>prev.map(s=>s.id===id?rec:s));
-    setEditId(null);
-    showToast(`✅ ${id} updated`);
-  };
-
-  // Activate a new state
-  const activate=async(stData,exempt=false)=>{
-    const r=ref(stData.id);
-    const rec={
-      id:stData.id,
-      name:stData.name,
-      rate:exempt?0:r.otp,
-      cig_tax:r.cig,
-      exempt,
-    };
-    const{error}=await supabase.from("state_taxes").upsert(rec);
-    if(error){showToast(error.message,"error");return;}
-    setStateTaxes(prev=>{
-      const exists=prev.find(s=>s.id===rec.id);
-      return exists?prev.map(s=>s.id===rec.id?rec:s):[...prev,rec];
-    });
-    showToast(`✅ ${stData.id} — ${stData.name} ${exempt?"added as exempt":"activated"}`);
-    setAdding(false);
-  };
-
-  // Remove state
-  const remove=async(id)=>{
-    if(!window.confirm(`Remove ${id} from active states?`))return;
-    await supabase.from("state_taxes").delete().eq("id",id);
-    setStateTaxes(prev=>prev.filter(s=>s.id!==id));
-    showToast(`${id} removed`);
-  };
-
-  const notAdded=ALL_STATES_TAX.filter(s=>
-    !activeIds.has(s.id)&&
-    (!search||s.name.toLowerCase().includes(search.toLowerCase())||s.id.toLowerCase().includes(search.toLowerCase()))
-  );
-
-  return(
-    <div className="fu">
-      {/* Header */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
-        <div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,color:"#212121"}}>⚙️ State Config</div>
-          <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>
-            Manage active states — OTP rate + cigarette tax per state.
-            Full reference table available in <strong>IRS Reports → 🗺 All States</strong>.
-          </div>
-        </div>
-        <button onClick={()=>setAdding(!adding)}
-          style={{padding:"9px 16px",background:adding?"#f3f4f6":"#0a1628",color:adding?"#6b7280":"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
-          {adding?"✕ Cancel":"+ Add State"}
-        </button>
-      </div>
-
-      {/* Connected note */}
-      <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:10,padding:"10px 16px",fontSize:11,color:"#065f46",marginBottom:16,display:"flex",gap:8,alignItems:"center"}}>
-        <span style={{fontSize:16}}>✅</span>
-        <span>Rates here are used automatically across <strong>all platforms</strong>: driver invoices · walk-in sales · customer orders · IRS reports · emails</span>
-      </div>
-
-      {/* Active States */}
-      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#9ca3af",letterSpacing:".1em",marginBottom:10}}>
-        ACTIVE STATES ({stateTaxes.length})
-      </div>
-
-      {stateTaxes.length===0&&(
-        <div style={{background:"#f9fafb",border:"1px dashed #e5e7eb",borderRadius:10,padding:"24px",textAlign:"center",color:"#9ca3af",fontSize:13,marginBottom:16}}>
-          No states configured yet. Click <strong>"+ Add State"</strong> to get started.
-        </div>
-      )}
-
-      <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
-        {stateTaxes.map(st=>{
-          const r=ref(st.id);
-          const isEditing=editId===st.id;
-          return(
-            <div key={st.id} style={{background:"#fff",border:`1.5px solid ${isEditing?"#7c3aed":"#e5e7eb"}`,borderRadius:12,padding:"14px 16px"}}>
-              <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-
-                {/* State badge */}
-                <div style={{background:"#0a1628",color:"#fff",borderRadius:8,padding:"6px 12px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,flexShrink:0,minWidth:44,textAlign:"center"}}>
-                  {st.id}
-                </div>
-
-                {/* Name */}
-                <div style={{flex:1,minWidth:120}}>
-                  <div style={{fontWeight:700,fontSize:13,color:"#212121"}}>{st.name}</div>
-                  <div style={{fontSize:10,color:"#9ca3af"}}>Due: {r.due} · Form: {r.form}</div>
-                </div>
-
-                {/* Rates — view or edit */}
-                {isEditing?(
-                  <div style={{display:"flex",gap:10,alignItems:"flex-start",flexWrap:"wrap",flex:2}}>
-                    <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
-                      <input type="checkbox" checked={editForm.exempt} onChange={e=>setEditForm(p=>({...p,exempt:e.target.checked}))}/>
-                      <span style={{color:"#059669",fontWeight:600}}>Tax Exempt</span>
-                    </label>
-                    {!editForm.exempt&&<>
-                      <div>
-                        <div style={{fontSize:10,color:"#6b7280",fontWeight:700,marginBottom:3}}>OTP RATE (%)</div>
-                        <div style={{display:"flex",alignItems:"center",gap:4}}>
-                          <input type="number" min="0" max="200" step="0.1" value={editForm.rate}
-                            onChange={e=>setEditForm(p=>({...p,rate:e.target.value}))}
-                            style={{width:64,border:"1.5px solid #7c3aed",borderRadius:6,padding:"5px 8px",fontSize:13,fontWeight:700}}/>
-                          <span style={{fontSize:11,color:"#6b7280"}}>% wholesale</span>
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{fontSize:10,color:"#1e40af",fontWeight:700,marginBottom:3}}>CIGARETTE TAX</div>
-                        <div style={{display:"flex",alignItems:"center",gap:4}}>
-                          <span style={{fontSize:12,color:"#6b7280"}}>$</span>
-                          <input type="number" min="0" step="0.01" value={editForm.cig_tax}
-                            onChange={e=>setEditForm(p=>({...p,cig_tax:e.target.value}))}
-                            style={{width:64,border:"1.5px solid #1e40af",borderRadius:6,padding:"5px 8px",fontSize:13,fontWeight:700}}/>
-                          <span style={{fontSize:11,color:"#6b7280"}}>/pack</span>
-                        </div>
-                      </div>
-                    </>}
-                    <div style={{display:"flex",gap:6,alignItems:"flex-end",paddingBottom:2}}>
-                      <button onClick={()=>saveEdit(st.id)}
-                        style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                        Save
-                      </button>
-                      <button onClick={()=>setEditId(null)}
-                        style={{background:"#f3f4f6",color:"#6b7280",border:"none",borderRadius:7,padding:"6px 10px",fontSize:12,cursor:"pointer"}}>
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ):(
-                  <div style={{display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
-                    {st.exempt?(
-                      <span style={{background:"#dcfce7",color:"#166534",padding:"4px 12px",borderRadius:6,fontSize:12,fontWeight:700}}>✅ TAX EXEMPT</span>
-                    ):<>
-                      <div style={{textAlign:"center",minWidth:80}}>
-                        <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".08em"}}>OTP RATE</div>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#dc2626"}}>{st.rate}%</div>
-                        <div style={{fontSize:9,color:"#9ca3af"}}>wholesale</div>
-                      </div>
-                      <div style={{textAlign:"center",minWidth:80}}>
-                        <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".08em"}}>CIGARETTE</div>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#1e40af"}}>${parseFloat(st.cig_tax||0).toFixed(2)}</div>
-                        <div style={{fontSize:9,color:"#9ca3af"}}>/pack</div>
-                      </div>
-                    </>}
-                    <div style={{display:"flex",gap:6}}>
-                      <button onClick={()=>{setEditId(st.id);setEditForm({rate:String(st.rate||0),cig_tax:String(st.cig_tax||0),exempt:st.exempt||false});}}
-                        style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:7,padding:"5px 12px",fontSize:11,color:"#7c3aed",cursor:"pointer",fontWeight:700}}>
-                        ✏️ Edit
-                      </button>
-                      <button onClick={()=>remove(st.id)}
-                        style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"5px 10px",fontSize:11,color:"#dc2626",cursor:"pointer",fontWeight:700}}>
-                        🗑
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Add State Panel */}
-      {adding&&<>
-        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#9ca3af",letterSpacing:".1em",marginBottom:10}}>
-          ADD STATE — click a state to activate it with reference rates
-        </div>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search state..."
-          style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"9px 14px",fontSize:13,marginBottom:12,boxSizing:"border-box"}}/>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:8}}>
-          {notAdded.map(s=>(
-            <div key={s.id} style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
-              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#0a1628",minWidth:28}}>{s.id}</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:12,fontWeight:600,color:"#212121"}}>{s.name}</div>
-                <div style={{fontSize:10,color:"#9ca3af"}}>OTP {s.otp}% · Cig ${s.cig.toFixed(2)}/pack</div>
-              </div>
-              <div style={{display:"flex",gap:4}}>
-                <button onClick={()=>activate(s,false)}
-                  style={{background:"#0a1628",color:"#fff",border:"none",borderRadius:6,padding:"5px 10px",fontSize:10,fontWeight:700,cursor:"pointer"}}>
-                  Activate
-                </button>
-                <button onClick={()=>activate(s,true)}
-                  style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"5px 8px",fontSize:10,fontWeight:700,color:"#065f46",cursor:"pointer"}}>
-                  Exempt
-                </button>
-              </div>
-            </div>
-          ))}
-          {notAdded.length===0&&<div style={{color:"#9ca3af",fontSize:13,padding:"10px"}}>All states already added</div>}
-        </div>
-      </>}
-
-      {/* Bottom note */}
-      <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"12px 16px",fontSize:11,color:"#6b7280",marginTop:16}}>
-        <strong>📌 OTP</strong> = Other Tobacco Products (vapes, e-cigarettes, disposables, nicotine pouches, cigars, hookah) — % of wholesale price, calculated per invoice.<br/>
-        <strong>🏷 Cigarette tax</strong> = per-pack stamp tax on cigarettes — stored for reference, not calculated in invoices.<br/>
-        Full 51-state reference: <strong>IRS Reports → 🗺 All States</strong>
-      </div>
-    </div>
-  );
-}
 
 
 export default function App(){
@@ -2752,7 +2523,7 @@ export default function App(){
   const[formItems,setFormItems]=useState([]);
   const[np,setNp]=useState({name:"",sku:"",cat:"Beverage",unit:"Case/24",cost:"",price:"",shelf:""});
   const[nt,setNt]=useState({driver:"",plate:"",route:""});
-  const[nc,setNc]=useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:""});
+  const[nc,setNc]=useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:"",custom_pricing:false,custom_prices:{}});
   const[rsPid,setRsPid]=useState("");
   const[rsQty,setRsQty]=useState("");
   const[coEdit,setCoEdit]=useState(null);
@@ -3019,9 +2790,13 @@ export default function App(){
     if(!nc.name)return showToast("Business name required","error");
     setSaving(true);
     const rec={id:"C"+uid(),name:nc.name,address:nc.address||"",phone:nc.phone||"",email:nc.email||"",notes:nc.notes||"",truck_id:nc.truck_id||trucks[0]?.id||null};
+    if(nc.custom_pricing&&nc.custom_prices&&Object.keys(nc.custom_prices).length>0){
+      rec.notes=(rec.notes?rec.notes+"
+":"")+"CUSTOM_PRICES:"+JSON.stringify(nc.custom_prices);
+    }
     const{error}=await supabase.from("customers").insert(rec);
     if(error)showToast(error.message,"error");
-    else{setCustomers(prev=>[...prev,rec]);showToast(`${nc.name} account opened`);setModal(null);setNc({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:""});}
+    else{setCustomers(prev=>[...prev,rec]);showToast(`${nc.name} account opened`);setModal(null);setNc({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:"",custom_pricing:false,custom_prices:{}});}
     setSaving(false);
   };
 
@@ -3492,29 +3267,7 @@ export default function App(){
               </div>
             </div>}
 
-            {/* State Tax Rates in sidebar */}
-            {isAdmin&&<div style={{marginBottom:10}}>
-              <div style={{fontSize:9,color:"#9ca3af",letterSpacing:".1em",marginBottom:6,paddingLeft:3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span>🏛 STATE TAX RATES</span>
-                <button onClick={()=>setModal("addState")} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:4,padding:"1px 6px",fontSize:9,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>+ Add</button>
-              </div>
-              {stateTaxes.map(st=>(
-                <div key={st.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 4px",marginBottom:2,background:"#f9fafb",borderRadius:5,border:"1px solid #e5e7eb"}}>
-                  <div>
-                    <span style={{fontSize:10,fontWeight:700,color:"#212121"}}>{st.id}</span>
-                    <span style={{fontSize:9,color:"#9ca3af",marginLeft:4}}>{st.name}</span>
-                  </div>
-                  <div style={{display:"flex",alignItems:"center",gap:4}}>
-                    {st.exempt
-                      ?<span style={{fontSize:9,background:"#dcfce7",color:"#059669",padding:"1px 5px",borderRadius:3,fontWeight:700}}>EXEMPT</span>
-                      :<span style={{fontSize:10,fontWeight:700,color:"#7c3aed"}}>{st.rate}%</span>
-                    }
-                    <button onClick={()=>deleteStateTax(st.id)} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:10,padding:"0 2px",lineHeight:1}}>×</button>
-                  </div>
-                </div>
-              ))}
-              <div style={{fontSize:9,color:"#9ca3af",marginTop:4,paddingLeft:3}}>Tobacco/Nicotine only</div>
-            </div>}
+
             <div style={{height:1,background:"#d1d5db",marginBottom:8}}/>
             <div style={{fontSize:9,color:"#9ca3af",letterSpacing:".1em",marginBottom:5,paddingLeft:3}}>{isAdmin?"COMPANY":"MY"} TOTALS</div>
             {[{l:"Collected",v:fmt(collectedRevenue),c:"#059669"},{l:"Profit",v:fmt(collectedProfit),c:"#7c3aed"},{l:"AR Due",v:fmt(totalAR),c:"#dc2626"}].map(k=>(
@@ -4539,6 +4292,47 @@ export default function App(){
                   <button className="btn bb" onClick={()=>{setRsPid(products[0]?.id||"");setRsQty("");setModal("restock");}}>{ic.box} Restock</button>
                   <button className="btn bg" onClick={()=>setModal("addTruck")}>{ic.plus} Add Driver</button>
                   <button className="btn bp" onClick={()=>setModal("addCustomer")}>{ic.plus} Add Customer</button>
+                  <button className="btn bgh" style={{fontSize:11}} onClick={()=>{
+                    const rows=[["customer_id","customer_name",...products.map(p=>p.name)],
+                      ...customers.map(c=>[c.id,c.name,...products.map(p=>{
+                        try{const n=c.notes||"";const m=n.match(/CUSTOM_PRICES:({.*?})/);const cp=m?JSON.parse(m[1]):{};return cp[p.id]||"";}catch{return "";}
+                      })])];
+                    const csv=rows.map(r=>r.join(",")).join("\n");
+                    const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+                    a.download="custom_prices_template.csv";a.click();showToast("Template downloaded");
+                  }}>📥 Price Template</button>
+                  <label className="btn bgh" style={{fontSize:11,cursor:"pointer"}}>
+                    📤 Import Prices
+                    <input type="file" accept=".csv" style={{display:"none"}} onChange={async e=>{
+                      const file=e.target.files[0];if(!file)return;
+                      const text=await file.text();
+                      const rows=text.split("\n").map(r=>r.split(","));
+                      const headers=rows[0];
+                      const prodHeaders=headers.slice(2);
+                      let updated=0;
+                      for(const row of rows.slice(1)){
+                        if(!row[0]||!row[0].trim())continue;
+                        const cid=row[0].trim();
+                        const cp={};
+                        prodHeaders.forEach((ph,i)=>{
+                          const v=parseFloat(row[i+2]);
+                          if(!isNaN(v)&&v>0){const p=products.find(x=>x.name===ph.trim());if(p)cp[p.id]=v;}
+                        });
+                        if(Object.keys(cp).length>0){
+                          const cust=customers.find(c=>c.id===cid);
+                          if(cust){
+                            const baseNotes=(cust.notes||"").replace(/CUSTOM_PRICES:{.*?}/g,"").trim();
+                            const newNotes=baseNotes+(baseNotes?"\n":"")+"CUSTOM_PRICES:"+JSON.stringify(cp);
+                            await supabase.from("customers").update({notes:newNotes}).eq("id",cid);
+                            setCustomers(prev=>prev.map(c=>c.id===cid?{...c,notes:newNotes}:c));
+                            updated++;
+                          }
+                        }
+                      }
+                      showToast("✅ Custom prices updated for "+updated+" customers");
+                      e.target.value="";
+                    }}/>
+                  </label>
                 </div>
               </div>
               <div className="card" style={{padding:22,marginBottom:14}}>
@@ -4735,6 +4529,32 @@ export default function App(){
               <input value={nc.notes||""} onChange={e=>setNc(p=>({...p,notes:e.target.value}))} placeholder="Optional notes..."
                 style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
             </div>
+            {/* Custom Pricing */}
+            <div style={{background:"#f5f3ff",border:"1.5px solid #ddd6fe",borderRadius:10,padding:"12px 14px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <label style={{fontSize:11,fontWeight:700,color:"#7c3aed",display:"block"}}>💰 Custom Pricing (optional)</label>
+                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,cursor:"pointer"}}>
+                  <input type="checkbox" checked={nc.custom_pricing||false} onChange={e=>setNc(p=>({...p,custom_pricing:e.target.checked,custom_prices:e.target.checked?p.custom_prices||{}:{}}))}/>
+                  <span style={{color:"#7c3aed",fontWeight:600}}>Enable custom prices for this customer</span>
+                </label>
+              </div>
+              {nc.custom_pricing&&<div style={{display:"flex",flexDirection:"column",gap:6}}>
+                <div style={{fontSize:10,color:"#9ca3af",marginBottom:4}}>Leave blank to use standard price. Enter custom price per product:</div>
+                {products.filter(p=>p.shelf>0||true).slice(0,products.length).map(p=>(
+                  <div key={p.id} style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{flex:1,fontSize:12,color:"#212121"}}>{p.name}</span>
+                    <span style={{fontSize:11,color:"#9ca3af"}}>std: {fmt(p.price)}</span>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{fontSize:12,color:"#6b7280"}}>$</span>
+                      <input type="number" min="0" step="0.01" placeholder={p.price.toFixed(2)}
+                        value={nc.custom_prices?.[p.id]||""}
+                        onChange={e=>setNc(prev=>({...prev,custom_prices:{...prev.custom_prices,[p.id]:e.target.value?parseFloat(e.target.value):undefined}}))}
+                        style={{width:70,border:"1.5px solid #ddd6fe",borderRadius:6,padding:"4px 8px",fontSize:12}}/>
+                    </div>
+                  </div>
+                ))}
+              </div>}
+            </div>
           </div>
         </div>
         <Divider/>
@@ -4893,28 +4713,7 @@ export default function App(){
       </Modal>}
 
       {/* ── ADD STATE TAX MODAL ── */}
-      {modal==="addState"&&<Modal title="🏛 Add State Tax Rate" onClose={()=>setModal(null)}>
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <div><label>State Code *</label><input placeholder="e.g. TX, MI, IN" value={stateForm.id} onChange={e=>setStateForm(f=>({...f,id:e.target.value.toUpperCase().slice(0,2)}))} maxLength={2}/></div>
-            <div><label>State Name *</label><input placeholder="e.g. Texas" value={stateForm.name} onChange={e=>setStateForm(f=>({...f,name:e.target.value}))}/></div>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:"#f9fafb",borderRadius:8,border:"1px solid #e5e7eb"}}>
-            <input type="checkbox" id="exempt-check" checked={stateForm.exempt} onChange={e=>setStateForm(f=>({...f,exempt:e.target.checked,rate:e.target.checked?"0":f.rate}))} style={{width:16,height:16}}/>
-            <label htmlFor="exempt-check" style={{fontSize:13,color:"#212121",cursor:"pointer",fontWeight:600,letterSpacing:"normal",textTransform:"none",display:"inline"}}>
-              Tax Exempt — Tobacco/Nicotine sales are NOT taxed in this state
-            </label>
-          </div>
-          {!stateForm.exempt&&<div><label>Tax Rate (%)</label><input type="number" min="0" max="30" step="0.01" placeholder="e.g. 8.25" value={stateForm.rate} onChange={e=>setStateForm(f=>({...f,rate:e.target.value}))}/></div>}
-          {!stateForm.exempt&&stateForm.rate&&<div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#7c3aed"}}>
-            On a $100 tobacco sale in {stateForm.id||"this state"}: tax = ${(100*parseFloat(stateForm.rate||0)/100).toFixed(2)} → customer pays ${(100+100*parseFloat(stateForm.rate||0)/100).toFixed(2)}
-          </div>}
-          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-            <button className="btn bgh" onClick={()=>setModal(null)}>Cancel</button>
-            <button className="btn ba" onClick={saveStateTax} disabled={saving}>{ic.save} Save State</button>
-          </div>
-        </div>
-      </Modal>}
+      
 
       {modal==="settlement"&&viewTruck&&(()=>{const t=getT(viewTruck),d=settlementData(viewTruck);return<Modal title="" onClose={()=>setModal(null)} xwide><div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button className="btn bpr" onClick={()=>window.print()}>{ic.prt} Print / Save PDF</button></div><SettleDoc truck={t} d={d} co={co} customers={customers} payments={payments} products={products} stateTaxes={stateTaxes}/></Modal>;})()}
 
