@@ -1,6 +1,9 @@
 // RouteFlow WMS — Complete Edition with Edit Everywhere
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "./supabase";
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 import StripePaymentModal from "./StripePaymentModal.jsx";
 
 const GS = () => (
@@ -128,8 +131,6 @@ const MFAGate=({onVerified})=>{
   const[stage,setStage]=useState("checking"); // checking | enroll | verify
 
   const callMfa=async(action,params={})=>{
-    const SUPABASE_URL=import.meta.env.VITE_SUPABASE_URL;
-    const SUPABASE_ANON_KEY=import.meta.env.VITE_SUPABASE_ANON_KEY;
     // Retry getting session — may need a moment after page refresh
     let session=null;
     for(let i=0;i<5;i++){
