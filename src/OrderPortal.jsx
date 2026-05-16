@@ -589,31 +589,10 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         </div>}
 
         {/* Notes */}
-        <div style={{marginBottom:12}}>
+        <div style={{marginBottom:14}}>
           <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>NOTES (optional)</label>
           <input value={payForm.notes} onChange={e=>setPayForm(p=>({...p,notes:e.target.value}))}
             placeholder="Any notes..." style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
-        </div>
-
-        {/* Receipt Upload */}
-        <div style={{marginBottom:14}}>
-          <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>RECEIPT / PAYMENT PROOF</label>
-          <div style={{border:"2px dashed #e5e7eb",borderRadius:10,padding:"14px",textAlign:"center",background:"#f9fafb",cursor:"pointer"}}
-            onClick={()=>document.getElementById("drvReceiptInput").click()}>
-            {receiptPreview?(
-              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
-                <img src={receiptPreview} alt="receipt" style={{maxHeight:100,maxWidth:"100%",borderRadius:8}}/>
-                <span style={{fontSize:11,color:"#059669",fontWeight:600}}>✅ Attached — tap to change</span>
-              </div>
-            ):(
-              <div style={{color:"#9ca3af",fontSize:12}}>
-                <div style={{fontSize:24,marginBottom:4}}>📸</div>
-                <div>Tap to take photo or upload</div>
-              </div>
-            )}
-            <input id="drvReceiptInput" type="file" accept="image/*,application/pdf" capture="environment" style={{display:"none"}}
-              onChange={e=>{const f=e.target.files[0];if(f){setReceiptFile(f);setReceiptPreview(URL.createObjectURL(f));}}}/>
-          </div>
         </div>
 
         {/* Action Buttons */}
@@ -941,8 +920,6 @@ export default function OrderPortal() {
   const [createdSaleForHistory, setCreatedSaleForHistory] = useState(null);
   const [createdSale, setCreatedSale] = useState(null);
   const [showPayment, setShowPayment] = useState(false);
-  const [receiptFile, setReceiptFile] = useState(null);
-  const [receiptPreview, setReceiptPreview] = useState("");
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
   const [paymentSaving, setPaymentSaving] = useState(false);
 
@@ -956,18 +933,9 @@ export default function OrderPortal() {
         return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
       }, 0);
       const saleTax = parseFloat((taxable*rate/100).toFixed(2));
-      const prevBal = parseFloat(sale.previous_balance||0);
-      const gt = parseFloat((sale.total+saleTax+prevBal).toFixed(2));
+      const gt = parseFloat((sale.total+saleTax).toFixed(2));
       const surcharge = method==="card" ? parseFloat((gt*CARD_FEE/100).toFixed(2)) : 0;
       const total = parseFloat((gt+surcharge).toFixed(2));
-      // Upload receipt if provided
-      let recUrl = "";
-      if(receiptFile){
-        const ext = receiptFile.name.split(".").pop();
-        const path = `receipts/DRV-${Math.random().toString(36).slice(2,8)}.${ext}`;
-        const {error:upErr} = await supabase.storage.from("receipts").upload(path, receiptFile, {upsert:true});
-        if(!upErr) recUrl = supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
-      }
       // Try update first, then insert if no existing record
       const {data:existing} = await supabase.from("payments").select("id,sale_id").eq("sale_id",sale.id).maybeSingle();
       const payData = {
@@ -978,18 +946,17 @@ export default function OrderPortal() {
         bank_name:payForm.bankName||"",
         zelle_ref:payForm.zelleRef||"",
         note:payForm.notes||"",
-        receipt_url:recUrl,
         collected_at:new Date().toISOString(),
       };
       if(existing){
+        // Update existing payment record
         await supabase.from("payments").update(payData).eq("sale_id",sale.id);
       } else {
+        // Insert new payment record
         await supabase.from("payments").insert({sale_id:sale.id,...payData});
       }
       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
       setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
-      setReceiptFile(null);
-      setReceiptPreview("");
     }catch(e){console.error("Payment error:",e.message);}
     setPaymentSaving(false);
   };
@@ -1001,6 +968,7 @@ export default function OrderPortal() {
 
   // Customer state
   const [selCust,   setSelCust]   = useState(null);
+  const [portalStateTaxes, setPortalStateTaxes] = useState([]);
   const [custSearch,setCustSearch]= useState("");
   const [custPhone, setCustPhone] = useState("");
   const [verifyError,setVerifyError] = useState("");
@@ -1023,15 +991,17 @@ export default function OrderPortal() {
   useEffect(()=>{
     (async()=>{
       try{
-        const [pr, cu, co, ld, sa, rt] = await Promise.all([
+        const [pr, cu, co, ld, sa, rt, stx] = await Promise.all([
           supabase.from("products").select("*").order("cat").order("name"),
           supabase.from("customers").select("*").order("name"),
           supabase.from("company").select("*").single(),
           supabase.from("loads").select("*").eq("status","out"),
           supabase.from("sales").select("*"),
           supabase.from("returns").select("*"),
+          supabase.from("state_taxes").select("*"),
         ]);
         if(cu.data) setCustomers(cu.data);
+        if(stx.data) setPortalStateTaxes(stx.data);
         if(co.data) setCo(co.data);
 
       if(pr.data){
@@ -1074,7 +1044,12 @@ export default function OrderPortal() {
   },[]);
 
   const cats = useMemo(()=>["All",...new Set(products.map(p=>p.cat))],[products]);
-  const taxRate = parseFloat(co?.tax_rate||0);
+  // Tax rate from customer's state — uses the same state_taxes table as all other platforms
+  const taxRate = useMemo(()=>{
+    if(!selCust?.state) return 0;
+    const st = portalStateTaxes.find(s=>s.id===selCust.state);
+    return st?.exempt ? 0 : parseFloat(st?.rate||0);
+  },[selCust?.state, portalStateTaxes]);
 
   const filtered = useMemo(()=>products.filter(p=>{
     if(catFilter!=="All"&&p.cat!==catFilter) return false;
@@ -1087,7 +1062,7 @@ export default function OrderPortal() {
   ,[quantities,products]);
 
   const subtotal = useMemo(()=>orderItems.reduce((a,i)=>a+(products.find(p=>p.id===i.pid)?.price||0)*i.qty,0),[orderItems,products]);
-  const tax = parseFloat((orderItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0)*(parseFloat(co?.tax_rate)||0)/100).toFixed(2));
+  const tax = parseFloat((orderItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0)*taxRate/100).toFixed(2));
   const total = subtotal+tax;
   const cardSurcharge = payMethod==="card" ? parseFloat((total*CARD_FEE/100).toFixed(2)) : 0;
   const grandTotal = parseFloat((total+cardSurcharge).toFixed(2));
@@ -1217,14 +1192,14 @@ export default function OrderPortal() {
         supabase.from("loads").select("*").eq("truck_id",truckId).eq("status","out").order("created_at",{ascending:false}),
         supabase.from("sales").select("*").eq("truck_id",truckId).order("created_at",{ascending:false}),
         supabase.from("state_taxes").select("*"),
-        supabase.from("payments").select("sale_id,status,method,amount"),
+        supabase.from("payments").select("sale_id,status,method,amount").eq("status","paid"),
         supabase.from("company").select("*").single(),
       ]);
 
       if(!truckR.data) throw new Error("Truck not found. Run this SQL: update profiles set truck_id = 'CORRECT_TRUCK_ID' where id = '"+data.user.id+"'");
 
       // Mark sales as paid based on payments table
-      const paidSaleIds = new Set((pmtsR.data||[]).filter(p=>p.status==="paid").map(p=>p.sale_id));
+      const paidSaleIds = new Set((pmtsR.data||[]).map(p=>p.sale_id));
       const salesWithPaid = (salesR.data||[]).map(s=>({...s, _paid: paidSaleIds.has(s.id)}));
 
       // Merge all active loads items into one virtual load
@@ -1550,7 +1525,7 @@ export default function OrderPortal() {
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:10,color:"#4b6080",marginBottom:4}}>TODAY'S REVENUE</div>
                   <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0ea5e9"}}>
-                    ${driverData.sales.filter(s=>s._paid).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)} collected
+                    ${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)} collected
                   </div>
                   <button onClick={async()=>{
                     // Refresh customers and state taxes
@@ -1648,7 +1623,7 @@ export default function OrderPortal() {
                   {[
                     {l:"Customers",v:driverData.customers.length,e:"⛽",c:"#0ea5e9"},
                     {l:"Today's Sales",v:driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).length,e:"📄",c:"#7c3aed"},
-                    {l:"Total Collected",v:`$${driverData.sales.filter(s=>s._paid).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)}`,e:"💰",c:"#059669"},{l:"Balance Due",v:(()=>{const lastUnpaid=driverData.sales.filter(s=>!s._paid).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];if(!lastUnpaid)return "$0.00";const st=driverData.stateTaxes?.find(x=>x.id===(lastUnpaid.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(lastUnpaid.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return "$"+(lastUnpaid.total+tax+parseFloat(lastUnpaid.previous_balance||0)).toFixed(2);})(),e:"⏳",c:"#f59e0b"},
+                    {l:"Collected Today",v:`$${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)}`,e:"💰",c:"#059669"},{l:"Balance Due",v:(()=>{const lastUnpaid=driverData.sales.filter(s=>!s._paid).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];if(!lastUnpaid)return "$0.00";const st=driverData.stateTaxes?.find(x=>x.id===(lastUnpaid.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(lastUnpaid.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return "$"+(lastUnpaid.total+tax+parseFloat(lastUnpaid.previous_balance||0)).toFixed(2);})(),e:"⏳",c:"#f59e0b"},
                   ].map(k=>(
                     <div key={k.l} className="card" style={{padding:"12px",textAlign:"center"}}>
                       <div style={{fontSize:20,marginBottom:3}}>{k.e}</div>
@@ -1791,20 +1766,6 @@ export default function OrderPortal() {
                       {payForm.method==="check"&&<input value={payForm.checkNum} onChange={e=>setPayForm(p=>({...p,checkNum:e.target.value}))} placeholder="Check number" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,marginBottom:10,boxSizing:"border-box"}}/>}
                       {payForm.method==="zelle"&&<input value={payForm.zelleRef} onChange={e=>setPayForm(p=>({...p,zelleRef:e.target.value}))} placeholder="Zelle reference" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,marginBottom:10,boxSizing:"border-box"}}/>}
                       {payForm.method==="money_order"&&<input value={payForm.checkNum} onChange={e=>setPayForm(p=>({...p,checkNum:e.target.value}))} placeholder="Money order number" style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,marginBottom:10,boxSizing:"border-box"}}/>}
-                      {/* Receipt upload */}
-                      <div style={{border:"2px dashed #e5e7eb",borderRadius:9,padding:"12px",textAlign:"center",background:"#f9fafb",cursor:"pointer",marginBottom:10}}
-                        onClick={()=>document.getElementById("histReceiptInput").click()}>
-                        {receiptPreview?(
-                          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-                            <img src={receiptPreview} alt="r" style={{maxHeight:70,maxWidth:"100%",borderRadius:6}}/>
-                            <span style={{fontSize:10,color:"#059669",fontWeight:600}}>✅ Receipt attached</span>
-                          </div>
-                        ):(
-                          <div style={{color:"#9ca3af",fontSize:11}}>📸 Tap to attach receipt</div>
-                        )}
-                        <input id="histReceiptInput" type="file" accept="image/*,application/pdf" capture="environment" style={{display:"none"}}
-                          onChange={e=>{const f=e.target.files[0];if(f){setReceiptFile(f);setReceiptPreview(URL.createObjectURL(f));}}}/>
-                      </div>
                       <button onClick={async()=>{
                         await collectPayment(s,payForm.method);
                         setDriverData(prev=>({...prev,sales:prev.sales.map(x=>x.id===s.id?{...x,_paid:true}:x)}));

@@ -1259,64 +1259,119 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
         </>}
 
         {/* ALL STATES */}
-        {irsTab==="allstates"&&<>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:8}}>All States — OTP Tax Rates &amp; Filing Info</div>
-          <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#0369a1",marginBottom:14}}>
-            <strong>📚 Reference for expansion:</strong> OTP = Other Tobacco Products (vapes, cigars, smokeless tobacco).
-            Rates are % of wholesale price. <span style={{background:"#f59e0b",color:"#fff",padding:"1px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>ACTIVE</span> = you have sales there.
-            <span style={{background:"#7c3aed",color:"#fff",padding:"1px 6px",borderRadius:4,fontSize:10,fontWeight:700,marginLeft:6}}>CONFIGURED</span> = set up in your system.
-          </div>
-          <input value={stateSearch} onChange={e=>setStateSearch(e.target.value)} placeholder="🔍 Search state name or code..."
-            style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"9px 14px",fontSize:13,marginBottom:12,boxSizing:"border-box"}}/>
-          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr style={{background:"#0a1628",color:"#fff"}}>
-                {["State","OTP Rate (vape/nicotine/OTP)","Cig Tax/pack","Filing Due","Form","Notes"].map(h=>(
-                  <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:10,fontWeight:700,letterSpacing:".06em",whiteSpace:"nowrap"}}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {ALL_STATES_TAX.filter(s=>!stateSearch||s.name.toLowerCase().includes(stateSearch.toLowerCase())||s.id.toLowerCase().includes(stateSearch.toLowerCase())).map(s=>{
-                  const isActive=activeStateIds.includes(s.id);
-                  const isConfigured=stateTaxes.some(st=>st.id===s.id);
-                  return(
-                    <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6",background:isActive?"#fefce8":isConfigured?"#f5f3ff":"#fff"}}>
+        {irsTab==="allstates"&&(()=>{
+          const [irsStateTab,setIrsStateTab]=useState("otp");
+          const filtered2=ALL_STATES_TAX.filter(s=>!stateSearch||s.name.toLowerCase().includes(stateSearch.toLowerCase())||s.id.toLowerCase().includes(stateSearch.toLowerCase()));
+          return(<>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:8}}>All States — Tax Reference Tables</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+              <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"10px 14px",fontSize:11,color:"#854d0e"}}>
+                <strong>🚬 OTP Tax (% of wholesale)</strong> — applies to vapes, e-cigarettes, disposables, nicotine pouches, cigars, hookah, smokeless tobacco.
+                <strong> This is what your invoices calculate.</strong>
+              </div>
+              <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"10px 14px",fontSize:11,color:"#1e40af"}}>
+                <strong>🏷 Cigarette Tax ($/pack)</strong> — separate per-pack stamp tax on cigarettes only.
+                <strong> Reference only — not calculated in your invoices.</strong>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:0,marginBottom:14,border:"1.5px solid #e5e7eb",borderRadius:10,overflow:"hidden",width:"fit-content"}}>
+              {[["otp","🚬 OTP / Vape / Nicotine"],["cig","🏷 Cigarette ($/pack)"]].map(([id,label])=>(
+                <button key={id} onClick={()=>setIrsStateTab(id)}
+                  style={{padding:"9px 18px",border:"none",background:irsStateTab===id?"#0a1628":"#fff",color:irsStateTab===id?"#fff":"#6b7280",fontWeight:irsStateTab===id?700:400,fontSize:12,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <input value={stateSearch} onChange={e=>setStateSearch(e.target.value)} placeholder="🔍 Search state..."
+              style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"9px 14px",fontSize:13,marginBottom:12,boxSizing:"border-box"}}/>
+
+            {/* OTP TABLE */}
+            {irsStateTab==="otp"&&<div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                  {["State","OTP Rate (% wholesale)","Status","Filing Due","Form","Note"].map(h=>(
+                    <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:10,fontWeight:700,letterSpacing:".06em",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {filtered2.map(s=>{
+                    const isActive=activeStateIds.includes(s.id);
+                    const isConfigured=stateTaxes.some(st=>st.id===s.id);
+                    return(
+                      <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6",background:isActive?"#fefce8":isConfigured?"#f5f3ff":"#fff"}}>
+                        <td style={{padding:"10px 14px"}}>
+                          <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                            <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#0a1628"}}>{s.id}</span>
+                            <span style={{fontSize:12,color:"#6b7280"}}>{s.name}</span>
+                            {isActive&&<span style={{background:"#f59e0b",color:"#fff",padding:"1px 6px",borderRadius:4,fontSize:9,fontWeight:700}}>ACTIVE</span>}
+                            {isConfigured&&!isActive&&<span style={{background:"#7c3aed",color:"#fff",padding:"1px 6px",borderRadius:4,fontSize:9,fontWeight:700}}>CONFIGURED</span>}
+                          </div>
+                        </td>
+                        <td style={{padding:"10px 14px"}}>
+                          <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:s.otp>=50?"#dc2626":s.otp>=25?"#f59e0b":"#059669"}}>{s.otp}%</span>
+                        </td>
+                        <td style={{padding:"10px 14px"}}>
+                          {isConfigured?(stateTaxes.find(st=>st.id===s.id)?.exempt
+                            ?<span style={{background:"#dcfce7",color:"#166534",padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:700}}>✅ Exempt</span>
+                            :<span style={{background:"#fef9c3",color:"#854d0e",padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:700}}>🏛 {stateTaxes.find(st=>st.id===s.id)?.rate}% active</span>)
+                          :<span style={{fontSize:11,color:"#9ca3af"}}>Not set</span>}
+                        </td>
+                        <td style={{padding:"10px 14px"}}><span style={{background:"#f5f3ff",color:"#7c3aed",padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:600}}>{s.due}</span></td>
+                        <td style={{padding:"10px 14px",fontSize:11,color:"#6b7280",fontFamily:"monospace"}}>{s.form}</td>
+                        <td style={{padding:"10px 14px",fontSize:10,color:"#9ca3af"}}>{s.note}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>}
+
+            {/* CIGARETTE TABLE */}
+            {irsStateTab==="cig"&&<div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#1e40af",color:"#fff"}}>
+                  {["State","Cigarette Tax ($/pack)","Filing Form","Note"].map(h=>(
+                    <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:10,fontWeight:700,letterSpacing:".06em"}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {[...filtered2].sort((a,b)=>b.cig-a.cig).map(s=>(
+                    <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6"}}>
                       <td style={{padding:"10px 14px"}}>
-                        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                          <span style={{fontWeight:700,color:"#0a1628",fontSize:13}}>{s.id}</span>
+                        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                          <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#1e40af"}}>{s.id}</span>
                           <span style={{fontSize:12,color:"#6b7280"}}>{s.name}</span>
-                          {isActive&&<span style={{background:"#f59e0b",color:"#fff",padding:"1px 6px",borderRadius:4,fontSize:9,fontWeight:700}}>ACTIVE</span>}
-                          {isConfigured&&!isActive&&<span style={{background:"#7c3aed",color:"#fff",padding:"1px 6px",borderRadius:4,fontSize:9,fontWeight:700}}>CONFIGURED</span>}
                         </div>
                       </td>
                       <td style={{padding:"10px 14px"}}>
-                        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:s.otp>=50?"#dc2626":s.otp>=25?"#f59e0b":"#059669"}}>{s.otp}%</span>
-                      </td>
-                      <td style={{padding:"10px 14px",fontSize:12,color:"#374151"}}>${s.cig.toFixed(2)}</td>
-                      <td style={{padding:"10px 14px"}}>
-                        <span style={{background:"#f5f3ff",color:"#7c3aed",padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:600}}>{s.due}</span>
+                        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:s.cig>=3?"#dc2626":s.cig>=1.5?"#f59e0b":"#059669"}}>${s.cig.toFixed(2)}/pack</span>
                       </td>
                       <td style={{padding:"10px 14px",fontSize:11,color:"#6b7280",fontFamily:"monospace"}}>{s.form}</td>
                       <td style={{padding:"10px 14px",fontSize:10,color:"#9ca3af"}}>{s.note}</td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>}
+                  ))}
+                </tbody>
+              </table>
+            </div>}
+          </>);
+        })()}
 
         {/* TAX BY STATE */}
         {irsTab==="tax"&&<>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:16}}>Tobacco Tax by State — Your Active States</div>
-          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e",marginBottom:16}}>
-            Tax collected from customers must be remitted to each state monthly. Keep state remittance receipts as proof for IRS audits.
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121",marginBottom:12}}>Tax by State — Your Active States</div>
+
+          {/* OTP Section */}
+          <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#854d0e",marginBottom:12}}>
+            <strong>🚬 OTP Tax</strong> collected from customers must be remitted to each state monthly.
+            Keep remittance receipts as proof. This is the tax your invoices calculate.
           </div>
-          {taxByState.length===0?<div style={{textAlign:"center",color:"#9ca3af",padding:"40px"}}>No taxable sales for this period</div>:(
-            <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+          {taxByState.length===0?(
+            <div style={{textAlign:"center",color:"#9ca3af",padding:"30px",background:"#fff",borderRadius:12,border:"1px solid #e5e7eb",marginBottom:16}}>No OTP taxable sales for this period</div>
+          ):(
+            <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden",marginBottom:20}}>
               <table style={{width:"100%",borderCollapse:"collapse"}}>
                 <thead><tr style={{background:"#0a1628",color:"#fff"}}>
-                  {["State","Your Rate","Invoices","Taxable Sales","Tax Collected","Filing Due","Form"].map(h=>(
+                  {["State","Your OTP Rate","Invoices","Taxable Sales","OTP Tax Collected","Filing Due","Form"].map(h=>(
                     <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
                   ))}
                 </tr></thead>
@@ -1324,7 +1379,7 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
                   {taxByState.map(t=>(
                     <tr key={t.state} style={{borderBottom:"1px solid #f3f4f6"}}>
                       <td style={{padding:"12px 14px",fontWeight:700,color:"#0a1628"}}>{t.state} — {t.name}</td>
-                      <td style={{padding:"12px 14px",color:"#7c3aed",fontWeight:700}}>{t.rate}%</td>
+                      <td style={{padding:"12px 14px",color:"#7c3aed",fontWeight:700}}>{t.rate}% wholesale</td>
                       <td style={{padding:"12px 14px",color:"#6b7280"}}>{t.count}</td>
                       <td style={{padding:"12px 14px"}}>{fmt(t.taxable)}</td>
                       <td style={{padding:"12px 14px"}}><span style={{background:"#fef9c3",color:"#854d0e",padding:"4px 10px",borderRadius:6,fontSize:12,fontWeight:700}}>{fmt(t.tax)}</span></td>
@@ -1333,7 +1388,7 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
                     </tr>
                   ))}
                   <tr style={{background:"#f9fafb",borderTop:"2px solid #e5e7eb"}}>
-                    <td colSpan={4} style={{padding:"12px 14px",fontWeight:800}}>TOTAL TO REMIT</td>
+                    <td colSpan={4} style={{padding:"12px 14px",fontWeight:800}}>TOTAL OTP TO REMIT</td>
                     <td style={{padding:"12px 14px"}}><span style={{background:"#dc2626",color:"#fff",padding:"4px 12px",borderRadius:6,fontSize:13,fontWeight:800}}>{fmt(taxByState.reduce((a,t)=>a+t.tax,0))}</span></td>
                     <td colSpan={2}/>
                   </tr>
@@ -1341,6 +1396,39 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
               </table>
             </div>
           )}
+
+          {/* Cigarette Section */}
+          <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#1e40af",marginBottom:12}}>
+            <strong>🏷 Cigarette Tax ($/pack)</strong> — reference rates for your active states.
+            This is a separate per-pack stamp tax paid when purchasing cigarettes from manufacturers/distributors.
+            Not calculated per invoice — shown for planning and compliance awareness.
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:"#1e40af",color:"#fff"}}>
+                {["State","Cigarette Tax","Filing Form","Note"].map(h=>(
+                  <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {activeStateIds.map(sid=>{
+                  const stInfo=ALL_STATES_TAX.find(x=>x.id===sid);
+                  if(!stInfo)return null;
+                  return(
+                    <tr key={sid} style={{borderBottom:"1px solid #f3f4f6"}}>
+                      <td style={{padding:"11px 14px",fontWeight:700,color:"#1e40af"}}>{sid} — {stInfo.name}</td>
+                      <td style={{padding:"11px 14px"}}>
+                        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:stInfo.cig>=3?"#dc2626":stInfo.cig>=1.5?"#f59e0b":"#059669"}}>${stInfo.cig.toFixed(2)}/pack</span>
+                      </td>
+                      <td style={{padding:"11px 14px",fontSize:11,color:"#6b7280",fontFamily:"monospace"}}>{stInfo.form}</td>
+                      <td style={{padding:"11px 14px",fontSize:10,color:"#9ca3af"}}>{stInfo.note}</td>
+                    </tr>
+                  );
+                })}
+                {activeStateIds.length===0&&<tr><td colSpan={4} style={{padding:"24px",textAlign:"center",color:"#9ca3af"}}>No active states configured</td></tr>}
+              </tbody>
+            </table>
+          </div>
         </>}
 
         {/* PAYMENT METHODS */}
