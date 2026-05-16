@@ -2140,7 +2140,7 @@ export default function App(){
     {id:"payments",label:"Payments",icon:ic.settle,badge:visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length||0},
     {id:"settlement",label:"Daily Settlement",icon:ic.settle},
     ...(isAdmin?[{id:"pl",label:"P&L Report",icon:ic.pl}]:[]),
-    ...(isAdmin?[{id:"irs",label:"IRS Reports",icon:"🏛"}]:[]),
+    ...(isAdmin?[{id:"irs",label:" IRS Reports",icon:"🏛"}]:[]),
     {id:"customers",label:"Customers",icon:ic.users},
     ...(isAdmin?[{id:"settings",label:"Settings",icon:ic.gear}]:[]),
   ];
