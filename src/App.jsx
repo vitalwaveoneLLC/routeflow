@@ -3607,7 +3607,7 @@ export default function App(){
             ))}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
               <div>
-                <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}><label htmlFor="nc-zip">ZIP Code *</label>
+                <label htmlFor="nc-zip" style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>ZIP Code *</label>
                 <input id="nc-zip" name="zip" type="text" autoComplete="postal-code" maxLength={10} value={nc.zip||""} onChange={e=>setNc(p=>({...p,zip:e.target.value.replace(/[^0-9-]/g,"")}))} placeholder="e.g. 46201"
                   style={{width:"100%",border:`1.5px solid ${nc.zip?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
               </div>
