@@ -128,12 +128,23 @@ const MFAGate=({onVerified})=>{
   const[stage,setStage]=useState("checking"); // checking | enroll | verify
 
   const callMfa=async(action,params={})=>{
-    const{data:{session}}=await supabase.auth.getSession();
-    const SUPABASE_URL=import.meta.env.VITE_SUPABASE_URL;
-    const SUPABASE_ANON_KEY=import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const{data:{session},error:sessErr}=await supabase.auth.getSession();
+    if(sessErr||!session?.access_token){
+      // Try refreshing the session once
+      const{data:refreshed}=await supabase.auth.refreshSession();
+      if(!refreshed?.session?.access_token) throw new Error("Not authenticated — please sign in again");
+      const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${refreshed.session.access_token}`,"apikey":SUPABASE_ANON_KEY},
+        body:JSON.stringify({action,...params}),
+      });
+      const result=await res.json();
+      if(result.error)throw new Error(result.error);
+      return result;
+    }
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${session?.access_token}`,"apikey":SUPABASE_ANON_KEY},
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${session.access_token}`,"apikey":SUPABASE_ANON_KEY},
       body:JSON.stringify({action,...params}),
     });
     const result=await res.json();
@@ -303,10 +314,22 @@ const Login=({})=>{
   const[otp,setOtp]=useState("");
 
   const callMfa=async(action,params={})=>{
-    const{data:{session}}=await supabase.auth.getSession();
+    const{data:{session},error:sessErr}=await supabase.auth.getSession();
+    if(sessErr||!session?.access_token){
+      const{data:refreshed}=await supabase.auth.refreshSession();
+      if(!refreshed?.session?.access_token) throw new Error("Not authenticated — please sign in again");
+      const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${refreshed.session.access_token}`,"apikey":SUPABASE_ANON_KEY},
+        body:JSON.stringify({action,...params}),
+      });
+      const result=await res.json();
+      if(result.error)throw new Error(result.error);
+      return result;
+    }
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${session?.access_token}`,"apikey":SUPABASE_ANON_KEY},
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${session.access_token}`,"apikey":SUPABASE_ANON_KEY},
       body:JSON.stringify({action,...params}),
     });
     const result=await res.json();
