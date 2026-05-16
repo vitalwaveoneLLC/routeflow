@@ -123,16 +123,14 @@ const Spinner=({msg=""})=>(<div style={{display:"flex",alignItems:"center",justi
 const Modal=({title,onClose,children,wide,xwide})=>(<div className="mo" onClick={e=>e.target===e.currentTarget&&onClose()}><div className={`mb fu${wide?" w":""}${xwide?" xw":""}`}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>{title?<div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:19,textTransform:"uppercase",letterSpacing:".04em",color:"#212121"}}>{title}</div>:<div/>}<button className="btn bgh" onClick={onClose}>{ic.X} Close</button></div>{children}</div></div>);
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────────
-// ── MFA GATE — for cached admin sessions only ────────────────────────────────
-// Only verifies existing TOTP — never enrolls (Login handles enrollment)
+// ── MFA GATE — verify 2FA even for cached sessions ────────────────────────────
 const MFAGate=({onVerified})=>{
   const[otp,setOtp]=useState("");
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState("");
-  const[stage,setStage]=useState("checking");
+  const[stage,setStage]=useState("checking"); // checking | enroll | verify
 
   const callMfa=async(action,params={})=>{
-    // Retry — session may take a moment to restore from storage on page load
     let token=null;
     for(let i=0;i<10;i++){
       const{data:{session}}=await supabase.auth.getSession();
@@ -140,38 +138,74 @@ const MFAGate=({onVerified})=>{
       await new Promise(r=>setTimeout(r,300));
     }
     if(!token){
-      // Try refresh as last resort
-      const{data}=await supabase.auth.refreshSession();
-      token=data?.session?.access_token;
+      const{data:rd}=await supabase.auth.refreshSession();
+      token=rd?.session?.access_token;
     }
-    if(!token) throw new Error("No active session — please sign in");
+    if(!token)throw new Error("No active session — please sign in");
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`,"apikey":SUPABASE_ANON_KEY},
       body:JSON.stringify({action,...params}),
     });
     const result=await res.json();
-    if(result.error) throw new Error(result.error);
+    if(result.error)throw new Error(result.error);
     return result;
   };
 
+  const[otpauth,setOtpauth]=useState("");
+  const[secret,setSecret]=useState("");
+
   useEffect(()=>{
-    (async()=>{
+    const init=async()=>{
       try{
         const{hasTotp}=await callMfa("check");
         if(hasTotp){
           setStage("verify");
         } else {
-          // No TOTP set up yet — pass through (Login flow will handle enrollment)
+          // No TOTP yet — pass through, Login handles enrollment
           onVerified();
         }
       }catch(e){
-        console.error("MFAGate check error:", e.message);
-        // On error, pass through to avoid lockout
-        onVerified();
+        console.error("MFAGate:",e.message);
+        onVerified(); // fail open to avoid lockout
       }
-    })();
+    };
+    init();
   },[]);
+
+  // Render QR code using qrcodejs library
+  useEffect(()=>{
+    if(!otpauth||stage!=="enroll")return;
+    const renderQR=async()=>{
+      if(!window.QRCode){
+        await new Promise((resolve,reject)=>{
+          const s=document.createElement("script");
+          s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+          s.onload=resolve;s.onerror=reject;
+          document.head.appendChild(s);
+        });
+      }
+      const el=document.getElementById("mfa-qr");
+      if(el){
+        el.innerHTML="";
+        new window.QRCode(el,{
+          text:otpauth,width:200,height:200,
+          colorDark:"#000000",colorLight:"#ffffff",
+          correctLevel:window.QRCode?.CorrectLevel?.M||1,
+        });
+      }
+    };
+    setTimeout(renderQR,200);
+  },[otpauth,stage]);
+
+  const verifyEnroll=async()=>{
+    setLoading(true);setErr("");
+    try{
+      await callMfa("verifyEnroll",{code:otp});
+      onVerified();
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
 
   const verifyLogin=async()=>{
     setLoading(true);setErr("");
@@ -190,144 +224,6 @@ const MFAGate=({onVerified})=>{
       </div>
     </div>
   );
-
-  // verify stage
-  return(
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5",padding:20}}>
-      <div style={{width:"100%",maxWidth:380}}>
-        <div style={{textAlign:"center",marginBottom:20}}>
-          <div style={{background:"#fff",borderRadius:20,padding:8,marginBottom:10,display:"inline-block"}}>
-            <img src="/logo-sidebar.png" style={{width:120,height:120,objectFit:"contain",display:"block",borderRadius:14}}/>
-          </div>
-        </div>
-        <div className="card" style={{padding:26}}>
-          <div style={{textAlign:"center",marginBottom:20}}>
-            <div style={{fontSize:32,marginBottom:6}}>📱</div>
-            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121"}}>ENTER YOUR CODE</div>
-            <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>Open Google Authenticator and enter the 6-digit code</div>
-          </div>
-          {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"9px 13px",fontSize:12,color:"#dc2626",marginBottom:12}}>{err}</div>}
-          <div><label>6-DIGIT CODE</label>
-            <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp}
-              onChange={e=>setOtp(e.target.value.replace(/\D/g,""))}
-              onKeyDown={e=>e.key==="Enter"&&otp.length===6&&verifyLogin()}
-              style={{textAlign:"center",fontSize:28,letterSpacing:"0.4em",fontWeight:700}} autoFocus/>
-          </div>
-          <button onClick={verifyLogin} className="btn ba" style={{width:"100%",justifyContent:"center",padding:"11px",marginTop:12}} disabled={loading||otp.length<6}>
-            {loading?"Verifying…":"🔓 Verify & Enter"}
-          </button>
-          <button onClick={()=>supabase.auth.signOut()} style={{width:"100%",background:"none",border:"none",color:"#9ca3af",fontSize:11,marginTop:10,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
-            ← Sign out
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ── LOGIN ─────────────────────────────────────────────────────────────────────
-const Login=({})=>{
-  const[email,setEmail]=useState("");
-  const[pw,setPw]=useState("");
-  const[loading,setLoading]=useState(false);
-  const[err,setErr]=useState("");
-  const[stage,setStage]=useState("login"); // login | enroll | verify
-  const[otpauth,setOtpauth]=useState("");
-  const[secret,setSecret]=useState("");
-  const[otp,setOtp]=useState("");
-
-  // callMfaWithToken — uses token directly (no session polling)
-  const callMfaWithToken=async(token,action,params={})=>{
-    if(!token) throw new Error("No session token");
-    const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
-      method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`,"apikey":SUPABASE_ANON_KEY},
-      body:JSON.stringify({action,...params}),
-    });
-    const result=await res.json();
-    if(result.error) throw new Error(result.error);
-    return result;
-  };
-
-  // callMfa — gets session then calls edge function
-  const callMfa=async(action,params={})=>{
-    const{data:{session}}=await supabase.auth.getSession();
-    if(!session?.access_token) throw new Error("No active session — please sign in");
-    return callMfaWithToken(session.access_token,action,params);
-  };
-
-  // Render QR code when otpauth changes
-  useEffect(()=>{
-    if(!otpauth||stage!=="enroll") return;
-    const renderQR=async()=>{
-      if(!window.QRCode){
-        await new Promise((resolve,reject)=>{
-          const s=document.createElement("script");
-          s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
-          s.onload=resolve; s.onerror=reject;
-          document.head.appendChild(s);
-        });
-      }
-      const el=document.getElementById("login-qr");
-      if(el){
-        el.innerHTML="";
-        new window.QRCode(el,{text:otpauth,width:200,height:200,colorDark:"#000000",colorLight:"#ffffff",correctLevel:window.QRCode?.CorrectLevel?.M||1});
-      }
-    };
-    setTimeout(renderQR,200);
-  },[otpauth,stage]);
-
-  const go=async e=>{
-    e.preventDefault();
-    setLoading(true); setErr("");
-    try{
-      const{data:signData,error}=await supabase.auth.signInWithPassword({email,password:pw});
-      if(error) throw error;
-      // Session is in signData — use it directly, no polling needed
-      if(!signData?.session?.access_token) throw new Error("Sign in failed — no session returned");
-      // Check MFA status
-      const{hasTotp,alreadyVerified}=await callMfaWithToken(signData.session.access_token,"check");
-      if(hasTotp){
-        setStage("verify");
-      } else {
-        // Enroll via edge function (idempotent — handles duplicates)
-        const result=await callMfaWithToken(signData.session.access_token,"enroll");
-        if(result.alreadyVerified){
-          setStage("verify");
-        } else {
-          setSecret(result.secret);
-          setOtpauth(result.otpauthUrl);
-          setStage("enroll");
-        }
-      }
-    }catch(e){
-      setErr(e.message);
-      await supabase.auth.signOut();
-    }
-    setLoading(false);
-  };
-
-  const verifyEnroll=async()=>{
-    setLoading(true); setErr("");
-    try{
-      await callMfa("verifyEnroll",{code:otp});
-      setOtp("");
-    }catch(e){setErr(e.message);}
-    setLoading(false);
-  };
-
-  const verifyLogin=async()=>{
-    setLoading(true); setErr("");
-    try{
-      await callMfa("verifyLogin",{code:otp});
-      setOtp("");
-    }catch(e){
-      setErr(e.message);
-      setLoading(false);
-      return;
-    }
-    setLoading(false);
-  };
 
   if(stage==="enroll") return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5",padding:20}}>
@@ -402,8 +298,181 @@ const Login=({})=>{
       </div>
     </div>
   );
+};
 
-  // Default: show email/password login form
+// ── LOGIN ─────────────────────────────────────────────────────────────────────
+const Login=({})=>{
+  const[email,setEmail]=useState("");
+  const[pw,setPw]=useState("");
+  const[loading,setLoading]=useState(false);
+  const[err,setErr]=useState("");
+  const[stage,setStage]=useState("login"); // login | enroll | verify
+  const[otpauth,setOtpauth]=useState("");
+  const[secret,setSecret]=useState("");
+  const[otp,setOtp]=useState("");
+
+  const callMfaWithToken=async(token,action,params={})=>{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`,"apikey":SUPABASE_ANON_KEY},
+      body:JSON.stringify({action,...params}),
+    });
+    const result=await res.json();
+    if(result.error)throw new Error(result.error);
+    return result;
+  };
+  const callMfa=async(action,params={})=>{
+    const{data:{session}}=await supabase.auth.getSession();
+    if(!session?.access_token)throw new Error("No session");
+    return callMfaWithToken(session.access_token,action,params);
+  };
+
+  // Render QR code when otpauth changes
+  useEffect(()=>{
+    if(!otpauth||stage!=="enroll")return;
+    const renderQR=async()=>{
+      if(!window.QRCode){
+        await new Promise((resolve,reject)=>{
+          const s=document.createElement("script");
+          s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+          s.onload=resolve;s.onerror=reject;
+          document.head.appendChild(s);
+        });
+      }
+      const el=document.getElementById("login-qr");
+      if(el){
+        el.innerHTML="";
+        new window.QRCode(el,{
+          text:otpauth,width:200,height:200,
+          colorDark:"#000000",colorLight:"#ffffff",
+          correctLevel:window.QRCode?.CorrectLevel?.M||1,
+        });
+      }
+    };
+    setTimeout(renderQR,200);
+  },[otpauth,stage]);
+
+  const go=async e=>{
+    e.preventDefault();
+    setLoading(true);setErr("");
+    try{
+      const{data:signData,error}=await supabase.auth.signInWithPassword({email,password:pw});
+      if(error)throw error;
+      if(!signData?.session?.access_token)throw new Error("Sign in failed — no session");
+      const tok=signData.session.access_token;
+      const{hasTotp}=await callMfaWithToken(tok,"check");
+      if(hasTotp){
+        setStage("verify");
+      } else {
+        const result=await callMfaWithToken(tok,"enroll");
+        if(result.alreadyVerified){
+          setStage("verify");
+        } else {
+          setSecret(result.secret);
+          setOtpauth(result.otpauthUrl);
+          setStage("enroll");
+        }
+      }
+    }catch(e){
+      setErr(e.message);
+      await supabase.auth.signOut();
+    }
+    setLoading(false);
+  };
+
+  const verifyEnroll=async()=>{
+    setLoading(true);setErr("");
+    try{
+      await callMfa("verifyEnroll",{code:otp});
+      setOtp("");
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+
+  const verifyLogin=async()=>{
+    setLoading(true);setErr("");
+    try{
+      await callMfa("verifyLogin",{code:otp});
+      setOtp("");
+    }catch(e){
+      setErr(e.message);
+      setLoading(false);
+      return;
+    }
+    setLoading(false);
+  };
+
+  if(stage==="enroll") return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5",padding:20}}>
+      <div style={{width:"100%",maxWidth:420}}>
+        <div className="card" style={{padding:28}}>
+          <div style={{textAlign:"center",marginBottom:20}}>
+            <div style={{fontSize:32,marginBottom:8}}>🔐</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121"}}>SET UP 2-FACTOR AUTH</div>
+            <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>One-time setup — scan this QR code with your authenticator app</div>
+          </div>
+          <div style={{textAlign:"center",marginBottom:16}}>
+            <div id="login-qr" style={{display:"inline-block",padding:10,background:"#fff",borderRadius:10,border:"1px solid #e5e7eb"}}></div>
+          </div>
+          <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:16}}>
+            <div style={{fontSize:10,color:"#9ca3af",marginBottom:4,fontWeight:700,letterSpacing:".08em"}}>OR ENTER CODE MANUALLY</div>
+            <div style={{fontFamily:"monospace",fontSize:13,color:"#212121",wordBreak:"break-all",letterSpacing:".1em"}}>{secret}</div>
+          </div>
+          <div style={{fontSize:12,color:"#6b7280",marginBottom:14,lineHeight:1.7}}>
+            1. Open <strong>Google Authenticator</strong> or <strong>Authy</strong><br/>
+            2. Tap <strong>+</strong> → <strong>Scan QR code</strong><br/>
+            3. Enter the 6-digit code shown in the app
+          </div>
+          {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"9px 13px",fontSize:12,color:"#dc2626",marginBottom:12}}>{err}</div>}
+          <div><label>6-DIGIT CODE FROM APP</label>
+            <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp}
+              onChange={e=>setOtp(e.target.value.replace(/\D/g,""))}
+              onKeyDown={e=>e.key==="Enter"&&verifyEnroll()}
+              style={{textAlign:"center",fontSize:28,letterSpacing:"0.4em",fontWeight:700}}/>
+          </div>
+          <button onClick={verifyEnroll} className="btn ba" style={{width:"100%",justifyContent:"center",padding:"11px",marginTop:12}} disabled={loading||otp.length<6}>
+            {loading?"Verifying…":"✓ Activate 2FA & Sign In"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if(stage==="verify") return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5",padding:20}}>
+      <div style={{width:"100%",maxWidth:380}}>
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{background:"#fff",borderRadius:20,padding:8,marginBottom:10,display:"inline-block"}}>
+            <img src="/logo-sidebar.png" style={{width:120,height:120,objectFit:"contain",display:"block",borderRadius:14}}/>
+          </div>
+        </div>
+        <div className="card" style={{padding:26}}>
+          <div style={{textAlign:"center",marginBottom:20}}>
+            <div style={{fontSize:32,marginBottom:6}}>📱</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#212121"}}>ENTER YOUR CODE</div>
+            <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>Open Google Authenticator and enter the 6-digit code</div>
+          </div>
+          {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"9px 13px",fontSize:12,color:"#dc2626",marginBottom:12}}>{err}</div>}
+          <div><label>6-DIGIT CODE</label>
+            <input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp}
+              onChange={e=>setOtp(e.target.value.replace(/\D/g,""))}
+              onKeyDown={e=>e.key==="Enter"&&verifyLogin()}
+              style={{textAlign:"center",fontSize:28,letterSpacing:"0.4em",fontWeight:700}}
+              autoFocus/>
+          </div>
+          <button onClick={verifyLogin} className="btn ba" style={{width:"100%",justifyContent:"center",padding:"11px",marginTop:12}} disabled={loading||otp.length<6}>
+            {loading?"Verifying…":"🔓 Verify & Sign In"}
+          </button>
+          <button onClick={()=>{supabase.auth.signOut();setStage("login");setOtp("");setErr("");}}
+            style={{width:"100%",background:"none",border:"none",color:"#9ca3af",fontSize:11,marginTop:10,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+            ← Use different account
+          </button>
+        </div>
+        <div style={{textAlign:"center",marginTop:12,fontSize:11,color:"#9ca3af"}}>🔐 Protected by 2-Factor Authentication</div>
+      </div>
+    </div>
+  );
+
   return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5",padding:20}}>
       <div style={{width:"100%",maxWidth:380}}>
@@ -430,6 +499,7 @@ const Login=({})=>{
   );
 };
 
+// ── INVOICE DOC ───────────────────────────────────────────────────────────────
 // ── GLOBAL TAX HELPERS (module level - available to all components) ──────────
 const TAXABLE_CATS=["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
 const isTaxableProd=p=>{const c=(p?.cat||"").toLowerCase().trim(),n=(p?.name||"").toLowerCase().trim();return["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff","smoke","eliquid","e-liquid","pod","disposable"].some(t=>c.includes(t)||n.includes(t));};
