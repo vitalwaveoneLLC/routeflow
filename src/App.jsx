@@ -124,24 +124,17 @@ const Modal=({title,onClose,children,wide,xwide})=>(<div className="mo" onClick=
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────────
 // ── MFA GATE — verify 2FA even for cached sessions ────────────────────────────
-const MFAGate=({onVerified,sessionToken})=>{
+const MFAGate=({onVerified})=>{
   const[otp,setOtp]=useState("");
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState("");
   const[stage,setStage]=useState("checking"); // checking | enroll | verify
 
   const callMfa=async(action,params={})=>{
-    // Use token passed from App (already verified session exists)
-    let token=sessionToken;
-    if(!token){
-      // Fallback: try getSession
-      const{data:{session}}=await supabase.auth.getSession();
-      token=session?.access_token;
-    }
-    if(!token)throw new Error("No active session — please sign in");
+    const{data:{session}}=await supabase.auth.getSession();
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`,"apikey":SUPABASE_ANON_KEY},
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${session?.access_token}`,"apikey":SUPABASE_ANON_KEY},
       body:JSON.stringify({action,...params}),
     });
     const result=await res.json();
@@ -157,23 +150,16 @@ const MFAGate=({onVerified,sessionToken})=>{
       try{
         const{hasTotp}=await callMfa("check");
         if(hasTotp){
-          // Has verified TOTP — show verify screen
           setStage("verify");
         } else {
-          // No TOTP set up — must enroll via Login flow
-          // Sign out and let Login handle enrollment
-          await supabase.auth.signOut();
-          // User will be redirected to Login which handles enrollment
+          const{secret:sec,otpauthUrl}=await callMfa("enroll");
+          setSecret(sec);
+          setOtpauth(otpauthUrl);
+          setStage("enroll");
         }
       }catch(e){
-        console.error("MFAGate check failed:",e.message);
-        if(e.message.includes("No active session")){
-          // Session not ready — don't sign out, just show verify screen as fallback
-          setStage("verify");
-        } else {
-          // Real error — sign out for security
-          await supabase.auth.signOut();
-        }
+        setErr(e.message);
+        setStage("verify");
       }
     };
     init();
@@ -317,20 +303,16 @@ const Login=({})=>{
   const[secret,setSecret]=useState("");
   const[otp,setOtp]=useState("");
 
-  const callMfaWithToken=async(token,action,params={})=>{
+  const callMfa=async(action,params={})=>{
+    const{data:{session}}=await supabase.auth.getSession();
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`,"apikey":SUPABASE_ANON_KEY},
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${session?.access_token}`,"apikey":SUPABASE_ANON_KEY},
       body:JSON.stringify({action,...params}),
     });
     const result=await res.json();
     if(result.error)throw new Error(result.error);
     return result;
-  };
-  const callMfa=async(action,params={})=>{
-    const{data:{session}}=await supabase.auth.getSession();
-    if(!session?.access_token)throw new Error("No session");
-    return callMfaWithToken(session.access_token,action,params);
   };
 
   // Render QR code when otpauth changes
@@ -362,37 +344,20 @@ const Login=({})=>{
     e.preventDefault();
     setLoading(true);setErr("");
     try{
-      const{data:signData,error}=await supabase.auth.signInWithPassword({email,password:pw});
+      const{error}=await supabase.auth.signInWithPassword({email,password:pw});
       if(error)throw error;
-      if(!signData?.session?.access_token)throw new Error("Sign in failed — no session");
-      const tok=signData.session.access_token;
-      // Check MFA status via edge function (admin role verification)
-      const{hasTotp}=await callMfaWithToken(tok,"check");
+      const{hasTotp}=await callMfa("check");
       if(hasTotp){
         setStage("verify");
       } else {
-        // Enroll directly from browser — browser has real session
-        const{data:lf}=await supabase.auth.mfa.listFactors();
-        const verified=(lf?.totp||[]).filter(f=>f.status==="verified");
-        const unverified=(lf?.totp||[]).filter(f=>f.status==="unverified");
-        if(verified.length>0){
-          setStage("verify");
-        } else {
-          // Remove stale unverified factors
-          for(const f of unverified){
-            await supabase.auth.mfa.unenroll({factorId:f.id}).catch(()=>{});
-          }
-          const{data:enrollData,error:ee}=await supabase.auth.mfa.enroll({factorType:"totp"});
-          if(ee)throw ee;
-          setSecret(enrollData.totp.secret);
-          setOtpauth(enrollData.totp.qr_code);
-          setStage("enroll");
-        }
+        const{secret:sec,otpauthUrl}=await callMfa("enroll");
+        setSecret(sec);
+        setOtpauth(otpauthUrl);
+        setStage("enroll");
       }
     }catch(e){
       setErr(e.message);
-      const{data:{session:cs}}=await supabase.auth.getSession();
-      if(!cs)await supabase.auth.signOut();
+      await supabase.auth.signOut();
     }
     setLoading(false);
   };
@@ -400,16 +365,7 @@ const Login=({})=>{
   const verifyEnroll=async()=>{
     setLoading(true);setErr("");
     try{
-      const{data:lf,error:le}=await supabase.auth.mfa.listFactors();
-      if(le)throw le;
-      const pending=(lf?.totp||[]).find(f=>f.status==="unverified");
-      if(!pending)throw new Error("No pending MFA factor — please sign in again");
-      const{data:ch,error:ce}=await supabase.auth.mfa.challenge({factorId:pending.id});
-      if(ce)throw ce;
-      const{error:ve}=await supabase.auth.mfa.verify({
-        factorId:pending.id,challengeId:ch.id,code:otp.trim()
-      });
-      if(ve)throw ve;
+      await callMfa("verifyEnroll",{code:otp});
       setOtp("");
     }catch(e){setErr(e.message);}
     setLoading(false);
@@ -418,17 +374,7 @@ const Login=({})=>{
   const verifyLogin=async()=>{
     setLoading(true);setErr("");
     try{
-      const{data:lf,error:le}=await supabase.auth.mfa.listFactors();
-      if(le)throw le;
-      const verified=(lf?.totp||[]).filter(f=>f.status==="verified");
-      if(verified.length===0)throw new Error("No verified MFA factor found");
-      const fid=verified[0].id;
-      const{data:ch,error:ce}=await supabase.auth.mfa.challenge({factorId:fid});
-      if(ce)throw ce;
-      const{error:ve}=await supabase.auth.mfa.verify({
-        factorId:fid,challengeId:ch.id,code:otp.trim()
-      });
-      if(ve)throw ve;
+      await callMfa("verifyLogin",{code:otp});
       setOtp("");
     }catch(e){
       setErr(e.message);
@@ -2474,7 +2420,7 @@ export default function App(){
   // ── 2FA GATE ───────────────────────────────────────────────────────────────
   // Force 2FA verification even for cached sessions
   if(!mfaVerified&&profile?.role==="admin"){
-    return<div className="app"><GS/><MFAGate onVerified={()=>setMfaVerified(true)} sessionToken={session?.access_token}/></div>;
+    return<div className="app"><GS/><MFAGate onVerified={()=>setMfaVerified(true)}/></div>;
   }
 
   // ── ACCESS CONTROL ─────────────────────────────────────────────────────────
