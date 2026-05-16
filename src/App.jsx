@@ -124,22 +124,19 @@ const Modal=({title,onClose,children,wide,xwide})=>(<div className="mo" onClick=
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────────
 // ── MFA GATE — verify 2FA even for cached sessions ────────────────────────────
-const MFAGate=({onVerified})=>{
+const MFAGate=({onVerified,sessionToken})=>{
   const[otp,setOtp]=useState("");
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState("");
   const[stage,setStage]=useState("checking"); // checking | enroll | verify
 
   const callMfa=async(action,params={})=>{
-    let token=null;
-    for(let i=0;i<10;i++){
-      const{data:{session}}=await supabase.auth.getSession();
-      if(session?.access_token){token=session.access_token;break;}
-      await new Promise(r=>setTimeout(r,300));
-    }
+    // Use token passed from App (already verified session exists)
+    let token=sessionToken;
     if(!token){
-      const{data:rd}=await supabase.auth.refreshSession();
-      token=rd?.session?.access_token;
+      // Fallback: try getSession
+      const{data:{session}}=await supabase.auth.getSession();
+      token=session?.access_token;
     }
     if(!token)throw new Error("No active session — please sign in");
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
@@ -170,8 +167,13 @@ const MFAGate=({onVerified})=>{
         }
       }catch(e){
         console.error("MFAGate check failed:",e.message);
-        // On error, sign out for security
-        await supabase.auth.signOut();
+        if(e.message.includes("No active session")){
+          // Session not ready — don't sign out, just show verify screen as fallback
+          setStage("verify");
+        } else {
+          // Real error — sign out for security
+          await supabase.auth.signOut();
+        }
       }
     };
     init();
@@ -2472,7 +2474,7 @@ export default function App(){
   // ── 2FA GATE ───────────────────────────────────────────────────────────────
   // Force 2FA verification even for cached sessions
   if(!mfaVerified&&profile?.role==="admin"){
-    return<div className="app"><GS/><MFAGate onVerified={()=>setMfaVerified(true)}/></div>;
+    return<div className="app"><GS/><MFAGate onVerified={()=>setMfaVerified(true)} sessionToken={session?.access_token}/></div>;
   }
 
   // ── ACCESS CONTROL ─────────────────────────────────────────────────────────
