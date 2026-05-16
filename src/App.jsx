@@ -2791,8 +2791,7 @@ export default function App(){
     setSaving(true);
     const rec={id:"C"+uid(),name:nc.name,address:nc.address||"",phone:nc.phone||"",email:nc.email||"",notes:nc.notes||"",truck_id:nc.truck_id||trucks[0]?.id||null};
     if(nc.custom_pricing&&nc.custom_prices&&Object.keys(nc.custom_prices).length>0){
-      rec.notes=(rec.notes?rec.notes+"
-":"")+"CUSTOM_PRICES:"+JSON.stringify(nc.custom_prices);
+      rec.notes=(rec.notes?rec.notes+"\n":"")+"CUSTOM_PRICES:"+JSON.stringify(nc.custom_prices);
     }
     const{error}=await supabase.from("customers").insert(rec);
     if(error)showToast(error.message,"error");
