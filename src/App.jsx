@@ -162,12 +162,12 @@ const MFAGate=({onVerified})=>{
         if(hasTotp){
           setStage("verify");
         } else {
-          // No TOTP yet — pass through, Login handles enrollment
           onVerified();
         }
       }catch(e){
-        console.error("MFAGate:",e.message);
-        onVerified(); // fail open to avoid lockout
+        console.error("MFAGate check failed:",e.message);
+        // On any error — pass through. Don't lock user out.
+        onVerified();
       }
     };
     init();
@@ -360,22 +360,33 @@ const Login=({})=>{
       if(error)throw error;
       if(!signData?.session?.access_token)throw new Error("Sign in failed — no session");
       const tok=signData.session.access_token;
+      // Check MFA status via edge function (admin role verification)
       const{hasTotp}=await callMfaWithToken(tok,"check");
       if(hasTotp){
         setStage("verify");
       } else {
-        const result=await callMfaWithToken(tok,"enroll");
-        if(result.alreadyVerified){
+        // Enroll directly from browser — browser has real session
+        const{data:lf}=await supabase.auth.mfa.listFactors();
+        const verified=(lf?.totp||[]).filter(f=>f.status==="verified");
+        const unverified=(lf?.totp||[]).filter(f=>f.status==="unverified");
+        if(verified.length>0){
           setStage("verify");
         } else {
-          setSecret(result.secret);
-          setOtpauth(result.otpauthUrl);
+          // Remove stale unverified factors
+          for(const f of unverified){
+            await supabase.auth.mfa.unenroll({factorId:f.id}).catch(()=>{});
+          }
+          const{data:enrollData,error:ee}=await supabase.auth.mfa.enroll({factorType:"totp"});
+          if(ee)throw ee;
+          setSecret(enrollData.totp.secret);
+          setOtpauth(enrollData.totp.qr_code);
           setStage("enroll");
         }
       }
     }catch(e){
       setErr(e.message);
-      await supabase.auth.signOut();
+      const{data:{session:cs}}=await supabase.auth.getSession();
+      if(!cs)await supabase.auth.signOut();
     }
     setLoading(false);
   };
@@ -383,7 +394,16 @@ const Login=({})=>{
   const verifyEnroll=async()=>{
     setLoading(true);setErr("");
     try{
-      await callMfa("verifyEnroll",{code:otp});
+      const{data:lf,error:le}=await supabase.auth.mfa.listFactors();
+      if(le)throw le;
+      const pending=(lf?.totp||[]).find(f=>f.status==="unverified");
+      if(!pending)throw new Error("No pending MFA factor — please sign in again");
+      const{data:ch,error:ce}=await supabase.auth.mfa.challenge({factorId:pending.id});
+      if(ce)throw ce;
+      const{error:ve}=await supabase.auth.mfa.verify({
+        factorId:pending.id,challengeId:ch.id,code:otp.trim()
+      });
+      if(ve)throw ve;
       setOtp("");
     }catch(e){setErr(e.message);}
     setLoading(false);
@@ -392,7 +412,17 @@ const Login=({})=>{
   const verifyLogin=async()=>{
     setLoading(true);setErr("");
     try{
-      await callMfa("verifyLogin",{code:otp});
+      const{data:lf,error:le}=await supabase.auth.mfa.listFactors();
+      if(le)throw le;
+      const verified=(lf?.totp||[]).filter(f=>f.status==="verified");
+      if(verified.length===0)throw new Error("No verified MFA factor found");
+      const fid=verified[0].id;
+      const{data:ch,error:ce}=await supabase.auth.mfa.challenge({factorId:fid});
+      if(ce)throw ce;
+      const{error:ve}=await supabase.auth.mfa.verify({
+        factorId:fid,challengeId:ch.id,code:otp.trim()
+      });
+      if(ve)throw ve;
       setOtp("");
     }catch(e){
       setErr(e.message);
