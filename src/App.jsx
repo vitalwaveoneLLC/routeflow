@@ -304,8 +304,6 @@ const Login=({})=>{
 
   const callMfa=async(action,params={})=>{
     const{data:{session}}=await supabase.auth.getSession();
-    const SUPABASE_URL=import.meta.env.VITE_SUPABASE_URL;
-    const SUPABASE_ANON_KEY=import.meta.env.VITE_SUPABASE_ANON_KEY;
     const res=await fetch(`${SUPABASE_URL}/functions/v1/mfa-handler`,{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":`Bearer ${session?.access_token}`,"apikey":SUPABASE_ANON_KEY},
@@ -1733,59 +1731,6 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
 // All 50 states + DC OTP (Other Tobacco Products) tax rates
 // Source: State revenue departments, Tax Foundation 2025
 // OTP rates = % of wholesale price (how wholesalers are taxed)
-let ALL_STATES_TAX = [
-  {id:"AL",name:"Alabama",        otp:10,   cig:0.68, due:"20th",    form:"Tobacco Tax Return",      note:"OTP 10% wholesale"},
-  {id:"AK",name:"Alaska",         otp:75,   cig:2.00, due:"Last day",form:"OTP Tax Return",          note:"OTP 75% wholesale"},
-  {id:"AZ",name:"Arizona",        otp:65,   cig:2.00, due:"20th",    form:"TPT Return",              note:"OTP 65% wholesale"},
-  {id:"AR",name:"Arkansas",       otp:68,   cig:1.15, due:"20th",    form:"ET-1 Return",             note:"OTP 68% manufacturer"},
-  {id:"CA",name:"California",     otp:61.74,cig:2.87, due:"25th",    form:"BOE-501-T",               note:"OTP 61.74% wholesale"},
-  {id:"CO",name:"Colorado",       otp:50,   cig:1.94, due:"20th",    form:"DR 0225",                 note:"OTP 50% manufacturer"},
-  {id:"CT",name:"Connecticut",    otp:50,   cig:4.35, due:"Last day",form:"TPTP Return",             note:"OTP 50% wholesale"},
-  {id:"DE",name:"Delaware",       otp:30,   cig:2.10, due:"15th",    form:"OTP Return",              note:"OTP 30% wholesale"},
-  {id:"FL",name:"Florida",        otp:85,   cig:1.34, due:"20th",    form:"DR-15TOB",                note:"OTP 85% wholesale"},
-  {id:"GA",name:"Georgia",        otp:23,   cig:0.37, due:"20th",    form:"TP-1 Return",             note:"OTP 23% wholesale"},
-  {id:"HI",name:"Hawaii",         otp:70,   cig:3.20, due:"20th",    form:"OTP Return",              note:"OTP 70% wholesale"},
-  {id:"ID",name:"Idaho",          otp:40,   cig:0.57, due:"20th",    form:"Tobacco Products Return", note:"OTP 40% wholesale"},
-  {id:"IL",name:"Illinois",       otp:36,   cig:2.98, due:"15th",    form:"TP-1",                    note:"OTP 36% wholesale"},
-  {id:"IN",name:"Indiana",        otp:24,   cig:1.00, due:"20th",    form:"TF-1 / OTP Return",       note:"OTP 24% wholesale"},
-  {id:"IA",name:"Iowa",           otp:50,   cig:1.36, due:"Last day",form:"IA 81-018",               note:"OTP 50% wholesale"},
-  {id:"KS",name:"Kansas",         otp:10,   cig:1.29, due:"25th",    form:"CT-10U",                  note:"OTP 10% wholesale"},
-  {id:"KY",name:"Kentucky",       otp:15,   cig:1.10, due:"20th",    form:"72A190",                  note:"OTP 15% wholesale"},
-  {id:"LA",name:"Louisiana",      otp:20,   cig:1.08, due:"20th",    form:"R-5604",                  note:"OTP 20% cost price"},
-  {id:"ME",name:"Maine",          otp:43,   cig:2.00, due:"15th",    form:"Tobacco Products Return", note:"OTP 43% wholesale"},
-  {id:"MD",name:"Maryland",       otp:30,   cig:3.00, due:"21st",    form:"MW508",                   note:"OTP 30% wholesale"},
-  {id:"MA",name:"Massachusetts",  otp:40,   cig:3.51, due:"20th",    form:"Excise Return",           note:"OTP 40% wholesale"},
-  {id:"MI",name:"Michigan",       otp:32,   cig:2.00, due:"20th",    form:"Form 4600",               note:"OTP 32% wholesale"},
-  {id:"MN",name:"Minnesota",      otp:95,   cig:3.04, due:"18th",    form:"Tobacco Products Return", note:"OTP 95% — highest"},
-  {id:"MS",name:"Mississippi",    otp:15,   cig:0.68, due:"20th",    form:"Tobacco Tax Return",      note:"OTP 15% wholesale"},
-  {id:"MO",name:"Missouri",       otp:10,   cig:0.17, due:"15th",    form:"MO-860",                  note:"OTP 10% manufacturer"},
-  {id:"MT",name:"Montana",        otp:50,   cig:1.70, due:"Last day",form:"Tobacco Return",          note:"OTP 50% wholesale"},
-  {id:"NE",name:"Nebraska",       otp:20,   cig:0.64, due:"Last day",form:"Form 69",                 note:"OTP 20% wholesale"},
-  {id:"NV",name:"Nevada",         otp:30,   cig:1.80, due:"Last day",form:"TXR-025",                note:"OTP 30% wholesale"},
-  {id:"NH",name:"New Hampshire",  otp:19,   cig:1.78, due:"15th",    form:"OTP Return",              note:"OTP 19% wholesale"},
-  {id:"NJ",name:"New Jersey",     otp:30,   cig:2.70, due:"20th",    form:"OTP-100",                 note:"OTP 30% wholesale"},
-  {id:"NM",name:"New Mexico",     otp:25,   cig:2.00, due:"25th",    form:"TRD-41413",               note:"OTP 25% wholesale"},
-  {id:"NY",name:"New York",       otp:75,   cig:5.35, due:"20th",    form:"MT-203",                  note:"OTP 75% wholesale"},
-  {id:"NC",name:"North Carolina", otp:12.8, cig:0.45, due:"20th",    form:"NC-TP Return",            note:"OTP 12.8% wholesale"},
-  {id:"ND",name:"North Dakota",   otp:28,   cig:0.44, due:"25th",    form:"SFN 21999",               note:"OTP 28% wholesale"},
-  {id:"OH",name:"Ohio",           otp:17,   cig:1.60, due:"23rd",    form:"OTP Tax Return",          note:"OTP 17% wholesale"},
-  {id:"OK",name:"Oklahoma",       otp:36,   cig:2.03, due:"20th",    form:"OTC 900",                 note:"OTP 36% manufacturer"},
-  {id:"OR",name:"Oregon",         otp:65,   cig:1.34, due:"Last day",form:"OR-CIGT",                 note:"OTP 65% wholesale"},
-  {id:"PA",name:"Pennsylvania",   otp:55,   cig:2.60, due:"20th",    form:"REV-1200",                note:"OTP 55% wholesale"},
-  {id:"RI",name:"Rhode Island",   otp:80,   cig:4.25, due:"20th",    form:"OTP Return",              note:"OTP 80% wholesale"},
-  {id:"SC",name:"South Carolina", otp:5,    cig:0.57, due:"20th",    form:"SC Tobacco Return",       note:"OTP 5% wholesale"},
-  {id:"SD",name:"South Dakota",   otp:35,   cig:1.53, due:"Last day",form:"OTP Return",              note:"OTP 35% wholesale"},
-  {id:"TN",name:"Tennessee",      otp:6.6,  cig:0.62, due:"20th",    form:"Tobacco Tax Return",      note:"OTP 6.6% wholesale"},
-  {id:"TX",name:"Texas",          otp:1,    cig:1.41, due:"25th",    form:"AP-143",                  note:"OTP 1% manufacturer"},
-  {id:"UT",name:"Utah",           otp:86,   cig:1.70, due:"Last day",form:"TC-105",                  note:"OTP 86% manufacturer"},
-  {id:"VT",name:"Vermont",        otp:92,   cig:3.08, due:"25th",    form:"Tobacco Products Return", note:"OTP 92% wholesale"},
-  {id:"VA",name:"Virginia",       otp:10,   cig:0.30, due:"20th",    form:"TT-1",                    note:"OTP 10% manufacturer"},
-  {id:"WA",name:"Washington",     otp:95,   cig:3.03, due:"25th",    form:"Excise Tax Return",       note:"OTP 95% — tied highest"},
-  {id:"WV",name:"West Virginia",  otp:12,   cig:1.20, due:"20th",    form:"WV/TFR-1",               note:"OTP 12% wholesale"},
-  {id:"WI",name:"Wisconsin",      otp:71,   cig:2.52, due:"15th",    form:"TF-100",                  note:"OTP 71% manufacturer"},
-  {id:"WY",name:"Wyoming",        otp:20,   cig:0.60, due:"Last day",form:"Tobacco Return",          note:"OTP 20% wholesale"},
-  {id:"DC",name:"Washington DC",  otp:96,   cig:4.50, due:"20th",    form:"FR-800",                  note:"OTP 96% — highest overall"},
-];
 
 
 // ── STATE CONFIG COMPONENT ────────────────────────────────────────────────────
@@ -1910,7 +1855,6 @@ export default function App(){
 
   // ── STATE TAX HELPERS ──────────────────────────────────────────────────────
   // Tax applies to tobacco/nicotine category ONLY
-  const TAXABLE_CATS = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
   const isTaxableProd = p => TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
 
   const getStateTaxRate = stateId => {
