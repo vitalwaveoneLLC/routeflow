@@ -936,6 +936,7 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
   const [period,setPeriod] = useState("all");
   const [depositFilter,setDepositFilter] = useState("all");
   const [viewReceipt,setViewReceipt] = useState(null);
+  const [localExpenses, setLocalExpenses] = useState(expenses);
 
   // Period filter
   const now = new Date();
@@ -968,7 +969,7 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
   },0);
   const grossProfit = grossRevenue - cogs;
   const grossMargin = grossRevenue>0?((grossProfit/grossRevenue)*100).toFixed(1):"0";
-  const totalExpenses = expenses.reduce((a,e)=>a+parseFloat(e.amount||0),0);
+  const totalExpenses = localExpenses.reduce((a,e)=>a+parseFloat(e.amount||0),0);
   const netProfit = grossProfit - totalExpenses;
   const collected = paidSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
   const outstanding = filteredSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0);
@@ -1018,6 +1019,16 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
   });
 
   // Export CSV
+  const deleteExpense = async (id) => {
+    if(!window.confirm("Delete this expense? This cannot be undone.")) return;
+    const {error} = await supabase.from("expenses").delete().eq("id", id);
+    if(error){ showToast(error.message, "error"); return; }
+    showToast("✅ Expense deleted");
+    // Reload expenses from DB
+    const {data:fresh} = await supabase.from("expenses").select("*").order("created_at",{ascending:false});
+    if(fresh) setLocalExpenses(fresh);
+  };
+
   const exportIRS = () => {
     const rows = [
       ["VitalWaveOne LLC — IRS Report"],
@@ -1052,7 +1063,7 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
       [],
       ["EXPENSES"],
       ["Date","Driver","Category","Amount","Description"],
-      ...expenses.map(e=>[e.date,e.driver_name,e.category,parseFloat(e.amount).toFixed(2),e.description]),
+      ...localExpenses.map(e=>[e.date,e.driver_name,e.category,parseFloat(e.amount).toFixed(2),e.description]),
       [],
       ["DEPOSIT LEDGER"],
       ["Sale ID","Method","Amount","Date","Check#","Bank","Receipt"],
@@ -1306,7 +1317,7 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
             Keep all receipts. Gas/mileage = Line 9, Other = Line 22. Total deductible: <strong>{fmt(totalExpenses)}</strong>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10,marginBottom:16}}>
-            {Object.entries(expenses.reduce((acc,e)=>{const c=e.category||"other";acc[c]=(acc[c]||0)+parseFloat(e.amount||0);return acc;},{})).map(([cat,amt])=>(
+            {Object.entries(localExpenses.reduce((acc,e)=>{const c=e.category||"other";acc[c]=(acc[c]||0)+parseFloat(e.amount||0);return acc;},{})).map(([cat,amt])=>(
               <div key={cat} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px"}}>
                 <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:".08em",marginBottom:4}}>{cat.toUpperCase()}</div>
                 <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#f59e0b"}}>{fmt(amt)}</div>
@@ -1316,12 +1327,12 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
           <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,overflow:"hidden"}}>
             <table style={{width:"100%",borderCollapse:"collapse"}}>
               <thead><tr style={{background:"#0a1628",color:"#fff"}}>
-                {["Date","Driver","Category","Amount","Description","Receipt"].map(h=>(
+                {["Date","Driver","Category","Amount","Description","Receipt / Action"].map(h=>(
                   <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>
-                {expenses.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e=>(
+                {localExpenses.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(e=>(
                   <tr key={e.id} style={{borderBottom:"1px solid #f3f4f6"}}>
                     <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{e.date}</td>
                     <td style={{padding:"10px 14px",fontSize:12,color:"#212121"}}>{e.driver_name}</td>
@@ -1329,11 +1340,17 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
                     <td style={{padding:"10px 14px",fontWeight:700,color:"#f59e0b"}}>{fmt(parseFloat(e.amount||0))}</td>
                     <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{e.description||"—"}</td>
                     <td style={{padding:"10px 14px"}}>
-                      {e.receipt_url?(
-                        <button onClick={()=>setViewReceipt(e.receipt_url)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700}}>View</button>
-                      ):(
-                        <span style={{fontSize:11,color:"#d1d5db"}}>None</span>
-                      )}
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        {e.receipt_url?(
+                          <button onClick={()=>setViewReceipt(e.receipt_url)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700}}>📸 View</button>
+                        ):(
+                          <span style={{fontSize:11,color:"#d1d5db"}}>None</span>
+                        )}
+                        <button onClick={()=>deleteExpense(e.id)}
+                          style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#dc2626",cursor:"pointer",fontWeight:700}}>
+                          🗑 Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
