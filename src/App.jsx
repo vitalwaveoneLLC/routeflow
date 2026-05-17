@@ -1596,6 +1596,9 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
 function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
   const [search,setSearch]=useState("");
   const [adding,setAdding]=useState(false);
+  const [editingId,setEditingId]=useState(null);
+  const [editVals,setEditVals]=useState({otp:"",cig:""});
+  const [savingEdit,setSavingEdit]=useState(false);
 
   const activeIds=new Set(stateTaxes.map(s=>s.id));
   const ref=(id)=>ALL_STATES_TAX.find(s=>s.id===id)||{otp:0,cig:0,due:"20th",form:"OTP Return"};
@@ -1620,6 +1623,24 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
     showToast(`${id} removed`);
   };
 
+  const startEdit=(st)=>{
+    setEditingId(st.id);
+    setEditVals({otp:String(st.rate??ref(st.id).otp),cig:String(st.cig_tax??ref(st.id).cig)});
+  };
+
+  const saveEdit=async(st)=>{
+    setSavingEdit(true);
+    const newRate=parseFloat(editVals.otp)||0;
+    const newCig=parseFloat(editVals.cig)||0;
+    const updated={...st,rate:newRate,cig_tax:newCig};
+    const{error}=await supabase.from("state_taxes").upsert(updated);
+    if(error){showToast(error.message,"error");setSavingEdit(false);return;}
+    setStateTaxes(prev=>prev.map(s=>s.id===st.id?updated:s));
+    showToast(`✅ ${st.id} rates updated — OTP ${newRate}% · Cig $${newCig.toFixed(2)}/pack`);
+    setEditingId(null);
+    setSavingEdit(false);
+  };
+
   const notAdded=ALL_STATES_TAX.filter(s=>
     !activeIds.has(s.id)&&
     (!search||s.name.toLowerCase().includes(search.toLowerCase())||s.id.toLowerCase().includes(search.toLowerCase()))
@@ -1631,9 +1652,7 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
         <div>
           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,color:"#212121"}}>⚙️ State Activation</div>
-          <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>
-            Activate states where you operate. To edit OTP &amp; cigarette tax rates, go to <strong>IRS Reports → 🗺 All States</strong>.
-          </div>
+          <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>Activate states and customize OTP &amp; cigarette tax rates per state.</div>
         </div>
         <button onClick={()=>setAdding(!adding)}
           style={{padding:"9px 16px",background:adding?"#f3f4f6":"#0a1628",color:adding?"#6b7280":"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
@@ -1659,31 +1678,76 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
       )}
 
       <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
-        {stateTaxes.map(st=>(
-          <div key={st.id} style={{background:"#fff",border:"1.5px solid #e5e7eb",borderRadius:12,padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
-            {/* State badge */}
-            <div style={{background:"#0a1628",color:"#fff",borderRadius:8,padding:"6px 12px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,flexShrink:0,minWidth:44,textAlign:"center"}}>
-              {st.id}
-            </div>
-            {/* Name + status */}
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:14,color:"#212121"}}>{st.name}</div>
-              <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>
-                {ref(st.id).due} of month · {ref(st.id).form}
+        {stateTaxes.map(st=>{
+          const isEditing=editingId===st.id;
+          return(
+            <div key={st.id} style={{background:"#fff",border:`1.5px solid ${isEditing?"#7c3aed":"#e5e7eb"}`,borderRadius:12,padding:"14px 16px",transition:"border-color .15s"}}>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                {/* State badge */}
+                <div style={{background:"#0a1628",color:"#fff",borderRadius:8,padding:"6px 12px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,flexShrink:0,minWidth:44,textAlign:"center"}}>
+                  {st.id}
+                </div>
+                {/* Name + rates */}
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700,fontSize:14,color:"#212121"}}>{st.name}</div>
+                  {!isEditing&&(
+                    <div style={{fontSize:11,color:"#9ca3af",marginTop:2,display:"flex",gap:10}}>
+                      <span>OTP <strong style={{color:"#7c3aed"}}>{st.exempt?"—":`${st.rate??ref(st.id).otp}%`}</strong></span>
+                      <span>Cig <strong style={{color:"#0a1628"}}>${(st.cig_tax??ref(st.id).cig).toFixed(2)}/pack</strong></span>
+                      <span style={{color:"#d1d5db"}}>·</span>
+                      <span>{ref(st.id).due} of month</span>
+                    </div>
+                  )}
+                </div>
+                {/* Status badge */}
+                {st.exempt
+                  ?<span style={{background:"#dcfce7",color:"#166534",padding:"4px 12px",borderRadius:6,fontSize:12,fontWeight:700,flexShrink:0}}>✅ Exempt</span>
+                  :<span style={{background:"#fef9c3",color:"#854d0e",padding:"4px 12px",borderRadius:6,fontSize:12,fontWeight:700,flexShrink:0}}>🏛 Active</span>
+                }
+                {/* Edit button */}
+                {!st.exempt&&(
+                  <button onClick={()=>isEditing?setEditingId(null):startEdit(st)}
+                    style={{background:isEditing?"#ede9fe":"#f5f3ff",border:`1px solid ${isEditing?"#7c3aed":"#ddd6fe"}`,borderRadius:7,padding:"6px 10px",fontSize:12,color:"#7c3aed",cursor:"pointer",fontWeight:700,flexShrink:0}}>
+                    {isEditing?"✕":"✏️"}
+                  </button>
+                )}
+                {/* Remove */}
+                <button onClick={()=>remove(st.id)}
+                  style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"6px 10px",fontSize:12,color:"#dc2626",cursor:"pointer",fontWeight:700,flexShrink:0}}>
+                  🗑
+                </button>
               </div>
+
+              {/* Inline edit panel */}
+              {isEditing&&(
+                <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #ede9fe",display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+                  <div style={{flex:1,minWidth:120}}>
+                    <label style={{fontSize:10,fontWeight:700,color:"#7c3aed",textTransform:"uppercase",letterSpacing:".08em",display:"block",marginBottom:4}}>🔋 OTP Rate (%)</label>
+                    <input type="number" min="0" max="200" step="0.01"
+                      value={editVals.otp}
+                      onChange={e=>setEditVals(v=>({...v,otp:e.target.value}))}
+                      style={{border:"1.5px solid #7c3aed",borderRadius:7,padding:"7px 10px",fontSize:14,fontWeight:700,width:"100%",color:"#7c3aed"}}
+                    />
+                    <div style={{fontSize:10,color:"#9ca3af",marginTop:3}}>% of wholesale price</div>
+                  </div>
+                  <div style={{flex:1,minWidth:120}}>
+                    <label style={{fontSize:10,fontWeight:700,color:"#0a1628",textTransform:"uppercase",letterSpacing:".08em",display:"block",marginBottom:4}}>🚬 Cigarette Tax ($/pack)</label>
+                    <input type="number" min="0" max="20" step="0.01"
+                      value={editVals.cig}
+                      onChange={e=>setEditVals(v=>({...v,cig:e.target.value}))}
+                      style={{border:"1.5px solid #0a1628",borderRadius:7,padding:"7px 10px",fontSize:14,fontWeight:700,width:"100%",color:"#0a1628"}}
+                    />
+                    <div style={{fontSize:10,color:"#9ca3af",marginTop:3}}>per pack (reference only)</div>
+                  </div>
+                  <button onClick={()=>saveEdit(st)} disabled={savingEdit}
+                    style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"9px 18px",fontSize:12,fontWeight:700,cursor:savingEdit?"not-allowed":"pointer",flexShrink:0,opacity:savingEdit?.6:1}}>
+                    {savingEdit?"Saving…":"💾 Save Rates"}
+                  </button>
+                </div>
+              )}
             </div>
-            {/* Status badge */}
-            {st.exempt
-              ?<span style={{background:"#dcfce7",color:"#166534",padding:"4px 12px",borderRadius:6,fontSize:12,fontWeight:700}}>✅ Exempt</span>
-              :<span style={{background:"#fef9c3",color:"#854d0e",padding:"4px 12px",borderRadius:6,fontSize:12,fontWeight:700}}>🏛 Active</span>
-            }
-            {/* Remove */}
-            <button onClick={()=>remove(st.id)}
-              style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"6px 10px",fontSize:12,color:"#dc2626",cursor:"pointer",fontWeight:700}}>
-              🗑
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Add State Panel */}
@@ -1716,10 +1780,6 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
           {notAdded.length===0&&<div style={{color:"#9ca3af",fontSize:13,padding:"10px"}}>All states already added</div>}
         </div>
       </>}
-
-      <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"12px 16px",fontSize:11,color:"#6b7280",marginTop:16}}>
-        <strong>📌 Note:</strong> To edit OTP rates and cigarette tax rates, go to <strong>IRS Reports → 🗺 All States</strong> and click ✏️ on any state.
-      </div>
     </div>
   );
 }
