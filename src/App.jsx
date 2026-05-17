@@ -1808,7 +1808,7 @@ export default function App(){
   // Auth
   useEffect(()=>{
     supabase.auth.getSession().then(({data:{session}})=>{setSession(session);if(session)loadProfile(session.user.id);else setAuthReady(true);});
-    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>{setSession(session);if(session)loadProfile(session.user.id);else{setProfile(null);setAuthReady(true);setLoading(false);}});
+    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>{setSession(session);if(session)loadProfile(session.user.id);else{setProfile(null);setMfaVerified(false);setAuthReady(true);setLoading(false);}});
     return()=>subscription.unsubscribe();
   },[]);
 
