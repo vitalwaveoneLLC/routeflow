@@ -1593,6 +1593,7 @@ export default function App(){
   const[paymentsLog,setPaymentsLog]=useState([]);
   const[walkinRegs,setWalkinRegs]=useState([]);
   const[driverProfiles,setDriverProfiles]=useState([]);
+  const[truckResets,setTruckResets]=useState([]); // pending/approved/rejected inventory reset requests
   // Truck Management tab state
   const[tmTab,setTmTab]=useState("overview");
   const[driverForm,setDriverForm]=useState({driver:"",plate:"",route:"",email:""});
@@ -1957,6 +1958,11 @@ export default function App(){
       if(stR.data)setStateTaxes(stR.data);
       if(exR.data)setExpenses(exR.data);
       if(wiR.data)setWalkinRegs(wiR.data);
+      // Load truck reset requests (graceful fallback if table doesn't exist yet)
+      try{
+        const{data:rr}=await supabase.from("truck_resets").select("*").order("created_at",{ascending:false});
+        if(rr)setTruckResets(rr);
+      }catch{setTruckResets([]);}
       // Load driver profiles - graceful fallback if lat/lng/last_seen don't exist yet
       try{
         const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id,lat,lng,last_seen").eq("role","driver");
@@ -2358,6 +2364,41 @@ export default function App(){
     showToast("🔓 Truck unlocked — loading enabled");
   };
 
+  // -- TRUCK INVENTORY RESET --------------------------------------------------
+  const approveReset=async(req)=>{
+    try{
+      const inv=truckInv(req.truck_id);
+      const load=activeLoad(req.truck_id);
+      // Return remaining stock to shelf
+      const toReturn=inv.filter(i=>i.remaining>0&&getP(i.pid));
+      if(toReturn.length>0){
+        await Promise.all(toReturn.map(i=>supabase.from("products")
+          .update({shelf:Math.max(0,(getP(i.pid)?.shelf||0)+i.remaining)}).eq("id",i.pid)));
+        setProducts(prev=>prev.map(p=>{
+          const item=toReturn.find(i=>i.pid===p.id);
+          return item?{...p,shelf:Math.max(0,p.shelf+item.remaining)}:p;
+        }));
+      }
+      // Close the active load
+      if(load){
+        await supabase.from("loads").update({status:"reset"}).eq("id",load.id);
+        setLoads(prev=>prev.map(l=>l.id===load.id?{...l,status:"reset"}:l));
+      }
+      // Mark request approved
+      await supabase.from("truck_resets").update({status:"approved",reviewed_at:new Date().toISOString()}).eq("id",req.id);
+      setTruckResets(prev=>prev.map(r=>r.id===req.id?{...r,status:"approved",reviewed_at:new Date().toISOString()}:r));
+      const truck=getT(req.truck_id);
+      showToast(`✅ ${truck?.driver||"Truck"} inventory reset — ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to shelf`);
+    }catch(e){showToast("Reset failed: "+e.message,"error");}
+  };
+
+  const rejectReset=async(req)=>{
+    await supabase.from("truck_resets").update({status:"rejected",reviewed_at:new Date().toISOString()}).eq("id",req.id);
+    setTruckResets(prev=>prev.map(r=>r.id===req.id?{...r,status:"rejected",reviewed_at:new Date().toISOString()}:r));
+    const truck=getT(req.truck_id);
+    showToast(`❌ Reset request for ${truck?.driver||"truck"} rejected`);
+  };
+
   const openLoad=tid=>{
     const truck=trucks.find(t=>t.id===tid);
     if(truck?.locked)return showToast("Truck is locked — admin must unlock it first","error");
@@ -2733,7 +2774,7 @@ export default function App(){
     {id:"ar",label:"Accounts Receivable",icon:ic.ar},
     {id:"payments",label:"Payments",icon:ic.settle,badge:visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length||0},
     {id:"settlement",label:"Daily Settlement",icon:ic.settle},
-    ...(isAdmin?[{id:"truckmanagement",label:"Truck Management",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🚚</span>}]:[]),
+    ...(isAdmin?[{id:"truckmanagement",label:"Truck Management",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🚚</span>,badge:truckResets.filter(r=>r.status==="pending").length||0}]:[]),
     ...(isAdmin?[{id:"returnedchecks",label:"Returned Checks",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🔴</span>,badge:payments.filter(p=>p.status==="returned_check").length||0}]:[]),
     ...(isAdmin?[{id:"pl",label:"P&L Report",icon:ic.pl}]:[]),
     ...(isAdmin?[{id:"irs",label:"IRS Reports",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13,marginRight:0}}>🏛</span>}]:[]),
@@ -3983,7 +4024,13 @@ export default function App(){
             };
 
             // -- map init (Leaflet via CDN) ------------------------------------
-            const subTabs=[["overview","📊 Overview"],["drivers","🚚 Drivers"],["assign","👤 Assign Customers"],["map","🗺 Live Map"]];
+            const subTabs=[
+              ["overview","📊 Overview"],
+              ["drivers","🚚 Drivers"],
+              ["assign","👤 Assign Customers"],
+              ["resets",`🔄 Reset Requests${truckResets.filter(r=>r.status==="pending").length?` (${truckResets.filter(r=>r.status==="pending").length})`:""}` ],
+              ["map","🗺 Live Map"],
+            ];
 
             return(<>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
@@ -4044,12 +4091,41 @@ export default function App(){
                             <div key={l}><div style={{fontSize:9,color:"#9ca3af",fontWeight:700}}>{l}</div><div style={{fontWeight:800,fontSize:14,color:c}}>{v}</div></div>
                           ))}
                         </div>
-                        <div style={{display:"flex",gap:6,marginTop:10}}>
+                        <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
                           <button className="btn bb" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>setEditTruck({...t})}>✏️ Edit</button>
                           <button className="btn br" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>deleteTruck(t.id,t.driver)}>Delete</button>
                           {t.locked
                             ?<button className="btn bg" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>unlockTruck(t.id)}>🔓 Unlock</button>
                             :<button className="btn ba" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>lockTruck(t.id)}>🔒 Lock</button>}
+                          {inv.reduce((a,i)=>a+i.remaining,0)>0&&(()=>{
+                            const hasPending=truckResets.some(r=>r.truck_id===t.id&&r.status==="pending");
+                            return hasPending
+                              ?<span style={{fontSize:9,fontWeight:700,padding:"4px 8px",borderRadius:6,background:"#fef9c3",color:"#854d0e",border:"1px solid #fde68a"}}>⏳ Reset Pending</span>
+                              :<button style={{fontSize:10,padding:"4px 10px",border:"1.5px solid #f97316",background:"#fff7ed",color:"#c2410c",borderRadius:6,cursor:"pointer",fontWeight:700,fontFamily:"'Inter',sans-serif"}}
+                                onClick={()=>showConfirm(`Reset ALL inventory on ${t.driver}'s truck to zero?\n\nThis will:\n• Return ${inv.reduce((a,i)=>a+i.remaining,0)} remaining units to warehouse shelf\n• Close the active load\n• Requires your admin approval\n\nThe driver will be notified.`,()=>{
+                                  supabase.from("truck_resets").insert({
+                                    id:"RST-"+uid(),
+                                    truck_id:t.id,
+                                    driver_name:t.driver,
+                                    requested_by:profile?.email||"admin",
+                                    remaining_units:inv.reduce((a,i)=>a+i.remaining,0),
+                                    load_id:activeLoad(t.id)?.id||null,
+                                    status:"pending",
+                                    note:`Reset requested for ${t.driver} (${t.plate})`,
+                                    created_at:new Date().toISOString(),
+                                  }).then(({error})=>{
+                                    if(error)showToast("Failed to submit reset: "+error.message,"error");
+                                    else{
+                                      setTruckResets(prev=>[{id:"RST-"+uid(),truck_id:t.id,driver_name:t.driver,status:"pending",remaining_units:inv.reduce((a,i)=>a+i.remaining,0),created_at:new Date().toISOString()},...prev]);
+                                      showToast("🔄 Reset request submitted — pending approval");
+                                      setTmTab("resets");
+                                    }
+                                  });
+                                })}>
+                                🔄 Reset
+                              </button>;
+                          })()}
+                        </div>
                         </div>
                       </div>
                     );
@@ -4205,6 +4281,97 @@ export default function App(){
                       </table>
                     </div>
                   );
+                })()}
+              </>}
+
+              {/* -- RESET REQUESTS -- */}
+              {tmTab==="resets"&&<>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:18,color:"#c2410c",marginBottom:4}}>🔄 Inventory Reset Requests</div>
+                <div style={{fontSize:12,color:"#9ca3af",marginBottom:16}}>Review and approve driver requests to zero out truck inventory and return stock to warehouse.</div>
+
+                {/* Pending requests */}
+                {(()=>{
+                  const pending=truckResets.filter(r=>r.status==="pending");
+                  const reviewed=truckResets.filter(r=>r.status!=="pending");
+                  return(<>
+                    {pending.length===0&&<div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:12,padding:"32px",textAlign:"center",marginBottom:16}}>
+                      <div style={{fontSize:28,marginBottom:8}}>✅</div>
+                      <div style={{fontWeight:700,color:"#374151",marginBottom:4}}>No pending reset requests</div>
+                      <div style={{fontSize:12,color:"#9ca3af"}}>When a driver requests an inventory reset, it will appear here for your approval.</div>
+                    </div>}
+
+                    {pending.length>0&&<>
+                      <div style={{fontSize:10,fontWeight:800,letterSpacing:".08em",color:"#c2410c",marginBottom:10}}>⏳ PENDING APPROVAL ({pending.length})</div>
+                      {pending.map(req=>{
+                        const truck=getT(req.truck_id);
+                        const inv=truckInv(req.truck_id);
+                        const actualRemaining=inv.reduce((a,i)=>a+i.remaining,0);
+                        return(
+                          <div key={req.id} className="card" style={{padding:20,marginBottom:12,borderLeft:"4px solid #f97316",background:"#fffbf5"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
+                              <div>
+                                <div style={{fontWeight:800,fontSize:15,color:"#0a1628",marginBottom:4}}>
+                                  🚚 {truck?.driver||req.driver_name} — {truck?.plate||""}
+                                </div>
+                                <div style={{fontSize:12,color:"#6b7280",marginBottom:2}}>Requested by: <strong>{req.requested_by||"Driver"}</strong></div>
+                                <div style={{fontSize:12,color:"#6b7280",marginBottom:2}}>Requested at: {new Date(req.created_at).toLocaleString()}</div>
+                                <div style={{fontSize:12,color:"#6b7280",marginBottom:8}}>{req.note||""}</div>
+                                {/* Live inventory at time of review */}
+                                {inv.length>0&&<div style={{background:"#fff",border:"1px solid #fed7aa",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
+                                  <div style={{fontSize:10,fontWeight:800,color:"#c2410c",letterSpacing:".06em",marginBottom:6}}>CURRENT TRUCK INVENTORY</div>
+                                  {inv.map(i=>{const p=getP(i.pid);return(
+                                    <div key={i.pid} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+                                      <span style={{color:"#374151"}}>{p?.name||i.pid}</span>
+                                      <span style={{fontWeight:700,color:i.remaining>0?"#c2410c":"#9ca3af"}}>{i.remaining} remaining (of {i.loaded} loaded)</span>
+                                    </div>
+                                  );})}
+                                  <div style={{borderTop:"1px solid #fed7aa",marginTop:8,paddingTop:8,display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:13}}>
+                                    <span>Total to return to shelf</span>
+                                    <span style={{color:"#c2410c"}}>{actualRemaining} units</span>
+                                  </div>
+                                </div>}
+                              </div>
+                              <div style={{display:"flex",flexDirection:"column",gap:8,minWidth:140}}>
+                                <button onClick={()=>showConfirm(`Approve reset for ${truck?.driver||req.driver_name}?\n\n${actualRemaining} units will be returned to the warehouse shelf and the active load will be closed.`,()=>approveReset(req))}
+                                  style={{background:"#059669",color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                                  ✅ Approve Reset
+                                </button>
+                                <button onClick={()=>showConfirm(`Reject reset request for ${truck?.driver||req.driver_name}? The truck inventory will remain unchanged.`,()=>rejectReset(req))}
+                                  style={{background:"#fff",color:"#dc2626",border:"1.5px solid #fecaca",borderRadius:8,padding:"10px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                                  ❌ Reject
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>}
+
+                    {/* History */}
+                    {reviewed.length>0&&<>
+                      <div style={{fontSize:10,fontWeight:800,letterSpacing:".08em",color:"#9ca3af",marginBottom:10,marginTop:20}}>HISTORY</div>
+                      <div className="card" style={{overflow:"hidden"}}>
+                        <table>
+                          <thead><tr>{["Driver","Requested","Units","Status","Reviewed"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {reviewed.map(req=>(
+                              <tr key={req.id}>
+                                <td style={{fontWeight:600}}>{req.driver_name||getT(req.truck_id)?.driver||"—"}</td>
+                                <td style={{fontSize:11,color:"#6b7280"}}>{new Date(req.created_at).toLocaleDateString()}</td>
+                                <td style={{fontWeight:700}}>{req.remaining_units||"—"}</td>
+                                <td><span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,
+                                  background:req.status==="approved"?"#dcfce7":"#fef2f2",
+                                  color:req.status==="approved"?"#065f46":"#dc2626"}}>
+                                  {req.status==="approved"?"✅ Approved":"❌ Rejected"}
+                                </span></td>
+                                <td style={{fontSize:11,color:"#6b7280"}}>{req.reviewed_at?new Date(req.reviewed_at).toLocaleDateString():"—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>}
+                  </>);
                 })()}
               </>}
 

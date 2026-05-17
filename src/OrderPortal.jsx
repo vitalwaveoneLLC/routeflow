@@ -2305,7 +2305,58 @@ export default function OrderPortal() {
                   );
                 })()}
 
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
+                {driverData.activeLoad&&(()=>{
+                  const loadedItems=driverData.activeLoad.items||[];
+                  const allLdIds=driverData.activeLoad._allLoadIds||[driverData.activeLoad.id];
+                  const soldMap=driverData.sales
+                    .filter(s=>allLdIds.includes(s.load_id))
+                    .reduce((acc,s)=>{(s.items||[]).forEach(i=>{acc[i.pid]=(acc[i.pid]||0)+i.qty;});return acc;},{});
+                  const totalRemaining=loadedItems.reduce((a,i)=>a+Math.max(0,i.qty-(soldMap[i.pid]||0)),0);
+                  if(totalRemaining===0) return null;
+                  // Check if already has a pending reset
+                  const hasPendingReset=driverData.resetStatus==="pending";
+                  return(
+                    <div style={{marginBottom:14}}>
+                      {hasPendingReset
+                        ?<div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:10,padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
+                          <span style={{fontSize:22}}>⏳</span>
+                          <div>
+                            <div style={{fontWeight:700,fontSize:13,color:"#854d0e"}}>Reset Request Pending</div>
+                            <div style={{fontSize:12,color:"#92400e"}}>Your request to reset truck inventory is waiting for admin approval.</div>
+                          </div>
+                        </div>
+                        :<div style={{background:"#fff7ed",border:"1.5px solid #fed7aa",borderRadius:10,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+                          <div>
+                            <div style={{fontWeight:700,fontSize:13,color:"#c2410c"}}>🔄 Need to reset truck inventory?</div>
+                            <div style={{fontSize:12,color:"#9a3412",marginTop:2}}>{totalRemaining} units still on truck · admin approval required</div>
+                          </div>
+                          <button onClick={()=>{
+                            if(!window.confirm(`Request inventory reset?\n\nThis will send a request to your admin to:\n• Return ${totalRemaining} remaining units to warehouse\n• Close your current load\n\nYou cannot undo this request.`)) return;
+                            supabase.from("truck_resets").insert({
+                              id:"RST-"+Math.random().toString(36).slice(2,8).toUpperCase(),
+                              truck_id:driverData.truck?.id,
+                              driver_name:driverData.truck?.driver,
+                              requested_by:driverData.profile?.email||"driver",
+                              remaining_units:totalRemaining,
+                              load_id:driverData.activeLoad?.id||null,
+                              status:"pending",
+                              note:`Driver requested reset — ${totalRemaining} units remaining`,
+                              created_at:new Date().toISOString(),
+                            }).then(({error})=>{
+                              if(error) setMsg({t:"error",m:"Failed: "+error.message});
+                              else{
+                                setDriverData(prev=>({...prev,resetStatus:"pending"}));
+                                setMsg({t:"success",m:"✅ Reset request sent to admin — awaiting approval"});
+                              }
+                            });
+                          }}
+                            style={{background:"#c2410c",color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
+                            🔄 Request Reset
+                          </button>
+                        </div>}
+                    </div>
+                  );
+                })()}
                   {[
                     {l:"Customers",v:driverData.customers.length,e:"⛽",c:"#0ea5e9"},
                     {l:"Today's Sales",v:driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).length,e:"📄",c:"#7c3aed"},
