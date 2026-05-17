@@ -1921,7 +1921,7 @@ export default function App(){
   const getEffectivePrice=(custId,pid)=>{const cust=getC(custId);const cp=parseCustomPrices(cust);const custom=cp[pid];return(custom&&parseFloat(custom)>0)?parseFloat(custom):(getP(pid)?.price||0);};
   const saveCustomPrices=async(custId,newPrices)=>{
     const cust=getC(custId);if(!cust)return;
-    const baseNotes=(cust.notes||"").replace(/CUSTOM_PRICES:{.*?}/g,"").trim();
+    const baseNotes=(cust.notes||"").replace(/CUSTOM_PRICES:\{[^{}]*\}/g,"").trim();
     const hasAny=Object.values(newPrices).some(v=>v&&parseFloat(v)>0);
     const filtered=Object.fromEntries(Object.entries(newPrices).filter(([,v])=>v&&parseFloat(v)>0).map(([k,v])=>[k,parseFloat(v)]));
     const newNotes=hasAny?(baseNotes+(baseNotes?"
@@ -3545,7 +3545,7 @@ export default function App(){
                 </div>
                 <div><label>Assigned Driver</label><select value={editCust.truck_id||""} onChange={e=>setEditCust(x=>({...x,truck_id:e.target.value}))}><option value="">— Unassigned —</option>{trucks.map(t=><option key={t.id} value={t.id}>{t.driver} ({t.route||t.plate})</option>)}</select></div>
                 <div><label>Notes</label><input 
-                  value={(editCust.notes||"").replace(/CUSTOM_PRICES:{.*?}/g,"").trim()}
+                  value={(editCust.notes||"").replace(/CUSTOM_PRICES:\{[^{}]*\}/g,"").trim()}
                   onChange={e=>{
                     const cleanNote=e.target.value;
                     const cp=parseCustomPrices(editCust);
@@ -3599,7 +3599,7 @@ export default function App(){
                                   const newCp={...parseCustomPrices(editCust)};
                                   if(val&&parseFloat(val)>0)newCp[p.id]=parseFloat(val);
                                   else delete newCp[p.id];
-                                  const baseNotes=(editCust.notes||"").replace(/CUSTOM_PRICES:{.*?}/g,"").trim();
+                                  const baseNotes=(editCust.notes||"").replace(/CUSTOM_PRICES:\{[^{}]*\}/g,"").trim();
                                   const hasAny=Object.keys(newCp).length>0;
                                   const newNotes=hasAny?(baseNotes+(baseNotes?"
 ":"")+"CUSTOM_PRICES:"+JSON.stringify(newCp)):baseNotes;
@@ -3642,7 +3642,7 @@ export default function App(){
                           {c.address&&<div style={{fontSize:10,color:"#6b7280",marginTop:2,lineHeight:1.5}}>{c.address}</div>}
                           {c.phone&&<div style={{fontSize:10,color:"#6b7280",display:"flex",alignItems:"center",gap:4}}>📞 {c.phone}</div>}
                           {c.email&&<div style={{fontSize:10,color:"#6b7280",display:"flex",alignItems:"center",gap:4}}>✉️ {c.email}</div>}
-                          {(()=>{const visNotes=(c.notes||"").replace(/CUSTOM_PRICES:{.*?}/g,"").trim();return visNotes?<div style={{fontSize:10,color:"#6b7280",fontStyle:"italic",marginTop:2}}>📝 {visNotes}</div>:null;})()}
+                          {(()=>{const visNotes=(c.notes||"").replace(/CUSTOM_PRICES:\{[^{}]*\}/g,"").trim();return visNotes?<div style={{fontSize:10,color:"#6b7280",fontStyle:"italic",marginTop:2}}>📝 {visNotes}</div>:null;})()}
                         </div>
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}}>
@@ -3738,7 +3738,7 @@ export default function App(){
                         if(Object.keys(cp).length>0){
                           const cust=customers.find(c=>c.id===cid);
                           if(cust){
-                            const baseNotes=(cust.notes||"").replace(/CUSTOM_PRICES:{.*?}/g,"").trim();
+                            const baseNotes=(cust.notes||"").replace(/CUSTOM_PRICES:\{[^{}]*\}/g,"").trim();
                             const newNotes=baseNotes+(baseNotes?"\n":"")+"CUSTOM_PRICES:"+JSON.stringify(cp);
                             await supabase.from("customers").update({notes:newNotes}).eq("id",cid);
                             setCustomers(prev=>prev.map(c=>c.id===cid?{...c,notes:newNotes}:c));

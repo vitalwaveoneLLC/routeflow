@@ -1996,7 +1996,7 @@ export default function OrderPortal() {
             <div className="card" style={{padding:"16px 18px",marginBottom:12}}>
               <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",letterSpacing:".1em",marginBottom:10}}>ORDERING FOR</div>
               <div style={{fontWeight:700,fontSize:15,color:"#111"}}>{selCust?.name}</div>
-              {selCust?.notes&&<div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{selCust.notes}</div>}
+              {(()=>{const vn=(selCust?.notes||"").replace(/CUSTOM_PRICES:[^}]*}/g,"").trim();return vn?<div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{vn}</div>:null;})()}
               {selCust?.address&&<div style={{fontSize:12,color:"#6b7280",marginTop:2}}>📍 {selCust.address}</div>}
               {selCust?.phone&&<div style={{fontSize:12,color:"#6b7280"}}>📞 {selCust.phone}</div>}
               {selCust?.email&&<div style={{fontSize:12,color:"#6b7280"}}>✉️ {selCust.email}</div>}
