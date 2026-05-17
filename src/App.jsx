@@ -1779,7 +1779,7 @@ export default function App(){
         if(driverPins.length>0){
           map.fitBounds(driverPins.map(p=>[p.lat,p.lng]),{padding:[40,40],maxZoom:12});
         }
-      },100); // 100ms defer — enough for React to finish painting
+      },100); // 100ms defer - enough for React to finish painting
     };
 
     // Load Leaflet JS if needed, then init
@@ -2381,7 +2381,7 @@ export default function App(){
       const oldMap={};(amendSale.items||[]).forEach(i=>{oldMap[i.pid]=i.qty;});
       const stockErr=newItems.find(i=>{
         const increase=i.qty-(oldMap[i.pid]||0);
-        if(increase<=0)return false; // reducing qty — always ok
+        if(increase<=0)return false; // reducing qty - always ok
         const prod=getP(i.pid);
         return !prod||increase>prod.shelf; // need more than what's on shelf
       });
