@@ -1592,7 +1592,16 @@ export default function App(){
   const[expenses,setExpenses]=useState([]);
   const[paymentsLog,setPaymentsLog]=useState([]);
   const[walkinRegs,setWalkinRegs]=useState([]);
-  const[driverProfiles,setDriverProfiles]=useState([]); // drivers with lat/lng/last_seen
+  const[driverProfiles,setDriverProfiles]=useState([]);
+  // Truck Management tab state
+  const[tmTab,setTmTab]=useState("overview");
+  const[driverForm,setDriverForm]=useState({driver:"",plate:"",route:"",email:""});
+  const[driverSaving,setDriverSaving]=useState(false);
+  const[editTruck,setEditTruck]=useState(null);
+  const[assignCid,setAssignCid]=useState("");
+  const[assignTid,setAssignTid]=useState("");
+  const mapRef=useRef(null);
+  const mapInst=useRef(null);
   const[loading,setLoading]=useState(true);
 
   // UI
@@ -1665,6 +1674,54 @@ export default function App(){
   useEffect(()=>{if(authReady&&session&&profile)loadAll();},[authReady,session,profile]);
   useEffect(()=>{if(co?.check_penalty!=null)setPenaltyEdit(String(co.check_penalty));},[co?.check_penalty]);
 
+  // ── LEAFLET MAP — fires when truck management map tab is active ────────────
+  useEffect(()=>{
+    if(tab!=="truckmanagement"||tmTab!=="map") return;
+    if(!document.getElementById("leaflet-css")){
+      const link=document.createElement("link");
+      link.id="leaflet-css";link.rel="stylesheet";
+      link.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
+    const initMap=()=>{
+      if(!mapRef.current||mapInst.current) return;
+      const L=window.L;
+      const map=L.map(mapRef.current,{zoomControl:true}).setView([32.7,-97.3],9);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+        attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',maxZoom:19,
+      }).addTo(map);
+      mapInst.current=map;
+      // Customer pins — geocoded via Nominatim (free)
+      customers.forEach((c,i)=>{
+        if(!c.address) return;
+        const truck=trucks.find(t=>t.id===c.truck_id);
+        const icon=L.divIcon({className:"",html:`<div style="background:#0a1628;color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;border:2px solid #fff;box-shadow:0 2px 6px #0003">${i+1}</div>`,iconSize:[24,24],iconAnchor:[12,12]});
+        fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(c.address)}&limit=1`,{headers:{"Accept-Language":"en"}})
+          .then(r=>r.json()).then(data=>{
+            if(!data[0]) return;
+            const{lat,lon}=data[0];
+            L.marker([parseFloat(lat),parseFloat(lon)],{icon}).addTo(map)
+              .bindPopup(`<b>${c.name}</b><br/>📍 ${c.address}<br/>🚚 ${truck?.driver||"Unassigned"}<br/>📞 ${c.phone||"—"}<br/><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" style="color:#0ea5e9">Open in Maps →</a>`);
+          }).catch(()=>{});
+      });
+      // Driver location pins
+      driverProfiles.filter(p=>p.lat&&p.lng).forEach(p=>{
+        const truck=trucks.find(t=>t.id===p.truck_id);
+        const driverIcon=L.divIcon({className:"",html:`<div style="background:#0ea5e9;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid #fff;box-shadow:0 2px 8px #0003">🚚</div>`,iconSize:[28,28],iconAnchor:[14,14]});
+        L.marker([p.lat,p.lng],{icon:driverIcon}).addTo(map)
+          .bindPopup(`<b>🚚 ${trucks.find(t=>t.id===p.truck_id)?.driver||"Driver"}</b><br/>Last seen: ${p.last_seen?new Date(p.last_seen).toLocaleTimeString():"Unknown"}<br/>Route: ${truck?.route||"—"}`);
+      });
+    };
+    if(window.L){initMap();}
+    else{
+      const script=document.createElement("script");
+      script.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      script.onload=initMap;
+      document.head.appendChild(script);
+    }
+    return()=>{if(mapInst.current){mapInst.current.remove();mapInst.current=null;}};
+  },[tab,tmTab,customers,driverProfiles,trucks]);
+
   const loadAll=useCallback(async()=>{
     setLoading(true);
     try{
@@ -1694,9 +1751,15 @@ export default function App(){
       if(stR.data)setStateTaxes(stR.data);
       if(exR.data)setExpenses(exR.data);
       if(wiR.data)setWalkinRegs(wiR.data);
-      // Load driver profiles with location data
-      const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id,lat,lng,last_seen,email").eq("role","driver");
-      if(dpData)setDriverProfiles(dpData);
+      // Load driver profiles — graceful fallback if lat/lng/last_seen don't exist yet
+      try{
+        const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id,lat,lng,last_seen").eq("role","driver");
+        if(dpData)setDriverProfiles(dpData);
+      }catch{
+        // Columns may not exist yet — load without location fields
+        const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id").eq("role","driver");
+        if(dpData)setDriverProfiles(dpData.map(p=>({...p,lat:null,lng:null,last_seen:null})));
+      }
       // Also reload paymentsLog
       const pmLR = await supabase.from("payments_log").select("*").order("created_at",{ascending:false});
       if(pmLR.data)setPaymentsLog(pmLR.data);
@@ -3673,15 +3736,6 @@ export default function App(){
             };
 
             // ── sub-tab ───────────────────────────────────────────────────────
-            const [tmTab, setTmTab] = React.useState("overview");
-            // New driver form
-            const [driverForm, setDriverForm] = React.useState({driver:"",plate:"",route:"",email:""});
-            const [driverSaving, setDriverSaving] = React.useState(false);
-            // Edit truck
-            const [editTruck, setEditTruck] = React.useState(null);
-            // Assign customer
-            const [assignCid, setAssignCid] = React.useState("");
-            const [assignTid, setAssignTid] = React.useState("");
 
             const addDriver = async () => {
               if(!driverForm.driver.trim()||!driverForm.plate.trim()) return showToast("Driver name and plate required","error");
@@ -3722,82 +3776,6 @@ export default function App(){
             };
 
             // ── map init (Leaflet via CDN) ────────────────────────────────────
-            const mapRef = React.useRef(null);
-            const mapInst = React.useRef(null);
-            React.useEffect(()=>{
-              if(tmTab!=="map") return;
-              // Load Leaflet CSS + JS from CDN
-              if(!document.getElementById("leaflet-css")){
-                const link=document.createElement("link");
-                link.id="leaflet-css"; link.rel="stylesheet";
-                link.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-                document.head.appendChild(link);
-              }
-              const initMap=()=>{
-                if(!mapRef.current||mapInst.current) return;
-                const L=window.L;
-                const map=L.map(mapRef.current,{zoomControl:true}).setView([32.7,-97.3],9);
-                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
-                  attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-                  maxZoom:19,
-                }).addTo(map);
-                mapInst.current=map;
-
-                // Customer pins
-                customers.forEach((c,i)=>{
-                  if(!c.address) return;
-                  // Use nominatim geocode lazily for demo — or just show a list
-                  // For now: show numbered markers using geocoding
-                  const icon=L.divIcon({
-                    className:"",
-                    html:`<div style="background:#0a1628;color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;border:2px solid #fff;box-shadow:0 2px 6px #0003">${i+1}</div>`,
-                    iconSize:[24,24],iconAnchor:[12,12]
-                  });
-                  const truck=trucks.find(t=>t.id===c.truck_id);
-                  L.marker([0,0],{icon}).bindPopup(`
-                    <b>${c.name}</b><br/>
-                    📍 ${c.address||"No address"}<br/>
-                    🚚 ${truck?.driver||"Unassigned"}<br/>
-                    📞 ${c.phone||"—"}<br/>
-                    <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" style="color:#0ea5e9">Open in Maps →</a>
-                  `);
-                  // Geocode address via Nominatim (free, no key)
-                  fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(c.address)}&limit=1`,{headers:{"Accept-Language":"en"}})
-                    .then(r=>r.json()).then(data=>{
-                      if(data[0]) {
-                        const {lat,lon}=data[0];
-                        L.marker([parseFloat(lat),parseFloat(lon)],{icon})
-                          .addTo(map)
-                          .bindPopup(`<b>${c.name}</b><br/>📍 ${c.address}<br/>🚚 ${truck?.driver||"Unassigned"}<br/>📞 ${c.phone||"—"}<br/><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" style="color:#0ea5e9">Open in Maps →</a>`);
-                      }
-                    }).catch(()=>{});
-                });
-
-                // Driver location pins from profiles last_seen lat/lng
-                driverProfiles.filter(p=>p.lat&&p.lng).forEach(p=>{
-                  const truck=trucks.find(t=>t.id===p.truck_id);
-                  const driverIcon=L.divIcon({
-                    className:"",
-                    html:`<div style="background:#0ea5e9;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid #fff;box-shadow:0 2px 8px #0003">🚚</div>`,
-                    iconSize:[28,28],iconAnchor:[14,14]
-                  });
-                  const lastSeen=p.last_seen?new Date(p.last_seen).toLocaleTimeString():"Unknown";
-                  L.marker([p.lat,p.lng],{icon:driverIcon})
-                    .addTo(map)
-                    .bindPopup(`<b>🚚 ${truck?.driver||p.email||"Driver"}</b><br/>Last seen: ${lastSeen}<br/>Route: ${truck?.route||"—"}`);
-                });
-              };
-
-              if(window.L) { initMap(); }
-              else {
-                const script=document.createElement("script");
-                script.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-                script.onload=initMap;
-                document.head.appendChild(script);
-              }
-              return()=>{ if(mapInst.current){mapInst.current.remove();mapInst.current=null;} };
-            },[tmTab]);
-
             const subTabs=[["overview","📊 Overview"],["drivers","🚚 Drivers"],["assign","👤 Assign Customers"],["map","🗺 Live Map"]];
 
             return(<>
