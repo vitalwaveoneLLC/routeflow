@@ -1597,7 +1597,6 @@ export default function App(){
   const[tmTab,setTmTab]=useState("overview");
   const[driverForm,setDriverForm]=useState({driver:"",plate:"",route:"",email:""});
   const[driverSaving,setDriverSaving]=useState(false);
-  const[editTruck,setEditTruck]=useState(null);
   const[assignCid,setAssignCid]=useState("");
   const[assignTid,setAssignTid]=useState("");
   const mapRef=useRef(null);
