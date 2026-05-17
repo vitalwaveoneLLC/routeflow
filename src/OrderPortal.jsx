@@ -21,6 +21,8 @@ const GS = () => (
       input,select,textarea{font-family:'Inter',sans-serif;transition:all .15s;}
       input:focus,select:focus,textarea:focus{outline:none;}
       @keyframes fu{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}
+      @keyframes pu{0%,100%{opacity:1;}50%{opacity:.4;}}
+      .pu{animation:pu 1.5s infinite;}
       .fu{animation:fu .28s ease forwards;}
       @keyframes spin{to{transform:rotate(360deg);}}
       .sp{animation:spin .7s linear infinite;display:inline-block;}
@@ -746,6 +748,16 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           </button>
         </div>}
         {/* Unpaid balance warning */}
+        {/* Returned check warning */}
+        {selCustObj&&(selCustObj.notes||"").includes("RETURNED_CHECK:1")&&<div style={{marginTop:8,background:"#1a0505",border:"2px solid #dc2626",borderRadius:10,padding:"12px 14px",animation:"pu 1.5s infinite"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:24,flexShrink:0}}>🚨</span>
+            <div>
+              <div style={{fontFamily:"'Inter',sans-serif",fontWeight:800,fontSize:14,color:"#dc2626",marginBottom:3}}>RETURNED CHECK ON FILE</div>
+              <div style={{fontSize:12,color:"#f87171",lineHeight:1.6}}>This customer has a returned check. <strong style={{color:"#fbbf24"}}>DO NOT accept a check.</strong><br/>A <strong style={{color:"#fbbf24"}}>$50 penalty fee</strong> applies on next check. Accept cash, Zelle, or card only.</div>
+            </div>
+          </div>
+        </div>}
         {custUnpaidBalance>0&&<div style={{marginTop:8,background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px"}}>
           <div style={{fontWeight:700,fontSize:12,color:"#854d0e",marginBottom:4}}>⚠️ Outstanding Balance</div>
           {custUnpaidInvs.map(s=>(
