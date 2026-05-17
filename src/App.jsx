@@ -719,6 +719,8 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
   const [wiReceiptUrl,setWiReceiptUrl]=useState("");
 
   const wiCustObj=customers.find(c=>c.id===wiCust);
+  const wiHasReturnedCheck=wiCustObj&&(wiCustObj.notes||"").includes("RETURNED_CHECK:1");
+  const RETURNED_CHECK_FEE=50;
   const cats=["All",...new Set(products.map(p=>p.cat).filter(Boolean))];
   const filtered=products.filter(p=>{
     if(p.shelf<=0) return false;
@@ -814,6 +816,15 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
           {wiCustObj&&<div style={{marginTop:6,fontSize:11,color:"#6b7280"}}>
             State: <strong>{wiCustObj.state||"Not set"}</strong> · 
             Tax: <strong style={{color:taxRate2>0?"#7c3aed":"#9ca3af"}}>{taxRate2>0?`${taxRate2}% tobacco`:"exempt/none"}</strong>
+          </div>}
+          {wiHasReturnedCheck&&<div style={{marginTop:8,background:"#1a0505",border:"2px solid #dc2626",borderRadius:10,padding:"12px 16px",animation:"pu 1.5s infinite"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:22}}>🚨</span>
+              <div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#dc2626"}}>RETURNED CHECK ON FILE</div>
+                <div style={{fontSize:11,color:"#f87171",marginTop:2}}><strong style={{color:"#fbbf24"}}>${RETURNED_CHECK_FEE} penalty fee</strong> applies if another check is accepted. Use cash, Zelle, or card only.</div>
+              </div>
+            </div>
           </div>}
           {wiPrevBal>0&&<div style={{marginTop:8,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px"}}>
             <div style={{fontWeight:700,fontSize:11,color:"#dc2626",marginBottom:4}}>⚠️ Outstanding Balance</div>
@@ -1832,6 +1843,8 @@ export default function App(){
   const[viewTruck,setViewTruck]=useState(null);
   const[stripeModal,setStripeModal]=useState(null);
   const[scanning,setScanning]=useState(false);
+  const[rcModal,setRcModal]=useState(null); // {saleId, custId} for returned check upload
+  const[rcUploading,setRcUploading]=useState(false);
   const[scanInput,setScanInput]=useState("");
   const[scanMsg,setScanMsg]=useState(null);
 
@@ -1918,6 +1931,50 @@ export default function App(){
 
   // ── CUSTOM PRICING ─────────────────────────────────────────────────────────────────────────────
   const parseCustomPrices=cust=>{try{const m=(cust?.notes||"").match(/CUSTOM_PRICES:({.*?})/);return m?JSON.parse(m[1]):{};}catch{return{};}};
+  const hasReturnedCheck=cust=>!!(cust?.notes||"").includes("RETURNED_CHECK:1");
+  const RETURNED_CHECK_FEE=50;
+  const markCheckReturned=async(custId)=>{
+    const cust=getC(custId);if(!cust)return;
+    if((cust.notes||"").includes("RETURNED_CHECK:1"))return; // already flagged, skip silently
+    const newNotes=(cust.notes||"").trim()+"\nRETURNED_CHECK:1";
+    await supabase.from("customers").update({notes:newNotes}).eq("id",custId);
+    setCustomers(prev=>prev.map(c=>c.id===custId?{...c,notes:newNotes}:c));
+    showToast("⚠️ Customer flagged — returned check recorded");
+  };
+  const clearReturnedCheck=async(custId)=>{
+    const cust=getC(custId);if(!cust)return;
+    const newNotes=(cust.notes||"").replace(/
+RETURNED_CHECK:1/g,"").replace(/RETURNED_CHECK:1
+?/g,"").trim();
+    await supabase.from("customers").update({notes:newNotes}).eq("id",custId);
+    setCustomers(prev=>prev.map(c=>c.id===custId?{...c,notes:newNotes}:c));
+    showToast("✅ Returned check flag cleared");
+  };
+
+  const uploadReturnedCheck=async(file,saleId,custId)=>{
+    if(!file)return showToast("No file selected","error");
+    setRcUploading(true);
+    try{
+      const ext=file.name.split(".").pop();
+      const path=`returned-checks/RC-${saleId}-${uid()}.${ext}`;
+      const{error:upErr}=await supabase.storage.from("receipts").upload(path,file,{upsert:true});
+      if(upErr)throw upErr;
+      const rcUrl=supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
+      // Update payment record: set returned_check_url and status to "returned_check"
+      const ex=pmtFor(saleId);
+      if(ex){
+        await supabase.from("payments").update({returned_check_url:rcUrl,status:"returned_check"}).eq("sale_id",saleId);
+      } else {
+        await supabase.from("payments").insert({sale_id:saleId,status:"returned_check",returned_check_url:rcUrl});
+      }
+      setPayments(prev=>prev.map(p=>p.sale_id===saleId?{...p,status:"returned_check",returned_check_url:rcUrl}:p));
+      // Auto-flag the customer
+      await markCheckReturned(custId);
+      setRcModal(null);
+      showToast("🔴 Returned check uploaded — customer flagged");
+    }catch(e){showToast(e.message,"error");}
+    setRcUploading(false);
+  };
   const getEffectivePrice=(custId,pid)=>{const cust=getC(custId);const cp=parseCustomPrices(cust);const custom=cp[pid];return(custom&&parseFloat(custom)>0)?parseFloat(custom):(getP(pid)?.price||0);};
   const saveCustomPrices=async(custId,newPrices)=>{
     const cust=getC(custId);if(!cust)return;
@@ -2985,10 +3042,39 @@ export default function App(){
               <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>INVOICES — {visSales.length} TOTAL</div>
               {visSales.length===0?<Empty icon="📄" msg="NO INVOICES YET"/>:(
                 <div className="tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Driver</th><th>Subtotal</th><th>Tax</th><th>Grand Total</th><th>Profit</th><th>Status</th><th>Actions</th></tr></thead>
-                <tbody>{visSales.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id);return(
-                  <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver||"Walk-in"}</td><td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} prev</span>}</td><td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td><td><span className="bdg bb2">{fmt(gt)}</span></td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(s.profit)}</td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
-                  <td><div style={{display:"flex",gap:5}}><button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt} Invoice</button>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}{isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}</div></td>
-                </tr>);})}
+                <tbody>{visSales.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id);
+                  const isReturnedCheck=pmt?.status==="returned_check";
+                  const isPaid=pmt?.status==="paid";
+                  return(
+                  <tr key={s.id} style={{background:isReturnedCheck?"#fff5f5":""}}>
+                    <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td>
+                    <td style={{color:"#6b7280",fontSize:11}}>{s.date}</td>
+                    <td style={{color:"#212121",fontWeight:isReturnedCheck?700:400}}>
+                      {getC(s.cust_id)?.name}
+                      {isReturnedCheck&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}
+                    </td>
+                    <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver||"Walk-in"}</td>
+                    <td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} prev</span>}</td>
+                    <td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td>
+                    <td><span className="bdg bb2">{fmt(gt)}</span></td>
+                    <td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(s.profit)}</td>
+                    <td>
+                      {isReturnedCheck
+                        ?<span className="bdg br2" style={{animation:"pu 1.5s infinite"}}>🔴 RETURNED CHECK</span>
+                        :isPaid
+                          ?<span className="bdg bg2">✅ PAID</span>
+                          :<span className="bdg ba2">⏳ UNPAID</span>
+                      }
+                    </td>
+                    <td><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                      <button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt} Invoice</button>
+                      {isAdmin&&pmt?.returned_check_url&&<button onClick={()=>window.open(pmt.returned_check_url,"_blank")} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>📄 Check</button>}
+                      {isAdmin&&!isReturnedCheck&&pmt?.method==="check"&&<button onClick={()=>setRcModal({saleId:s.id,custId:s.cust_id})} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",whiteSpace:"nowrap"}}>🔴 Returned?</button>}
+                      {!isPaid&&!isReturnedCheck&&<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>}
+                      {isPaid&&<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}
+                      {isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}
+                    </div></td>
+                  </tr>);})}
                 </tbody></table></div>
               )}
             </div>
@@ -3275,7 +3361,7 @@ export default function App(){
               </div>
               {paymentsLog.length===0?<Empty icon="💳" msg="NO PAYMENTS RECORDED YET"/>:(
                 <div className="tw"><table>
-                  <thead><tr><th>ID</th><th>Date</th><th>Customer</th><th>Driver</th><th>Method</th><th>Amount</th><th>Ref #</th><th>Invoices</th><th>Note</th></tr></thead>
+                  <thead><tr><th>ID</th><th>Date</th><th>Customer</th><th>Driver</th><th>Method</th><th>Amount</th><th>Ref #</th><th>Invoices</th><th>Note</th><th></th></tr></thead>
                   <tbody>{paymentsLog.map(p=>(
                     <tr key={p.id}>
                       <td><span className="tag" style={{background:"#f0fdf4",color:"#065f46"}}>{p.id}</span></td>
@@ -3291,6 +3377,11 @@ export default function App(){
                       <td style={{fontFamily:"monospace",fontSize:11,color:"#6b7280"}}>{p.check_number||"—"}{p.bank_name&&<div style={{fontSize:9,color:"#9ca3af"}}>{p.bank_name}</div>}</td>
                       <td style={{fontSize:11,color:"#7c3aed"}}>{(p.invoice_ids||[]).join(", ")||"—"}</td>
                       <td style={{fontSize:11,color:"#6b7280",fontStyle:p.note?"normal":"italic"}}>{p.note||"—"}</td>
+                      <td>{p.method==="check"&&isAdmin&&(()=>{const cust=getC(p.cust_id);const flagged=hasReturnedCheck(cust);return flagged?(
+                        <button onClick={()=>clearReturnedCheck(p.cust_id)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",color:"#065f46",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow',sans-serif",whiteSpace:"nowrap"}}>✅ Clear Flag</button>
+                      ):(
+                        <button onClick={()=>markCheckReturned(p.cust_id)} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow',sans-serif",whiteSpace:"nowrap"}}>🔴 Returned</button>
+                      );})()}</td>
                     </tr>
                   ))}</tbody>
                 </table></div>
@@ -3544,7 +3635,7 @@ export default function App(){
                 </div>
                 <div><label>Assigned Driver</label><select value={editCust.truck_id||""} onChange={e=>setEditCust(x=>({...x,truck_id:e.target.value}))}><option value="">— Unassigned —</option>{trucks.map(t=><option key={t.id} value={t.id}>{t.driver} ({t.route||t.plate})</option>)}</select></div>
                 <div><label>Notes</label><input 
-                  value={(editCust.notes||"").replace(/CUSTOM_PRICES:\{[^{}]*\}/g,"").trim()}
+                  value={(editCust.notes||"").replace(/CUSTOM_PRICES:[^}]*}/g,"").replace(/\nRETURNED_CHECK:1/g,"").replace(/RETURNED_CHECK:1\n?/g,"").trim()}
                   onChange={e=>{
                     const cleanNote=e.target.value;
                     const cp=parseCustomPrices(editCust);
@@ -3617,9 +3708,14 @@ export default function App(){
                   </div>
                 </div>
               </div>
-              <div style={{display:"flex",gap:8,marginTop:14}}>
+              <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap",alignItems:"center"}}>
                 <button className="btn bg" onClick={saveEditCustomer} disabled={saving}>{ic.save} Save Changes</button>
                 <button className="btn bgh" onClick={cancelEditCustomer}>{ic.X} Cancel</button>
+                {hasReturnedCheck(editCust)?(
+                  <button className="btn bg" style={{marginLeft:"auto"}} onClick={()=>clearReturnedCheck(editCust.id)}>✅ Clear Returned Check Flag</button>
+                ):(
+                  <button className="btn br" style={{marginLeft:"auto"}} onClick={()=>markCheckReturned(editCust.id)}>🔴 Flag Returned Check</button>
+                )}
               </div>
             </div>}
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
@@ -3639,11 +3735,12 @@ export default function App(){
                           {c.address&&<div style={{fontSize:10,color:"#6b7280",marginTop:2,lineHeight:1.5}}>{c.address}</div>}
                           {c.phone&&<div style={{fontSize:10,color:"#6b7280",display:"flex",alignItems:"center",gap:4}}>📞 {c.phone}</div>}
                           {c.email&&<div style={{fontSize:10,color:"#6b7280",display:"flex",alignItems:"center",gap:4}}>✉️ {c.email}</div>}
-                          {(()=>{const visNotes=(c.notes||"").replace(/CUSTOM_PRICES:\{[^{}]*\}/g,"").trim();return visNotes?<div style={{fontSize:10,color:"#6b7280",fontStyle:"italic",marginTop:2}}>📝 {visNotes}</div>:null;})()}
+                          {(()=>{const visNotes=(c.notes||"").replace(/CUSTOM_PRICES:[^}]*}/g,"").replace(/\nRETURNED_CHECK:1/g,"").replace(/RETURNED_CHECK:1\n?/g,"").trim();return visNotes?<div style={{fontSize:10,color:"#6b7280",fontStyle:"italic",marginTop:2}}>📝 {visNotes}</div>:null;})()}
                         </div>
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}}>
                         {truck&&<span className="bdg bb2">{truck.route||truck.plate}</span>}
+                        {hasReturnedCheck(c)&&<span className="bdg br2" style={{background:"#fef2f2",color:"#dc2626",border:"1px solid #fecaca",animation:"pu 2s infinite"}}>🚨 Returned Check</span>}
                         {Object.keys(parseCustomPrices(c)).length>0&&<span className="bdg bb2" style={{background:"#ede9fe",color:"#7c3aed",border:"1px solid #ddd6fe"}}>💲 Custom Prices</span>}
                         <button className="btn bgh" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>isEditingThis?cancelEditCustomer():startEditCustomer(c)}>{isEditingThis?<>{ic.X} Cancel</>:<>{ic.edit} Edit</>}</button>
                         {isAdmin&&!isEditingThis&&<button className="btn br" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>deleteCustomer(c.id,c.name)}>{ic.X}</button>}
@@ -4018,7 +4115,19 @@ export default function App(){
       {modal==="sale"&&<Modal title={`💳 Record Sale — ${getT(selTruck)?.driver}`} onClose={()=>{setModal(null);setScanning(false);setScanInput("");setScanMsg(null);}}>
         <div>
           <div style={{marginBottom:12}}><label>Customer</label><select value={selCust} onChange={e=>setSelCust(e.target.value)}>{customers.filter(c=>c.truck_id===selTruck).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-          {selCust&&(()=>{const c=getC(selCust);return c&&(c.phone||c.address)&&<div style={{background:"#f9fafb",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:11,color:"#6b7280"}}>{c.address&&<div>📍 {c.address}</div>}{c.phone&&<div>📞 {c.phone}</div>}</div>;})()}
+          {selCust&&(()=>{const c=getC(selCust);return(<>
+            {c&&(c.phone||c.address)&&<div style={{background:"#f9fafb",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:11,color:"#6b7280"}}>{c.address&&<div>📍 {c.address}</div>}{c.phone&&<div>📞 {c.phone}</div>}</div>}
+            {c&&hasReturnedCheck(c)&&<div style={{background:"#1a0505",border:"2px solid #dc2626",borderRadius:10,padding:"12px 16px",marginBottom:14,animation:"pu 1.5s infinite"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:24}}>🚨</span>
+                <div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#dc2626",letterSpacing:".04em"}}>RETURNED CHECK — DO NOT ACCEPT CHECKS</div>
+                  <div style={{fontSize:12,color:"#f87171",marginTop:3}}>This customer has a returned check on file. A <strong style={{color:"#fbbf24"}}>$50 penalty fee</strong> will be applied if a check is accepted again.</div>
+                  <div style={{fontSize:11,color:"#6b7280",marginTop:4}}>Accepted payment: 💵 Cash · 📱 Zelle · 💳 Card only</div>
+                </div>
+              </div>
+            </div>}
+          </>);})()}
 
           {/* ── SCAN / MANUAL TOGGLE ── */}
           <div style={{display:"flex",gap:6,marginBottom:12}}>
@@ -4091,6 +4200,62 @@ export default function App(){
             <button className="btn bgh" onClick={()=>{setModal(null);setScanning(false);setScanInput("");}}>Cancel</button>
             <button className="btn bg" onClick={confirmSale} disabled={saving}>{ic.inv} Confirm & Invoice</button>
           </div>
+        </div>
+      </Modal>}
+
+      {/* ── RETURNED CHECK UPLOAD MODAL ── */}
+      {rcModal&&<Modal title="🔴 Upload Returned Check" onClose={()=>setRcModal(null)}>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {(()=>{const cust=getC(rcModal.custId);const sale=sales.find(s=>s.id===rcModal.saleId);const pmt=pmtFor(rcModal.saleId);return(<>
+            {/* Invoice summary */}
+            <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px"}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#212121",marginBottom:8}}>Invoice Details</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12}}>
+                <div><span style={{color:"#9ca3af"}}>Invoice: </span><strong style={{color:"#7c3aed"}}>{rcModal.saleId}</strong></div>
+                <div><span style={{color:"#9ca3af"}}>Customer: </span><strong>{cust?.name}</strong></div>
+                <div><span style={{color:"#9ca3af"}}>Amount: </span><strong>{sale?fmt(calcSaleGrandTotal(sale)):"—"}</strong></div>
+                <div><span style={{color:"#9ca3af"}}>Check #: </span><strong>{pmt?.check_number||"—"}</strong></div>
+                {pmt?.bank_name&&<div style={{gridColumn:"1/-1"}}><span style={{color:"#9ca3af"}}>Bank: </span><strong>{pmt.bank_name}</strong></div>}
+              </div>
+            </div>
+
+            {/* Warning */}
+            <div style={{background:"#1a0505",border:"2px solid #dc2626",borderRadius:10,padding:"14px 16px",display:"flex",gap:12,alignItems:"flex-start"}}>
+              <span style={{fontSize:28,flexShrink:0}}>🚨</span>
+              <div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#dc2626",marginBottom:4}}>This will flag the customer immediately</div>
+                <div style={{fontSize:12,color:"#f87171",lineHeight:1.6}}>
+                  Once uploaded, <strong style={{color:"#fbbf24"}}>{cust?.name}</strong> will be flagged system-wide.<br/>
+                  All drivers will see a <strong style={{color:"#fbbf24"}}>🚨 warning</strong> when creating any new sale for this customer.<br/>
+                  A <strong style={{color:"#fbbf24"}}>$50 penalty fee</strong> will be required on their next check.
+                </div>
+              </div>
+            </div>
+
+            {/* File upload */}
+            <div>
+              <label style={{fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:8}}>UPLOAD RETURNED CHECK IMAGE / SCAN</label>
+              <input type="file" accept="image/*,.pdf"
+                id="rc-file-input"
+                style={{display:"none"}}
+                onChange={async e=>{
+                  const file=e.target.files[0];
+                  if(file) await uploadReturnedCheck(file,rcModal.saleId,rcModal.custId);
+                }}
+              />
+              <label htmlFor="rc-file-input" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,background:rcUploading?"#f3f4f6":"#fef2f2",border:"2px dashed #fecaca",borderRadius:10,padding:"24px",cursor:rcUploading?"not-allowed":"pointer",transition:"all .15s"}}>
+                {rcUploading?(
+                  <><span className="spin" style={{display:"inline-block"}}>↻</span><span style={{fontSize:13,color:"#6b7280",fontWeight:600}}>Uploading & flagging customer…</span></>
+                ):(
+                  <><span style={{fontSize:24}}>📄</span><div><div style={{fontSize:13,fontWeight:700,color:"#dc2626"}}>Click to upload returned check</div><div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>JPG, PNG, or PDF · Max 10MB</div></div></>
+                )}
+              </label>
+            </div>
+
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button className="btn bgh" onClick={()=>setRcModal(null)} disabled={rcUploading}>Cancel</button>
+            </div>
+          </>);})()}
         </div>
       </Modal>}
 
