@@ -152,8 +152,8 @@ const Invoice = ({order, products, co, stateTaxes, custState}) => {
                   <td style={{padding:"10px 10px"}}><span className="cat-tag" style={{background:catC(p?.cat)+"18",color:catC(p?.cat)}}>{p?.cat||"—"}</span></td>
                   <td style={{padding:"10px 10px",fontSize:11,color:"#6b7280"}}>{p?.unit||"—"}</td>
                   <td style={{padding:"10px 10px",textAlign:"right",fontWeight:700,fontSize:14}}>{item.qty}</td>
-                  <td style={{padding:"10px 10px",textAlign:"right",fontSize:12,color:"#6b7280"}}>{fmt(p?.price||0)}</td>
-                  <td style={{padding:"10px 10px",textAlign:"right",fontWeight:700,fontSize:14}}>{fmt(item.qty*(p?.price||0))}</td>
+                  <td style={{padding:"10px 10px",textAlign:"right",fontSize:12,color:"#6b7280"}}>{fmt(getEffectivePrice(custObj,p))}</td>
+                  <td style={{padding:"10px 10px",textAlign:"right",fontWeight:700,fontSize:14}}>{fmt(item.qty*getEffectivePrice(custObj,p))}</td>
                 </tr>
               );
             })}
@@ -195,7 +195,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
   const sub = sale.total;
   const tax = parseFloat(((sale.items||[]).reduce((a,i)=>{
     const p=products.find(x=>x.id===i.pid);
-    return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;
+    return isTaxableProd(p)?a+getEffectivePrice(cust,p)*i.qty:a;
   },0)*stateRate/100).toFixed(2));
   const gt = sub+tax;
   return(
@@ -211,7 +211,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
       <div style={{padding:"12px 20px"}}>
         <table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}>
           <thead><tr>{["Product","Qty","Price","Total"].map(h=><th key={h} style={{textAlign:h==="Product"?"left":"right",padding:"6px 8px",fontSize:10,color:"#6b7280",fontWeight:700,borderBottom:"2px solid #111"}}>{h}</th>)}</tr></thead>
-          <tbody>{(sale.items||[]).map((item,i)=>{const p=products.find(x=>x.id===item.pid);return(<tr key={i}>{[p?.name||item.name,item.qty,`$${(p?.price||0).toFixed(2)}`,`$${(item.qty*(p?.price||0)).toFixed(2)}`].map((v,j)=><td key={j} style={{textAlign:j===0?"left":"right",padding:"8px",borderBottom:"1px solid #f3f4f6",fontSize:13,fontWeight:j===3?700:400}}>{v}</td>)}</tr>);})}</tbody>
+          <tbody>{(sale.items||[]).map((item,i)=>{const p=products.find(x=>x.id===item.pid);const ep=getEffectivePrice(cust,p);return(<tr key={i}>{[p?.name||item.name,item.qty,`$${ep.toFixed(2)}`,`$${(item.qty*ep).toFixed(2)}`].map((v,j)=><td key={j} style={{textAlign:j===0?"left":"right",padding:"8px",borderBottom:"1px solid #f3f4f6",fontSize:13,fontWeight:j===3?700:400}}>{v}</td>)}</tr>);})}</tbody>
         </table>
         <div style={{display:"flex",justifyContent:"flex-end"}}>
           <div style={{width:220}}>

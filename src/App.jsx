@@ -3067,7 +3067,7 @@ export default function App(){
                     <td><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                       <button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt} Invoice</button>
                       {isAdmin&&pmt?.returned_check_url&&<button onClick={()=>window.open(pmt.returned_check_url,"_blank")} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>📄 Check</button>}
-                      {isAdmin&&!isReturnedCheck&&pmt?.method==="check"&&<button onClick={()=>setRcModal({saleId:s.id,custId:s.cust_id})} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",whiteSpace:"nowrap"}}>🔴 Returned?</button>}
+                      {isAdmin&&!isReturnedCheck&&(pmt?.method==="check"||paymentsLog.some(pl=>pl.method==="check"&&(pl.invoice_ids||[]).includes(s.id)))&&<button onClick={()=>setRcModal({saleId:s.id,custId:s.cust_id})} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",whiteSpace:"nowrap"}}>🔴 Returned?</button>}
                       {!isPaid&&!isReturnedCheck&&<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>}
                       {isPaid&&<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}
                       {isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}
@@ -3375,11 +3375,9 @@ export default function App(){
                       <td style={{fontFamily:"monospace",fontSize:11,color:"#6b7280"}}>{p.check_number||"—"}{p.bank_name&&<div style={{fontSize:9,color:"#9ca3af"}}>{p.bank_name}</div>}</td>
                       <td style={{fontSize:11,color:"#7c3aed"}}>{(p.invoice_ids||[]).join(", ")||"—"}</td>
                       <td style={{fontSize:11,color:"#6b7280",fontStyle:p.note?"normal":"italic"}}>{p.note||"—"}</td>
-                      <td>{p.method==="check"&&isAdmin&&(()=>{const cust=getC(p.cust_id);const flagged=hasReturnedCheck(cust);return flagged?(
+                      <td>{isAdmin&&(()=>{const cust=getC(p.cust_id);const flagged=hasReturnedCheck(cust);return flagged?(
                         <button onClick={()=>clearReturnedCheck(p.cust_id)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",color:"#065f46",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow',sans-serif",whiteSpace:"nowrap"}}>✅ Clear Flag</button>
-                      ):(
-                        <button onClick={()=>markCheckReturned(p.cust_id)} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow',sans-serif",whiteSpace:"nowrap"}}>🔴 Returned</button>
-                      );})()}</td>
+                      ):null;})()}</td>
                     </tr>
                   ))}</tbody>
                 </table></div>
@@ -3709,10 +3707,8 @@ export default function App(){
               <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap",alignItems:"center"}}>
                 <button className="btn bg" onClick={saveEditCustomer} disabled={saving}>{ic.save} Save Changes</button>
                 <button className="btn bgh" onClick={cancelEditCustomer}>{ic.X} Cancel</button>
-                {hasReturnedCheck(editCust)?(
+                {hasReturnedCheck(editCust)&&(
                   <button className="btn bg" style={{marginLeft:"auto"}} onClick={()=>clearReturnedCheck(editCust.id)}>✅ Clear Returned Check Flag</button>
-                ):(
-                  <button className="btn br" style={{marginLeft:"auto"}} onClick={()=>markCheckReturned(editCust.id)}>🔴 Flag Returned Check</button>
                 )}
               </div>
             </div>}
