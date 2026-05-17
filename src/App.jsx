@@ -1,5 +1,5 @@
 // RouteFlow WMS — Complete Edition with Edit Everywhere
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -1609,6 +1609,8 @@ export default function App(){
   const[amendSale,setAmendSale]=useState(null);
   const[amendItems,setAmendItems]=useState({});
   const[amendSaving,setAmendSaving]=useState(false);
+  const[penaltyEdit,setPenaltyEdit]=useState("50");
+  const[penaltySaving,setPenaltySaving]=useState(false);
   const[scanning,setScanning]=useState(false);
   const[rcModal,setRcModal]=useState(null); // {saleId, custId} for returned check upload
   const[rcUploading,setRcUploading]=useState(false);
@@ -1655,6 +1657,7 @@ export default function App(){
   const loadProfile=async uid=>{const{data}=await supabase.from("profiles").select("*").eq("id",uid).single();setProfile(data);setAuthReady(true);};
 
   useEffect(()=>{if(authReady&&session&&profile)loadAll();},[authReady,session,profile]);
+  useEffect(()=>{if(co?.check_penalty!=null)setPenaltyEdit(String(co.check_penalty));},[co?.check_penalty]);
 
   const loadAll=useCallback(async()=>{
     setLoading(true);
@@ -1922,12 +1925,14 @@ export default function App(){
         setProducts(prev=>[...prev,...toInsert]);
         inserted=toInsert.length;
       }
-      for(const p of toUpdate){
-        const existing=products.find(x=>x.sku===p.sku);
-        if(!existing)continue;
-        await supabase.from("products").update({name:p.name,cat:p.cat,unit:p.unit,cost:p.cost,price:p.price,shelf:p.shelf}).eq("id",existing.id);
-        setProducts(prev=>prev.map(x=>x.sku===p.sku?{...x,...p,id:x.id}:x));
-        updated++;
+      if(toUpdate.length){
+        await Promise.all(toUpdate.map(p=>{
+          const existing=products.find(x=>x.sku===p.sku);
+          if(!existing)return Promise.resolve();
+          return supabase.from("products").update({name:p.name,cat:p.cat,unit:p.unit,cost:p.cost,price:p.price,shelf:p.shelf}).eq("id",existing.id);
+        }));
+        setProducts(prev=>prev.map(x=>{const u=toUpdate.find(p=>p.sku===x.sku);return u?{...x,...u,id:x.id}:x;}));
+        updated=toUpdate.length;
       }
       showToast(`✓ Imported: ${inserted} added, ${updated} updated`);
       setCsvPreview([]);setCsvErrors([]);setModal(null);
@@ -2039,17 +2044,16 @@ export default function App(){
       // Calculate remaining inventory on this truck and return it to shelf
       const inv=truckInv(id);
       if(inv.length>0){
-        for(const item of inv){
-          if(item.remaining>0){
-            const p=getP(item.pid);
-            if(p){
-              const newShelf=p.shelf+item.remaining;
-              await supabase.from("products").update({shelf:newShelf}).eq("id",item.pid);
-              setProducts(prev=>prev.map(x=>x.id===item.pid?{...x,shelf:newShelf}:x));
-            }
-          }
-        }
-        showToast(`↩️ ${inv.reduce((a,i)=>a+i.remaining,0)} units returned to warehouse`);
+        const toReturn=inv.filter(item=>item.remaining>0&&getP(item.pid));
+        await Promise.all(toReturn.map(item=>{
+          const newShelf=getP(item.pid).shelf+item.remaining;
+          return supabase.from("products").update({shelf:newShelf}).eq("id",item.pid);
+        }));
+        setProducts(prev=>prev.map(x=>{
+          const item=toReturn.find(i=>i.pid===x.id);
+          return item?{...x,shelf:x.shelf+item.remaining}:x;
+        }));
+        showToast(`↩️ ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to warehouse`);
       }
       await supabase.from("loads").delete().eq("truck_id",id);
       await supabase.from("trucks").delete().eq("id",id);
@@ -2088,7 +2092,7 @@ export default function App(){
     try{
       const load={id:"LD-"+uid(),truck_id:selTruck,date:nowStr(),items,status:"out"};
       await supabase.from("loads").insert(load);
-      for(const i of items)await supabase.from("products").update({shelf:getP(i.pid).shelf-i.qty}).eq("id",i.pid);
+      await Promise.all(items.map(i=>supabase.from("products").update({shelf:getP(i.pid).shelf-i.qty}).eq("id",i.pid)));
       setLoads(prev=>[load,...prev]);
       setProducts(prev=>prev.map(p=>{const fi=items.find(i=>i.pid===p.id);return fi?{...p,shelf:p.shelf-fi.qty}:p;}));
       showToast("Truck loaded");setModal(null);
@@ -2131,7 +2135,7 @@ export default function App(){
     try{
       const rec={id:"RT-"+uid(),load_id:selLoad.id,truck_id:selTruck,date:nowStr(),items};
       await supabase.from("returns").insert(rec);
-      for(const i of items)await supabase.from("products").update({shelf:getP(i.pid).shelf+i.qty}).eq("id",i.pid);
+      await Promise.all(items.map(i=>supabase.from("products").update({shelf:getP(i.pid).shelf+i.qty}).eq("id",i.pid)));
       const inv=truckInv(selTruck);const remAfter=inv.reduce((a,i)=>a+i.remaining,0)-items.reduce((a,i)=>a+i.qty,0);
       if(remAfter<=0)await supabase.from("loads").update({status:"closed"}).eq("id",selLoad.id);
       setReturns(prev=>[rec,...prev]);setProducts(prev=>prev.map(p=>{const fi=items.find(i=>i.pid===p.id);return fi?{...p,shelf:p.shelf+fi.qty}:p;}));
@@ -2184,6 +2188,17 @@ export default function App(){
     setModal("amend");
   };
 
+  const savePenalty=async()=>{
+    const val=parseFloat(penaltyEdit);
+    if(isNaN(val)||val<0)return showToast("Enter a valid amount","error");
+    setPenaltySaving(true);
+    await supabase.from("company").update({check_penalty:val}).eq("id",co.id);
+    setCo(prev=>({...prev,check_penalty:val}));
+    setCoEdit(prev=>({...prev,check_penalty:val}));
+    setPenaltySaving(false);
+    showToast(`✅ Penalty fee updated to $${val}`);
+  };
+
   const saveAmend=async()=>{
     if(!amendSale)return;
     setAmendSaving(true);
@@ -2202,22 +2217,17 @@ export default function App(){
       const newTaxable=newItems.reduce((a,i)=>{const p=getP(i.pid);return isTaxableProd(p)?a+(getEffectivePrice(amendSale.cust_id,i.pid)||0)*i.qty:a;},0);
       const newProfit=newItems.reduce((a,i)=>{const p=getP(i.pid);return a+(getEffectivePrice(amendSale.cust_id,i.pid)-(p?.cost||0))*i.qty;},0);
 
-      // Adjust shelf: return old qty, deduct new qty
+      // Adjust shelf: return old qty, deduct new qty — batched
       const oldMap={};(amendSale.items||[]).forEach(i=>{oldMap[i.pid]=i.qty;});
-      const allPids=new Set([...Object.keys(oldMap),...newItems.map(i=>i.pid)]);
-      for(const pid of allPids){
-        const oldQ=oldMap[pid]||0;
-        const newQ=parseInt(amendItems[pid]||0);
-        const diff=oldQ-newQ;
-        if(diff!==0){
-          const prod=getP(pid);
-          if(prod){
-            const newShelf=Math.max(0,prod.shelf+diff);
-            await supabase.from("products").update({shelf:newShelf}).eq("id",pid);
-            setProducts(prev=>prev.map(p=>p.id===pid?{...p,shelf:newShelf}:p));
-          }
-        }
-      }
+      const allPids=[...new Set([...Object.keys(oldMap),...newItems.map(i=>i.pid)])];
+      const shelfUpdates=allPids.map(pid=>{
+        const diff=(oldMap[pid]||0)-parseInt(amendItems[pid]||0);
+        if(diff===0)return null;
+        const prod=getP(pid); if(!prod)return null;
+        return{pid,newShelf:Math.max(0,prod.shelf+diff)};
+      }).filter(Boolean);
+      await Promise.all(shelfUpdates.map(u=>supabase.from("products").update({shelf:u.newShelf}).eq("id",u.pid)));
+      setProducts(prev=>prev.map(p=>{const u=shelfUpdates.find(x=>x.pid===p.id);return u?{...p,shelf:u.newShelf}:p;}));
 
       await supabase.from("sales").update({
         items:newItems, total:newSub, profit:newProfit,
@@ -2297,10 +2307,17 @@ export default function App(){
   };
 
   // ── ORDERS ─────────────────────────────────────────────────────────────────
-  // Auto-process new approved orders into invoices
+  // Auto-process new approved orders into invoices — runs once per new order
+  const processedOrderIds=useRef(new Set());
   useEffect(()=>{
     const autoProcess = async () => {
-      const newOrders = orders.filter(o=>o.status==="approved"&&!sales.some(s=>s.id==="INV-"+o.id.replace("ORD-","")));
+      const newOrders = orders.filter(o=>
+        o.status==="approved" &&
+        !processedOrderIds.current.has(o.id) &&
+        !sales.some(s=>s.id==="INV-"+o.id.replace("ORD-",""))
+      );
+      if(!newOrders.length) return;
+      newOrders.forEach(o=>processedOrderIds.current.add(o.id));
       for(const order of newOrders){
         try{
           const truckId=customers.find(c=>c.id===order.cust_id)?.truck_id||trucks[0]?.id;
@@ -3598,150 +3615,131 @@ export default function App(){
           </div>}
 
           {/* ══ RETURNED CHECKS ══ */}
-          {tab==="returnedchecks"&&isAdmin&&(()=>{
+          {tab==="returnedchecks"&&isAdmin&&<div className="fu">{(()=>{
             const rcPayments=payments.filter(p=>p.status==="returned_check");
             const flaggedCustomers=customers.filter(c=>hasReturnedCheck(c));
-            const [penaltyEdit,setPenaltyEdit]=useState(String(co?.check_penalty||50));
-            const [penaltySaving,setPenaltySaving]=useState(false);
-
-            const savePenalty=async()=>{
-              const val=parseFloat(penaltyEdit);
-              if(isNaN(val)||val<0)return showToast("Enter a valid amount","error");
-              setPenaltySaving(true);
-              await supabase.from("company").update({check_penalty:val}).eq("id",co.id);
-              setCo(prev=>({...prev,check_penalty:val}));
-              setCoEdit(prev=>({...prev,check_penalty:val}));
-              setPenaltySaving(false);
-              showToast(`✅ Penalty fee updated to $${val}`);
-            };
-
-            return(
-              <div className="fu">
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:10}}>
-                  <div>
-                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#212121"}}>🔴 Returned Checks</div>
-                    <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Track returned checks, flagged customers, and penalty fees</div>
-                  </div>
+            return(<>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:10}}>
+                <div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#212121"}}>🔴 Returned Checks</div>
+                  <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Track returned checks, flagged customers, and penalty fees</div>
                 </div>
-
-                {/* ── PENALTY SETTING ── */}
-                <div className="card" style={{padding:20,marginBottom:16,borderLeft:"4px solid #dc2626"}}>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#212121",marginBottom:4}}>💰 Returned Check Penalty Fee</div>
-                  <div style={{fontSize:12,color:"#6b7280",marginBottom:12}}>This amount is automatically added to the customer's latest unpaid invoice when a check is returned.</div>
-                  <div style={{display:"flex",gap:10,alignItems:"center",maxWidth:340}}>
-                    <div style={{position:"relative",flex:1}}>
-                      <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:14,fontWeight:700,color:"#374151"}}>$</span>
-                      <input type="number" min="0" step="1" value={penaltyEdit}
-                        onChange={e=>setPenaltyEdit(e.target.value)}
-                        onKeyDown={e=>e.key==="Enter"&&savePenalty()}
-                        style={{paddingLeft:28,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,width:"100%",border:"2px solid #fecaca",borderRadius:8,padding:"10px 12px 10px 28px",color:"#dc2626"}}/>
-                    </div>
-                    <button className="btn ba" onClick={savePenalty} disabled={penaltySaving} style={{background:"#dc2626",whiteSpace:"nowrap"}}>
-                      {penaltySaving?"Saving…":"Save Penalty"}
-                    </button>
-                  </div>
-                  <div style={{marginTop:8,fontSize:11,color:"#9ca3af"}}>Current: <strong style={{color:"#dc2626"}}>${co?.check_penalty||50}</strong></div>
-                </div>
-
-                {/* ── KPIs ── */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
-                  {[
-                    {l:"Returned Checks",v:rcPayments.length,c:"#dc2626",bg:"#fef2f2"},
-                    {l:"Flagged Customers",v:flaggedCustomers.length,c:"#f59e0b",bg:"#fffbeb"},
-                    {l:"Total Penalties",v:fmt(sales.reduce((a,s)=>a+parseFloat(s.check_penalty_applied||0),0)),c:"#7c3aed",bg:"#f5f3ff"},
-                  ].map(k=>(
-                    <div key={k.l} className="kpi" style={{background:k.bg,border:`1px solid ${k.c}30`}}>
-                      <div className="kv" style={{color:k.c}}>{k.v}</div>
-                      <div className="kl">{k.l}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* ── FLAGGED CUSTOMERS ── */}
-                {flaggedCustomers.length>0&&<>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,color:"#92400e",letterSpacing:".06em",marginBottom:8}}>⚠️ FLAGGED CUSTOMERS</div>
-                  <div className="card" style={{marginBottom:16,overflow:"hidden"}}>
-                    <table>
-                      <thead><tr>
-                        {["Customer","Phone","Returned Invoice","Penalty Applied To","Penalty Amt","Action"].map(h=><th key={h}>{h}</th>)}
-                      </tr></thead>
-                      <tbody>
-                        {flaggedCustomers.map(c=>{
-                          // Find invoices with penalty applied to this customer
-                          const penaltySales=sales.filter(s=>s.cust_id===c.id&&s.check_penalty_applied>0);
-                          const rcPmt=rcPayments.find(p=>sales.find(s=>s.id===p.sale_id&&s.cust_id===c.id));
-                          const rcSaleId=rcPmt?.sale_id;
-                          return(
-                            <tr key={c.id}>
-                              <td><div style={{fontWeight:700}}>{c.name}</div>{c.address&&<div style={{fontSize:10,color:"#9ca3af"}}>{c.address}</div>}</td>
-                              <td style={{color:"#6b7280"}}>{c.phone||"—"}</td>
-                              <td>
-                                {rcSaleId?<span style={{background:"#fef2f2",color:"#dc2626",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:700}}>{rcSaleId}</span>:<span style={{color:"#9ca3af",fontSize:11}}>—</span>}
-                                {rcPmt?.returned_check_url&&<button onClick={()=>window.open(rcPmt.returned_check_url,"_blank")} style={{marginLeft:6,background:"none",border:"1px solid #fecaca",color:"#dc2626",borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer"}}>📄 View</button>}
-                              </td>
-                              <td>
-                                {penaltySales.length>0
-                                  ?penaltySales.map(s=><div key={s.id}><span style={{fontWeight:700,color:"#7c3aed",fontSize:11}}>{s.id}</span><span style={{fontSize:10,color:"#9ca3af",marginLeft:4}}>(+${s.check_penalty_applied} added)</span></div>)
-                                  :<span style={{color:"#9ca3af",fontSize:11}}>—</span>}
-                              </td>
-                              <td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#dc2626"}}>${co?.check_penalty||50}</span></td>
-                              <td>
-                                <button className="btn bg" style={{fontSize:10,padding:"5px 10px"}} onClick={()=>clearReturnedCheck(c.id)}>✅ Clear Flag</button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </>}
-
-                {/* ── RETURNED CHECK HISTORY ── */}
-                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,color:"#991b1b",letterSpacing:".06em",marginBottom:8}}>📋 RETURNED CHECK HISTORY</div>
-                {rcPayments.length===0
-                  ?<div className="card" style={{padding:32,textAlign:"center",color:"#9ca3af"}}>
-                    <div style={{fontSize:28,marginBottom:6}}>✅</div>
-                    <div style={{fontSize:13}}>No returned checks on record</div>
-                  </div>
-                  :<div className="card" style={{overflow:"hidden"}}>
-                    <table>
-                      <thead><tr>
-                        {["Invoice","Customer","Driver","Date","Check Image","Penalty Applied"].map(h=><th key={h}>{h}</th>)}
-                      </tr></thead>
-                      <tbody>
-                        {rcPayments.map(p=>{
-                          const sale=sales.find(s=>s.id===p.sale_id);
-                          const cust=sale?getC(sale.cust_id):null;
-                          const truck=sale?getT(sale.truck_id):null;
-                          const penaltySale=sales.find(s=>s.check_penalty_invoice===p.sale_id);
-                          return(
-                            <tr key={p.sale_id}>
-                              <td><span style={{fontWeight:700,color:"#7c3aed"}}>{p.sale_id}</span></td>
-                              <td>{cust?.name||"—"}</td>
-                              <td style={{color:"#6b7280"}}>{truck?.driver||"Walk-in"}</td>
-                              <td style={{color:"#6b7280",fontSize:11}}>{sale?.date||"—"}</td>
-                              <td>
-                                {p.returned_check_url
-                                  ?<button onClick={()=>window.open(p.returned_check_url,"_blank")} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>📄 View Check</button>
-                                  :<span style={{color:"#9ca3af",fontSize:11}}>No image</span>}
-                              </td>
-                              <td>
-                                {penaltySale
-                                  ?<div><span style={{fontWeight:700,color:"#dc2626"}}>${sale?.check_penalty_applied||co?.check_penalty||50}</span><span style={{fontSize:10,color:"#9ca3af",marginLeft:4}}>→ {penaltySale.id}</span></div>
-                                  :<span style={{fontSize:11,color:"#9ca3af"}}>Added to same invoice</span>}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>}
               </div>
-            );
-          })()}
+
+              {/* ── PENALTY SETTING ── */}
+              <div className="card" style={{padding:20,marginBottom:16,borderLeft:"4px solid #dc2626"}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#212121",marginBottom:4}}>💰 Returned Check Penalty Fee</div>
+                <div style={{fontSize:12,color:"#6b7280",marginBottom:12}}>This amount is automatically added to the customer's latest unpaid invoice when a check is returned.</div>
+                <div style={{display:"flex",gap:10,alignItems:"center",maxWidth:340}}>
+                  <div style={{position:"relative",flex:1}}>
+                    <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:14,fontWeight:700,color:"#374151"}}>$</span>
+                    <input type="number" min="0" step="1" value={penaltyEdit}
+                      onChange={e=>setPenaltyEdit(e.target.value)}
+                      onKeyDown={e=>e.key==="Enter"&&savePenalty()}
+                      style={{paddingLeft:28,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,width:"100%",border:"2px solid #fecaca",borderRadius:8,padding:"10px 12px 10px 28px",color:"#dc2626"}}/>
+                  </div>
+                  <button className="btn ba" onClick={savePenalty} disabled={penaltySaving} style={{background:"#dc2626",whiteSpace:"nowrap"}}>
+                    {penaltySaving?"Saving…":"Save Penalty"}
+                  </button>
+                </div>
+                <div style={{marginTop:8,fontSize:11,color:"#9ca3af"}}>Current: <strong style={{color:"#dc2626"}}>${co?.check_penalty||50}</strong></div>
+              </div>
+
+              {/* ── KPIs ── */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
+                {[
+                  {l:"Returned Checks",v:rcPayments.length,c:"#dc2626",bg:"#fef2f2"},
+                  {l:"Flagged Customers",v:flaggedCustomers.length,c:"#f59e0b",bg:"#fffbeb"},
+                  {l:"Total Penalties",v:fmt(sales.reduce((a,s)=>a+parseFloat(s.check_penalty_applied||0),0)),c:"#7c3aed",bg:"#f5f3ff"},
+                ].map(k=>(
+                  <div key={k.l} className="kpi" style={{background:k.bg,border:`1px solid ${k.c}30`}}>
+                    <div className="kv" style={{color:k.c}}>{k.v}</div>
+                    <div className="kl">{k.l}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── FLAGGED CUSTOMERS ── */}
+              {flaggedCustomers.length>0&&<>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,color:"#92400e",letterSpacing:".06em",marginBottom:8}}>⚠️ FLAGGED CUSTOMERS</div>
+                <div className="card" style={{marginBottom:16,overflow:"hidden"}}>
+                  <table>
+                    <thead><tr>
+                      {["Customer","Phone","Returned Invoice","Penalty Applied To","Penalty Amt","Action"].map(h=><th key={h}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {flaggedCustomers.map(c=>{
+                        const penaltySales=sales.filter(s=>s.cust_id===c.id&&s.check_penalty_applied>0);
+                        const rcPmt=rcPayments.find(p=>sales.find(s=>s.id===p.sale_id&&s.cust_id===c.id));
+                        const rcSaleId=rcPmt?.sale_id;
+                        return(
+                          <tr key={c.id}>
+                            <td><div style={{fontWeight:700}}>{c.name}</div>{c.address&&<div style={{fontSize:10,color:"#9ca3af"}}>{c.address}</div>}</td>
+                            <td style={{color:"#6b7280"}}>{c.phone||"—"}</td>
+                            <td>
+                              {rcSaleId?<span style={{background:"#fef2f2",color:"#dc2626",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:700}}>{rcSaleId}</span>:<span style={{color:"#9ca3af",fontSize:11}}>—</span>}
+                              {rcPmt?.returned_check_url&&<button onClick={()=>window.open(rcPmt.returned_check_url,"_blank")} style={{marginLeft:6,background:"none",border:"1px solid #fecaca",color:"#dc2626",borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer"}}>📄 View</button>}
+                            </td>
+                            <td>
+                              {penaltySales.length>0
+                                ?penaltySales.map(s=><div key={s.id}><span style={{fontWeight:700,color:"#7c3aed",fontSize:11}}>{s.id}</span><span style={{fontSize:10,color:"#9ca3af",marginLeft:4}}>(+${s.check_penalty_applied} added)</span></div>)
+                                :<span style={{color:"#9ca3af",fontSize:11}}>—</span>}
+                            </td>
+                            <td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#dc2626"}}>${co?.check_penalty||50}</span></td>
+                            <td><button className="btn bg" style={{fontSize:10,padding:"5px 10px"}} onClick={()=>clearReturnedCheck(c.id)}>✅ Clear Flag</button></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>}
+
+              {/* ── RETURNED CHECK HISTORY ── */}
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,color:"#991b1b",letterSpacing:".06em",marginBottom:8}}>📋 RETURNED CHECK HISTORY</div>
+              {rcPayments.length===0
+                ?<div className="card" style={{padding:32,textAlign:"center",color:"#9ca3af"}}>
+                  <div style={{fontSize:28,marginBottom:6}}>✅</div>
+                  <div style={{fontSize:13}}>No returned checks on record</div>
+                </div>
+                :<div className="card" style={{overflow:"hidden"}}>
+                  <table>
+                    <thead><tr>
+                      {["Invoice","Customer","Driver","Date","Check Image","Penalty Applied"].map(h=><th key={h}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {rcPayments.map(p=>{
+                        const sale=sales.find(s=>s.id===p.sale_id);
+                        const cust=sale?getC(sale.cust_id):null;
+                        const truck=sale?getT(sale.truck_id):null;
+                        const penaltySale=sales.find(s=>s.check_penalty_invoice===p.sale_id);
+                        return(
+                          <tr key={p.sale_id}>
+                            <td><span style={{fontWeight:700,color:"#7c3aed"}}>{p.sale_id}</span></td>
+                            <td>{cust?.name||"—"}</td>
+                            <td style={{color:"#6b7280"}}>{truck?.driver||"Walk-in"}</td>
+                            <td style={{color:"#6b7280",fontSize:11}}>{sale?.date||"—"}</td>
+                            <td>
+                              {p.returned_check_url
+                                ?<button onClick={()=>window.open(p.returned_check_url,"_blank")} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>📄 View Check</button>
+                                :<span style={{color:"#9ca3af",fontSize:11}}>No image</span>}
+                            </td>
+                            <td>
+                              {penaltySale
+                                ?<div><span style={{fontWeight:700,color:"#dc2626"}}>${sale?.check_penalty_applied||co?.check_penalty||50}</span><span style={{fontSize:10,color:"#9ca3af",marginLeft:4}}>→ {penaltySale.id}</span></div>
+                                :<span style={{fontSize:11,color:"#9ca3af"}}>Added to same invoice</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>}
+            </>);
+          })()}</div>}
 
           {/* ══ NEW USERS APPROVAL ══ */}
-          {tab==="userapprovals"&&isAdmin&&(()=>{
+          {tab==="userapprovals"&&isAdmin&&<div className="fu">{(()=>{
             const pending=walkinRegs.filter(r=>r.status==="pending");
             const approved=walkinRegs.filter(r=>r.status==="approved");
             const rejected=walkinRegs.filter(r=>r.status==="rejected");
@@ -3752,7 +3750,7 @@ export default function App(){
               showToast(status==="approved"?"✅ User approved":"❌ Request rejected");
             };
 
-            const RegCard=({r})=>(
+            const renderRegCard=(r)=>(
               <div key={r.id} className="card" style={{padding:"16px 18px",marginBottom:10,borderLeft:`4px solid ${r.status==="approved"?"#059669":r.status==="rejected"?"#dc2626":"#7c3aed"}`}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
                   <div>
@@ -3765,75 +3763,62 @@ export default function App(){
                     </div>
                     <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>{new Date(r.created_at).toLocaleString()}</div>
                   </div>
-                  {r.status==="pending"&&(
-                    <div style={{display:"flex",gap:8,flexShrink:0}}>
-                      <button className="btn bg" onClick={()=>updateReg(r.id,"approved")}>✅ Approve</button>
-                      <button className="btn br" onClick={()=>updateReg(r.id,"rejected")}>❌ Reject</button>
-                    </div>
-                  )}
-                  {r.status!=="pending"&&(
-                    <div style={{display:"flex",gap:8,flexShrink:0}}>
-                      {r.status==="approved"&&<button className="btn br" onClick={()=>updateReg(r.id,"rejected")}>Revoke</button>}
-                      {r.status==="rejected"&&<button className="btn bg" onClick={()=>updateReg(r.id,"approved")}>Approve</button>}
-                    </div>
-                  )}
+                  <div style={{display:"flex",gap:8,flexShrink:0}}>
+                    {r.status==="pending"&&<><button className="btn bg" onClick={()=>updateReg(r.id,"approved")}>✅ Approve</button><button className="btn br" onClick={()=>updateReg(r.id,"rejected")}>❌ Reject</button></>}
+                    {r.status==="approved"&&<button className="btn br" onClick={()=>updateReg(r.id,"rejected")}>Revoke</button>}
+                    {r.status==="rejected"&&<button className="btn bg" onClick={()=>updateReg(r.id,"approved")}>Approve</button>}
+                  </div>
                 </div>
               </div>
             );
 
-            return(
-              <div className="fu">
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:10}}>
-                  <div>
-                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#212121"}}>👥 New Users Approval</div>
-                    <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Walk-in access requests from staff, receptionists, and managers</div>
-                  </div>
-                  <button className="btn bb" onClick={()=>loadAll()}>↻ Refresh</button>
+            return(<>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:10}}>
+                <div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#212121"}}>👥 New Users Approval</div>
+                  <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Walk-in access requests from staff, receptionists, and managers</div>
                 </div>
-
-                {/* KPIs */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
-                  {[{l:"Pending",v:pending.length,c:"#f59e0b",bg:"#fffbeb"},{l:"Approved",v:approved.length,c:"#059669",bg:"#ecfdf5"},{l:"Rejected",v:rejected.length,c:"#dc2626",bg:"#fef2f2"}].map(k=>(
-                    <div key={k.l} className="kpi" style={{background:k.bg,borderColor:k.c+"40"}}>
-                      <div className="kv" style={{color:k.c}}>{k.v}</div>
-                      <div className="kl">{k.l}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Pending */}
-                {pending.length>0&&<>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,color:"#92400e",letterSpacing:".06em",marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
-                    ⏳ PENDING REVIEW <span style={{background:"#f59e0b",color:"#fff",borderRadius:10,fontSize:10,padding:"1px 7px",fontWeight:700}}>{pending.length}</span>
-                  </div>
-                  {pending.map(r=><RegCard key={r.id} r={r}/>)}
-                </>}
-
-                {pending.length===0&&<div className="card" style={{padding:28,textAlign:"center",color:"#9ca3af",marginBottom:16}}>
-                  <div style={{fontSize:28,marginBottom:6}}>✅</div>
-                  <div style={{fontSize:13}}>No pending requests</div>
-                </div>}
-
-                {/* Approved */}
-                {approved.length>0&&<>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:12,color:"#065f46",letterSpacing:".06em",marginBottom:8,marginTop:16}}>✅ APPROVED</div>
-                  {approved.map(r=><RegCard key={r.id} r={r}/>)}
-                </>}
-
-                {/* Rejected */}
-                {rejected.length>0&&<>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:12,color:"#991b1b",letterSpacing:".06em",marginBottom:8,marginTop:16}}>❌ REJECTED</div>
-                  {rejected.map(r=><RegCard key={r.id} r={r}/>)}
-                </>}
-
-                {walkinRegs.length===0&&<div className="card" style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
-                  <div style={{fontSize:32,marginBottom:8}}>📋</div>
-                  <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>No access requests yet</div>
-                  <div style={{fontSize:12}}>Walk-in registrations from the portal will appear here</div>
-                </div>}
+                <button className="btn bb" onClick={()=>loadAll()}>↻ Refresh</button>
               </div>
-            );
-          })()}
+
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+                {[{l:"Pending",v:pending.length,c:"#f59e0b",bg:"#fffbeb"},{l:"Approved",v:approved.length,c:"#059669",bg:"#ecfdf5"},{l:"Rejected",v:rejected.length,c:"#dc2626",bg:"#fef2f2"}].map(k=>(
+                  <div key={k.l} className="kpi" style={{background:k.bg,borderColor:k.c+"40"}}>
+                    <div className="kv" style={{color:k.c}}>{k.v}</div>
+                    <div className="kl">{k.l}</div>
+                  </div>
+                ))}
+              </div>
+
+              {pending.length>0&&<>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,color:"#92400e",letterSpacing:".06em",marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
+                  ⏳ PENDING REVIEW <span style={{background:"#f59e0b",color:"#fff",borderRadius:10,fontSize:10,padding:"1px 7px",fontWeight:700}}>{pending.length}</span>
+                </div>
+                {pending.map(r=>renderRegCard(r))}
+              </>}
+
+              {pending.length===0&&<div className="card" style={{padding:28,textAlign:"center",color:"#9ca3af",marginBottom:16}}>
+                <div style={{fontSize:28,marginBottom:6}}>✅</div>
+                <div style={{fontSize:13}}>No pending requests</div>
+              </div>}
+
+              {approved.length>0&&<>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:12,color:"#065f46",letterSpacing:".06em",marginBottom:8,marginTop:16}}>✅ APPROVED</div>
+                {approved.map(r=>renderRegCard(r))}
+              </>}
+
+              {rejected.length>0&&<>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:12,color:"#991b1b",letterSpacing:".06em",marginBottom:8,marginTop:16}}>❌ REJECTED</div>
+                {rejected.map(r=>renderRegCard(r))}
+              </>}
+
+              {walkinRegs.length===0&&<div className="card" style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+                <div style={{fontSize:32,marginBottom:8}}>📋</div>
+                <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>No access requests yet</div>
+                <div style={{fontSize:12}}>Walk-in registrations from the portal will appear here</div>
+              </div>}
+            </>);
+          })()}</div>}
 
           {/* ══ SETTINGS ══ */}
           {tab==="settings"&&isAdmin&&<div className="fu">

@@ -246,10 +246,10 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
       const nl = {id:"LD-"+uid(),truck_id:driverData.truck?.id,date:new Date().toLocaleDateString(),items:loadItems,status:"out",created_at:new Date().toISOString()};
       const {error} = await supabase.from("loads").insert(nl);
       if(error) throw error;
-      for(const item of loadItems){
-        const p = products.find(x=>x.id===item.pid);
-        if(p) await supabase.from("products").update({shelf:Math.max(0,p.shelf-item.qty)}).eq("id",p.id);
-      }
+      await Promise.all(loadItems.map(item=>{
+        const p=products.find(x=>x.id===item.pid);
+        return p?supabase.from("products").update({shelf:Math.max(0,p.shelf-item.qty)}).eq("id",p.id):Promise.resolve();
+      }));
       setDriverData(prev=>({...prev,activeLoad:nl}));
       setMsg({t:"success",m:`✅ Loaded ${loadItems.reduce((a,i)=>a+i.qty,0)} units! Ready to sell.`});
       setItems({});
@@ -958,7 +958,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const profit=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(wiCust,i.pid)-(p?.cost||0))*i.qty;},0);
       const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
-      for(const i of saleItems){const p=products.find(x=>x.id===i.pid);if(p)await supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id);}
+      await Promise.all(saleItems.map(i=>{const p=products.find(x=>x.id===i.pid);return p?supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id):Promise.resolve();}));
       let wiRecUrl="";
       if(wiReceiptFile){
         const ext=wiReceiptFile.name.split(".").pop();
@@ -1004,22 +1004,17 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const newTax = parseFloat((newTaxable*tRate/100).toFixed(2));
       const newProfit = newItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(amendSale.cust_id,i.pid)-(p?.cost||0))*i.qty;},0);
 
-      // Adjust shelf stock: return old qty, deduct new qty
+      // Adjust shelf stock: batched parallel updates
       const oldMap = {};
       (amendSale.items||[]).forEach(i=>{ oldMap[i.pid]=i.qty; });
-      const allPids = new Set([...Object.keys(oldMap), ...newItems.map(i=>i.pid)]);
-      for(const pid of allPids){
-        const oldQ = oldMap[pid]||0;
-        const newQ = (amendItems[pid]||0);
-        const diff = oldQ - newQ; // positive = return to shelf, negative = take more
-        if(diff!==0){
-          const prod = products.find(p=>p.id===pid);
-          if(prod){
-            const newShelf = Math.max(0, prod.shelf + diff);
-            await supabase.from("products").update({shelf:newShelf}).eq("id",pid);
-          }
-        }
-      }
+      const allPids = [...new Set([...Object.keys(oldMap), ...newItems.map(i=>i.pid)])];
+      const shelfUpdates = allPids.map(pid=>{
+        const diff = (oldMap[pid]||0) - (amendItems[pid]||0);
+        if(diff===0) return null;
+        const prod = products.find(p=>p.id===pid); if(!prod) return null;
+        return {pid, newShelf:Math.max(0, prod.shelf+diff)};
+      }).filter(Boolean);
+      await Promise.all(shelfUpdates.map(u=>supabase.from("products").update({shelf:u.newShelf}).eq("id",u.pid)));
 
       // Save updated sale
       await supabase.from("sales").update({
@@ -1330,9 +1325,9 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
         ))}
       </div>
 
-      {wiView==="sale"&&<SaleTab/>}
-      {wiView==="history"&&<HistoryTab/>}
-      <AmendModal/>
+      {wiView==="sale"&&SaleTab()}
+      {wiView==="history"&&HistoryTab()}
+      {AmendModal()}
     </div>
   );
 }
