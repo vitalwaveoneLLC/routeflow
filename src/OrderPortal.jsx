@@ -1055,9 +1055,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const newTax = parseFloat((newTaxable*tRate/100).toFixed(2));
       const newProfit = newItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(amendSale.cust_id,i.pid)-(p?.cost||0))*i.qty;},0);
 
-      // Adjust shelf stock: batched parallel updates
-      const oldMap = {};
-      (amendSale.items||[]).forEach(i=>{ oldMap[i.pid]=i.qty; });
+      // Adjust shelf stock: batched parallel updates (reuse oldMap from validation above)
       const allPids = [...new Set([...Object.keys(oldMap), ...newItems.map(i=>i.pid)])];
       const shelfUpdates = allPids.map(pid=>{
         const diff = (oldMap[pid]||0) - (amendItems[pid]||0);
@@ -1564,6 +1562,7 @@ export default function OrderPortal() {
   const [catFilter,  setCatFilter]  = useState("All");
   const [search,     setSearch]     = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [portalError, setPortalError] = useState("");
   const [order,      setOrder]      = useState(null);
 
   // Load data
@@ -1682,7 +1681,7 @@ export default function OrderPortal() {
       setSelCust({...newCust, ownerName: reg.ownerName});
       setStep("order");
     } catch(e) {
-      alert("Registration error: "+e.message);
+      setPortalError("Registration error: "+e.message);
     }
     setSubmitting(false);
   };
@@ -1704,7 +1703,7 @@ export default function OrderPortal() {
           ? `"${p?.name||i.pid}" is out of stock`
           : `"${p?.name||i.pid}" — only ${avail} available, you ordered ${i.qty}`;
       });
-      alert("⚠️ Stock issue:\n\n" + msgs.join("\n") + "\n\nPlease adjust your quantities.");
+      setPortalError("⚠️ Stock issue: " + msgs.join(" · ") + " — please adjust quantities.");
       return;
     }
 
@@ -1756,7 +1755,7 @@ export default function OrderPortal() {
       });
       setStep("confirm");
     } catch(e) {
-      alert("Order error: "+e.message);
+      setPortalError("Order error: "+e.message);
     }
     setSubmitting(false);
   };
@@ -1944,7 +1943,7 @@ export default function OrderPortal() {
 
   // Send invoice email
   const sendInvoiceEmail = async (sale, cust) => {
-    if(!cust?.email) return alert("Customer has no email address on file");
+    if(!cust?.email) return setMsg({t:"error",m:"Customer has no email address on file"});
     try{
       const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
       const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -1979,12 +1978,11 @@ export default function OrderPortal() {
           paidStatus: "unpaid",
         }),
       });
-      // Mark as email sent
       await supabase.from("sales").update({email_sent:true,email_sent_at:new Date().toISOString()}).eq("id",sale.id);
       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,email_sent:true}:s)}));
-      alert(`✓ Invoice emailed to ${cust.email}`);
+      setMsg({t:"success",m:`✓ Invoice emailed to ${cust.email}`});
     }catch(e){
-      alert("Email error: "+e.message);
+      setMsg({t:"error",m:"Email error: "+e.message});
     }
   };
   const loadStripeIntent = async () => {
@@ -2718,11 +2716,14 @@ export default function OrderPortal() {
                   <input placeholder="77001" value={reg.zip} onChange={e=>setReg(r=>({...r,zip:e.target.value}))}/>
                 </div>
               </div>
-              <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
-                <button className="btn-ghost" style={{padding:"10px 20px",fontSize:13}} onClick={()=>setIsNew(false)}>← Back</button>
-                <button className="btn-amber" onClick={handleRegister} disabled={submitting}>
-                  {submitting?<><span className="sp">⟳</span> Registering…</>:<>Register & Continue →</>}
-                </button>
+              <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexDirection:"column"}}>
+                {portalError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626"}}>{portalError}</div>}
+                <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+                  <button className="btn-ghost" style={{padding:"10px 20px",fontSize:13}} onClick={()=>{setPortalError("");setIsNew(false);}}>← Back</button>
+                  <button className="btn-amber" onClick={()=>{setPortalError("");handleRegister();}} disabled={submitting}>
+                    {submitting?<><span className="sp">⟳</span> Registering…</>:<>Register & Continue →</>}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2953,7 +2954,8 @@ export default function OrderPortal() {
 
               {stripeError&&payMethod==="card"&&<button onClick={loadStripeIntent} style={{width:"100%",background:"transparent",border:"1px solid #4b6080",borderRadius:8,padding:"8px",fontSize:11,color:"#4b6080",cursor:"pointer",marginBottom:10,fontFamily:"'Inter',sans-serif"}}>↻ Retry</button>}
 
-              <button className="btn-amber" style={{width:"100%",justifyContent:"center",padding:"13px",opacity:(payMethod==="card"&&!stripeReady)?0.5:1}} onClick={handleSubmit} disabled={submitting||(payMethod==="card"&&!stripeReady)}>
+              {portalError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:9,padding:"12px 16px",fontSize:13,color:"#dc2626",marginBottom:12,fontWeight:500}}>{portalError}</div>}
+              <button className="btn-amber" style={{width:"100%",justifyContent:"center",padding:"13px",opacity:(payMethod==="card"&&!stripeReady)?0.5:1}} onClick={()=>{setPortalError("");handleSubmit();}} disabled={submitting||(payMethod==="card"&&!stripeReady)}>
                 {submitting?<><span className="sp">⟳</span>Processing…</>:payMethod==="card"?`💳 Pay ${fmt(grandTotal)} Now`:`✓ Submit Order — Pay on Delivery`}
               </button>
               <div style={{fontSize:10,color:"#374151",textAlign:"center",marginTop:8,lineHeight:1.6}}>

@@ -923,11 +923,12 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
   });
 
   const deleteExpense=async(id)=>{
-    if(!window.confirm("Delete this expense?"))return;
-    const{error}=await supabase.from("expenses").delete().eq("id",id);
-    if(error){showToast(error.message,"error");return;}
-    setLocalExpenses(prev=>prev.filter(e=>e.id!==id));
-    showToast("Expense deleted");
+    showConfirm("Delete this expense?",async()=>{
+      const{error}=await supabase.from("expenses").delete().eq("id",id);
+      if(error){showToast(error.message,"error");return;}
+      setLocalExpenses(prev=>prev.filter(e=>e.id!==id));
+      showToast("Expense deleted");
+    });
   };
 
   const exportIRS=()=>{
@@ -1391,10 +1392,11 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
   };
 
   const remove=async(id)=>{
-    if(!window.confirm(`Remove ${id} from active states?`))return;
-    await supabase.from("state_taxes").delete().eq("id",id);
-    setStateTaxes(prev=>prev.filter(s=>s.id!==id));
-    showToast(`${id} removed`);
+    showConfirm(`Remove ${id} from active states?`,async()=>{
+      await supabase.from("state_taxes").delete().eq("id",id);
+      setStateTaxes(prev=>prev.filter(s=>s.id!==id));
+      showToast(`${id} removed`);
+    });
   };
 
   const startEdit=(st)=>{
@@ -1611,6 +1613,9 @@ export default function App(){
   const[amendSaving,setAmendSaving]=useState(false);
   const[penaltyEdit,setPenaltyEdit]=useState("50");
   const[penaltySaving,setPenaltySaving]=useState(false);
+  const[confirmDialog,setConfirmDialog]=useState(null); // {msg, onConfirm}
+
+  const showConfirm=(msg,onConfirm)=>setConfirmDialog({msg,onConfirm});
   const[scanning,setScanning]=useState(false);
   const[rcModal,setRcModal]=useState(null); // {saleId, custId} for returned check upload
   const[rcUploading,setRcUploading]=useState(false);
@@ -2021,46 +2026,48 @@ export default function App(){
   };
 
   const deleteCustomer=async(id,name)=>{
-    if(!window.confirm(`Delete customer "${name}"? This cannot be undone.`))return;
-    try{
-      await supabase.from("customers").delete().eq("id",id);
-      setCustomers(prev=>prev.filter(c=>c.id!==id));
-      showToast(`"${name}" deleted`);
-    }catch(e){showToast(e.message,"error");}
+    showConfirm(`Delete customer "${name}"? This cannot be undone.`,async()=>{
+      try{
+        await supabase.from("customers").delete().eq("id",id);
+        setCustomers(prev=>prev.filter(c=>c.id!==id));
+        showToast(`"${name}" deleted`);
+      }catch(e){showToast(e.message,"error");}
+    });
   };
 
   const deleteProduct=async(id,name)=>{
-    if(!window.confirm(`Delete product "${name}"? This cannot be undone.`))return;
-    try{
-      await supabase.from("products").delete().eq("id",id);
-      setProducts(prev=>prev.filter(p=>p.id!==id));
-      showToast(`"${name}" deleted`);
-    }catch(e){showToast(e.message,"error");}
+    showConfirm(`Delete product "${name}"? This cannot be undone.`,async()=>{
+      try{
+        await supabase.from("products").delete().eq("id",id);
+        setProducts(prev=>prev.filter(p=>p.id!==id));
+        showToast(`"${name}" deleted`);
+      }catch(e){showToast(e.message,"error");}
+    });
   };
 
   const deleteTruck=async(id,driver)=>{
-    if(!window.confirm(`Delete truck for "${driver}"? Remaining inventory on this truck will be returned to the warehouse shelf. This cannot be undone.`))return;
-    try{
-      // Calculate remaining inventory on this truck and return it to shelf
-      const inv=truckInv(id);
-      if(inv.length>0){
-        const toReturn=inv.filter(item=>item.remaining>0&&getP(item.pid));
-        await Promise.all(toReturn.map(item=>{
-          const newShelf=getP(item.pid).shelf+item.remaining;
-          return supabase.from("products").update({shelf:newShelf}).eq("id",item.pid);
-        }));
-        setProducts(prev=>prev.map(x=>{
-          const item=toReturn.find(i=>i.pid===x.id);
-          return item?{...x,shelf:x.shelf+item.remaining}:x;
-        }));
-        showToast(`↩️ ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to warehouse`);
-      }
-      await supabase.from("loads").delete().eq("truck_id",id);
-      await supabase.from("trucks").delete().eq("id",id);
-      setTrucks(prev=>prev.filter(t=>t.id!==id));
-      setLoads(prev=>prev.filter(l=>l.truck_id!==id));
-      showToast(`"${driver}" truck deleted — inventory returned to shelf`);
-    }catch(e){showToast(e.message,"error");}
+    showConfirm(`Delete truck for "${driver}"? Remaining inventory will be returned to shelf. This cannot be undone.`,async()=>{
+      try{
+        const inv=truckInv(id);
+        if(inv.length>0){
+          const toReturn=inv.filter(item=>item.remaining>0&&getP(item.pid));
+          await Promise.all(toReturn.map(item=>{
+            const newShelf=getP(item.pid).shelf+item.remaining;
+            return supabase.from("products").update({shelf:newShelf}).eq("id",item.pid);
+          }));
+          setProducts(prev=>prev.map(x=>{
+            const item=toReturn.find(i=>i.pid===x.id);
+            return item?{...x,shelf:x.shelf+item.remaining}:x;
+          }));
+          showToast(`↩️ ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to warehouse`);
+        }
+        await supabase.from("loads").delete().eq("truck_id",id);
+        await supabase.from("trucks").delete().eq("id",id);
+        setTrucks(prev=>prev.filter(t=>t.id!==id));
+        setLoads(prev=>prev.filter(l=>l.truck_id!==id));
+        showToast(`"${driver}" truck deleted — inventory returned to shelf`);
+      }catch(e){showToast(e.message,"error");}
+    });
   };
 
   // State tax is now managed in StateTaxManager component (State Activation tab)
@@ -2170,19 +2177,20 @@ export default function App(){
   const markUnpaid=async sid=>{await supabase.from("payments").update({status:"unpaid",paid_at:null}).eq("sale_id",sid);setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"unpaid"}:p));showToast("Marked unpaid");};
 
   const deleteInvoice=async sid=>{
-    if(!window.confirm(`Delete invoice ${sid} and all linked payments and orders? This cannot be undone.`)) return;
-    try{
-      await supabase.from("payments").delete().eq("sale_id",sid);
-      await supabase.from("payments_log").delete().contains("invoice_ids",[sid]);
-      const orderId="ORD-"+sid.replace("INV-","");
-      await supabase.from("orders").delete().eq("id",orderId);
-      await supabase.from("sales").delete().eq("id",sid);
-      setSales(prev=>prev.filter(s=>s.id!==sid));
-      setPayments(prev=>prev.filter(p=>p.sale_id!==sid));
-      setPaymentsLog(prev=>prev.filter(p=>!(p.invoice_ids||[]).includes(sid)));
-      setOrders(prev=>prev.filter(o=>o.id!==orderId));
-      showToast(`Invoice ${sid} and linked records deleted`);
-    }catch(e){showToast("Error deleting: "+e.message,"error");}
+    showConfirm(`Delete invoice ${sid} and all linked payments? This cannot be undone.`,async()=>{
+      try{
+        await supabase.from("payments").delete().eq("sale_id",sid);
+        await supabase.from("payments_log").delete().contains("invoice_ids",[sid]);
+        const orderId="ORD-"+sid.replace("INV-","");
+        await supabase.from("orders").delete().eq("id",orderId);
+        await supabase.from("sales").delete().eq("id",sid);
+        setSales(prev=>prev.filter(s=>s.id!==sid));
+        setPayments(prev=>prev.filter(p=>p.sale_id!==sid));
+        setPaymentsLog(prev=>prev.filter(p=>!(p.invoice_ids||[]).includes(sid)));
+        setOrders(prev=>prev.filter(o=>o.id!==orderId));
+        showToast(`Invoice ${sid} deleted`);
+      }catch(e){showToast("Error deleting: "+e.message,"error");}
+    });
   };
 
   const openAmend=(sale)=>{
@@ -2504,6 +2512,18 @@ export default function App(){
   return(
     <div className="app">
       <GS/>
+      {/* ── CONFIRM DIALOG ── */}
+      {confirmDialog&&<div style={{position:"fixed",inset:0,background:"#00000070",display:"flex",alignItems:"center",justifyContent:"center",zIndex:998,backdropFilter:"blur(3px)"}}>
+        <div style={{background:"#fff",borderRadius:14,padding:"24px 28px",maxWidth:420,width:"90%",boxShadow:"0 8px 40px #00000030"}}>
+          <div style={{fontWeight:700,fontSize:15,color:"#0a1628",marginBottom:8}}>⚠️ Confirm Action</div>
+          <div style={{fontSize:13,color:"#374151",lineHeight:1.6,marginBottom:20}}>{confirmDialog.msg}</div>
+          <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+            <button className="btn bgh" style={{padding:"9px 20px"}} onClick={()=>setConfirmDialog(null)}>Cancel</button>
+            <button className="btn br" style={{padding:"9px 20px"}} onClick={()=>{const fn=confirmDialog.onConfirm;setConfirmDialog(null);fn();}}>Confirm</button>
+          </div>
+        </div>
+      </div>}
+
       {toast&&<div style={{position:"fixed",bottom:22,right:22,zIndex:999,background:toast.type==="error"?"#1a0c0c":"#0a1e14",border:`1px solid ${toast.type==="error"?"#401414":"#143020"}`,color:toast.type==="error"?"#dc2626":"#059669",padding:"10px 18px",borderRadius:9,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,letterSpacing:".05em",boxShadow:"0 4px 20px #00000060"}}>{toast.msg}</div>}
 
       <div style={{display:"flex",minHeight:"100vh"}}>
