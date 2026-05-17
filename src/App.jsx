@@ -1625,7 +1625,7 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
 
   const startEdit=(st)=>{
     setEditingId(st.id);
-    setEditVals({otp:String(st.rate??ref(st.id).otp),cig:String(st.cig_tax??ref(st.id).cig)});
+    setEditVals({otp:String(st.rate??ref(st.id).otp??0),cig:String(st.cig_tax??ref(st.id).cig??0)});
   };
 
   const saveEdit=async(st)=>{
@@ -1704,13 +1704,11 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
                   ?<span style={{background:"#dcfce7",color:"#166534",padding:"4px 12px",borderRadius:6,fontSize:12,fontWeight:700,flexShrink:0}}>✅ Exempt</span>
                   :<span style={{background:"#fef9c3",color:"#854d0e",padding:"4px 12px",borderRadius:6,fontSize:12,fontWeight:700,flexShrink:0}}>🏛 Active</span>
                 }
-                {/* Edit button */}
-                {!st.exempt&&(
-                  <button onClick={()=>isEditing?setEditingId(null):startEdit(st)}
-                    style={{background:isEditing?"#ede9fe":"#f5f3ff",border:`1px solid ${isEditing?"#7c3aed":"#ddd6fe"}`,borderRadius:7,padding:"6px 10px",fontSize:12,color:"#7c3aed",cursor:"pointer",fontWeight:700,flexShrink:0}}>
-                    {isEditing?"✕":"✏️"}
-                  </button>
-                )}
+                {/* Edit button — always show, even on exempt states */}
+                <button onClick={()=>isEditing?setEditingId(null):startEdit(st)}
+                  style={{background:isEditing?"#ede9fe":"#f5f3ff",border:`1px solid ${isEditing?"#7c3aed":"#ddd6fe"}`,borderRadius:7,padding:"6px 10px",fontSize:12,color:"#7c3aed",cursor:"pointer",fontWeight:700,flexShrink:0}}>
+                  {isEditing?"✕":"✏️"}
+                </button>
                 {/* Remove */}
                 <button onClick={()=>remove(st.id)}
                   style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"6px 10px",fontSize:12,color:"#dc2626",cursor:"pointer",fontWeight:700,flexShrink:0}}>
