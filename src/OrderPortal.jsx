@@ -835,6 +835,259 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   );
 }
 
+// ── DRIVER WALK-IN TAB ────────────────────────────────────────────────────────
+function DriverWalkInTab({driverData, setDriverData, products, supabase}){
+  const uid2 = ()=>Math.random().toString(36).slice(2,9).toUpperCase();
+  const fmt2 = n=>`$${Number(n||0).toFixed(2)}`;
+  const stateTaxes = driverData.stateTaxes||[];
+  const customers  = driverData.customers||[];
+
+  const [wiCust,    setWiCust]    = useState("");
+  const [wiSearch,  setWiSearch]  = useState("");
+  const [wiItems,   setWiItems]   = useState({});
+  const [wiSaving,  setWiSaving]  = useState(false);
+  const [wiMsg,     setWiMsg]     = useState(null);
+  const [wiPay,     setWiPay]     = useState("cash");
+  const [wiCheck,   setWiCheck]   = useState("");
+  const [wiZelle,   setWiZelle]   = useState("");
+  const [wiPrevBal, setWiPrevBal] = useState(0);
+  const [wiPrevInvs,setWiPrevInvs]= useState([]);
+  const [wiCatFilter,setWiCatFilter]=useState("All");
+  const [wiReceiptFile,setWiReceiptFile]=useState(null);
+  const [wiReceiptUrl,setWiReceiptUrl]=useState("");
+
+  const wiCustObj = customers.find(c=>c.id===wiCust);
+  const wiHasReturnedCheck = wiCustObj&&(wiCustObj.notes||"").includes("RETURNED_CHECK:1");
+  const RETURNED_CHECK_FEE = 50;
+
+  // Shelf products only
+  const shelfProds = products.filter(p=>p.shelf>0);
+  const cats = ["All",...new Set(shelfProds.map(p=>p.cat).filter(Boolean))];
+  const filtered = shelfProds.filter(p=>{
+    if(wiCatFilter!=="All"&&p.cat!==wiCatFilter) return false;
+    if(wiSearch&&!p.name.toLowerCase().includes(wiSearch.toLowerCase())&&!p.sku?.toLowerCase().includes(wiSearch.toLowerCase())) return false;
+    return true;
+  });
+  const grouped = cats.filter(c=>c!=="All").reduce((acc,cat)=>{
+    const items = wiCatFilter==="All"
+      ? shelfProds.filter(p=>p.cat===cat&&(!wiSearch||(p.name.toLowerCase().includes(wiSearch.toLowerCase())||p.sku?.toLowerCase().includes(wiSearch.toLowerCase()))))
+      : filtered;
+    if(wiCatFilter==="All"){if(items.length)acc[cat]=items;}
+    else acc[wiCatFilter]=filtered;
+    return acc;
+  },{});
+
+  const getEffP = (cid,pid)=>{
+    const c=customers.find(x=>x.id===cid);
+    const p=products.find(x=>x.id===pid);
+    if(!c||!p)return p?.price||0;
+    try{const m=(c.notes||"").match(/CUSTOM_PRICES:({.*?})/);const cp=m?JSON.parse(m[1]):{};const cv=cp[pid];return(cv&&parseFloat(cv)>0)?parseFloat(cv):p.price;}catch{return p?.price||0;}
+  };
+
+  const taxRate2 = wiCustObj?(()=>{
+    const cs=(wiCustObj.state||"").trim();
+    const st=stateTaxes.find(s=>s.id?.toUpperCase()===cs.toUpperCase()||s.name?.toLowerCase()===cs.toLowerCase());
+    return st?.exempt?0:parseFloat(st?.rate||0);
+  })():0;
+
+  const sub = shelfProds.reduce((a,p)=>a+(getEffP(wiCust,p.id)||0)*(wiItems[p.id]||0),0);
+  const taxable = shelfProds.reduce((a,p)=>isTaxableProd(p)?(a+(getEffP(wiCust,p.id)||0)*(wiItems[p.id]||0)):a,0);
+  const tax = parseFloat((taxable*taxRate2/100).toFixed(2));
+  const gt  = sub+tax;
+  const cardFee = 3;
+  const cardTotal = parseFloat((gt*(1+cardFee/100)).toFixed(2));
+  const totalDue  = (wiPay==="card"?cardTotal:gt)+wiPrevBal;
+
+  const handleWiCust = async(cid)=>{
+    setWiCust(cid);setWiPrevBal(0);setWiPrevInvs([]);
+    if(!cid)return;
+    const [{data:cs},{data:pm}]=await Promise.all([
+      supabase.from("sales").select("id,total,date,state,items,previous_balance").eq("cust_id",cid),
+      supabase.from("payments").select("sale_id,status"),
+    ]);
+    const paidIds=new Set((pm||[]).filter(p=>p.status==="paid").map(p=>p.sale_id));
+    const allUnpaid=(cs||[]).filter(s=>!paidIds.has(s.id));
+    const bal=parseFloat(allUnpaid.reduce((a,s)=>{
+      const custSt=(s.state||"").trim();
+      const st=stateTaxes.find(x=>x.id?.toUpperCase()===custSt.toUpperCase()||x.name?.toLowerCase()===custSt.toLowerCase());
+      const rate=st?.exempt?0:parseFloat(st?.rate||0);
+      const taxableAmt=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);
+      const stax=parseFloat((taxableAmt*rate/100).toFixed(2));
+      return a+s.total+stax+parseFloat(s.previous_balance||0);
+    },0).toFixed(2));
+    setWiPrevBal(bal);setWiPrevInvs(allUnpaid);
+  };
+
+  const createWiSale = async()=>{
+    if(!wiCust) return setWiMsg({t:"error",m:"Select a customer"});
+    const saleItems=shelfProds.filter(p=>wiItems[p.id]>0).map(p=>({pid:p.id,qty:wiItems[p.id]}));
+    if(!saleItems.length) return setWiMsg({t:"error",m:"Add at least one product"});
+    setWiSaving(true);
+    try{
+      const {data:seq}=await supabase.rpc("next_invoice_number");
+      const invId="INV-"+String(seq||1).padStart(4,"0");
+      const profit=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(wiCust,i.pid)-(p?.cost||0))*i.qty;},0);
+      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),created_at:new Date().toISOString()};
+      await supabase.from("sales").insert(ns);
+      for(const i of saleItems){const p=products.find(x=>x.id===i.pid);if(p)await supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id);}
+      let wiRecUrl="";
+      if(wiReceiptFile){
+        const ext=wiReceiptFile.name.split(".").pop();
+        const path=`receipts/WI-${uid2()}.${ext}`;
+        const {data:upD,error:upE}=await supabase.storage.from("receipts").upload(path,wiReceiptFile,{upsert:true});
+        if(!upE) wiRecUrl=supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
+      }
+      await supabase.from("payments").insert({id:"PMT-"+uid2(),sale_id:invId,status:"paid",method:wiPay,amount:totalDue,check_number:wiCheck||"",zelle_ref:wiZelle||"",note:"Walk-in sale",receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
+      // Update local driver sales
+      setDriverData(prev=>({...prev, sales:[{...ns,_paid:true},...prev.sales]}));
+      setWiItems({});setWiCust("");setWiPrevBal(0);setWiPrevInvs([]);setWiCheck("");setWiZelle("");setWiReceiptFile(null);setWiReceiptUrl("");
+      setWiMsg({t:"success",m:`✅ Invoice ${invId} created & payment recorded!`});
+    }catch(e){setWiMsg({t:"error",m:e.message});}
+    setWiSaving(false);
+  };
+
+  return(
+    <div className="fu">
+      <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:12}}>🏪 Walk-in Sale</div>
+      <div style={{fontSize:11,color:"#9ca3af",marginBottom:14}}>Sell directly from warehouse shelf — deducts shelf stock</div>
+
+      {/* Customer + summary card */}
+      <div className="card" style={{padding:"14px 16px",marginBottom:12}}>
+        <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:6}}>CUSTOMER</label>
+        <select value={wiCust} onChange={e=>handleWiCust(e.target.value)}
+          style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:9,padding:"10px 12px",fontSize:13,background:"#fff",color:"#111",marginBottom:8}}>
+          <option value="">— Select customer —</option>
+          {[...customers].sort((a,b)=>a.name.localeCompare(b.name)).map(c=><option key={c.id} value={c.id}>{c.name}{c.state?` · ${c.state}`:""}</option>)}
+        </select>
+        {wiCustObj&&<div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>
+          State: <strong>{wiCustObj.state||"Not set"}</strong> · Tax: <strong style={{color:taxRate2>0?"#7c3aed":"#9ca3af"}}>{taxRate2>0?`${taxRate2}% tobacco`:"exempt/none"}</strong>
+        </div>}
+        {wiHasReturnedCheck&&<div style={{background:"#1a0505",border:"2px solid #dc2626",borderRadius:10,padding:"12px 16px",animation:"pu 1.5s infinite",marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:22}}>🚨</span>
+            <div>
+              <div style={{fontWeight:800,fontSize:13,color:"#dc2626"}}>RETURNED CHECK ON FILE</div>
+              <div style={{fontSize:11,color:"#f87171",marginTop:2}}><strong style={{color:"#fbbf24"}}>${RETURNED_CHECK_FEE} penalty</strong> — use cash, Zelle, or card only.</div>
+            </div>
+          </div>
+        </div>}
+        {wiPrevBal>0&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px",marginBottom:6}}>
+          <div style={{fontWeight:700,fontSize:11,color:"#dc2626",marginBottom:4}}>⚠️ Outstanding Balance</div>
+          {wiPrevInvs.slice(0,3).map(s=><div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#dc2626",marginBottom:2}}><span>{s.id} · {s.date}</span></div>)}
+          <div style={{display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#dc2626",borderTop:"1px solid #fecaca",marginTop:4,paddingTop:4}}><span>Total Owed</span><span>{fmt2(wiPrevBal)}</span></div>
+        </div>}
+      </div>
+
+      {/* Product search + filter */}
+      <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+        <input value={wiSearch} onChange={e=>setWiSearch(e.target.value)} placeholder="🔍 Search products..."
+          style={{flex:1,minWidth:160,border:"1.5px solid #e5e7eb",borderRadius:9,padding:"9px 12px",fontSize:13,background:"#fff"}}/>
+        <button onClick={()=>setWiItems({})} style={{padding:"8px 12px",borderRadius:9,border:"1px solid #e5e7eb",background:"#fff",color:"#6b7280",fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Clear</button>
+      </div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+        {cats.map(c=>(
+          <button key={c} onClick={()=>setWiCatFilter(c)}
+            style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${wiCatFilter===c?"#0a1628":"#e5e7eb"}`,background:wiCatFilter===c?"#0a1628":"#fff",color:wiCatFilter===c?"#fff":"#6b7280",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+            {c}
+          </button>
+        ))}
+      </div>
+
+      {/* Products */}
+      {Object.entries(wiCatFilter==="All"?grouped:{[wiCatFilter]:filtered}).map(([cat,items])=>(
+        <div key={cat} style={{marginBottom:16}}>
+          <div style={{fontWeight:800,fontSize:10,color:"#9ca3af",letterSpacing:".1em",marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
+            {cat.toUpperCase()}<div style={{flex:1,height:1,background:"#e5e7eb"}}/>
+          </div>
+          {items.map(p=>{
+            const qty=wiItems[p.id]||0;
+            const isSelected=qty>0;
+            const ep=getEffP(wiCust,p.id);
+            return(
+              <div key={p.id} className="prod-row" style={{background:"#fff",border:`1.5px solid ${isSelected?"#0a1628":"#e5e7eb"}`,borderRadius:10,padding:"10px 12px",marginBottom:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:13,color:"#0a1628"}}>{p.name}</div>
+                    <div style={{fontSize:10,color:"#9ca3af"}}>{p.sku&&`${p.sku} · `}{p.unit} · {p.shelf} in stock{isTaxableProd(p)&&<span style={{marginLeft:5,background:"#fef3c7",color:"#92400e",padding:"1px 5px",borderRadius:3,fontSize:9,fontWeight:700}}>TOBACCO TAX</span>}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontWeight:800,fontSize:16,color:"#059669"}}>{fmt2(ep)}</div>
+                    {isSelected&&<div style={{fontSize:11,color:"#0a1628",fontWeight:600}}>{fmt2(qty*ep)}</div>}
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <button className="qty-btn" onClick={()=>setWiItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))} style={{width:30,height:30}}>−</button>
+                  <input type="number" min="0" max={p.shelf} value={qty||""} placeholder="0"
+                    onChange={e=>setWiItems(prev=>({...prev,[p.id]:Math.min(p.shelf,Math.max(0,parseInt(e.target.value)||0))}))}
+                    style={{flex:1,textAlign:"center",border:`1.5px solid ${isSelected?"#0a1628":"#e5e7eb"}`,borderRadius:8,padding:"6px 4px",fontSize:14,fontWeight:700,background:"#fff"}}/>
+                  <button className="qty-btn" onClick={()=>setWiItems(prev=>({...prev,[p.id]:Math.min(p.shelf,(prev[p.id]||0)+1)}))} disabled={qty>=p.shelf} style={{width:30,height:30}}>+</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      {filtered.length===0&&<div className="card" style={{padding:24,textAlign:"center",color:"#9ca3af",fontSize:13}}>No products match your search</div>}
+
+      {/* Order summary + payment */}
+      {sub>0&&(
+        <div className="card" style={{padding:"14px 16px",marginTop:4,marginBottom:12}}>
+          <div style={{fontWeight:700,fontSize:12,color:"#0a1628",marginBottom:8}}>ORDER SUMMARY</div>
+          {[["Subtotal",fmt2(sub),"#212121"],tax>0?["Tobacco Tax ("+taxRate2+"%)",fmt2(tax),"#7c3aed"]:null,wiPrevBal>0?["Prev. Balance",fmt2(wiPrevBal),"#dc2626"]:null,wiPay==="card"?["Card Fee ("+cardFee+"%)",fmt2(parseFloat((gt*cardFee/100).toFixed(2))),"#f59e0b"]:null,["Total Due",fmt2(totalDue),"#059669"]].filter(Boolean).map(([l,v,c])=>(
+            <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:5,paddingBottom:l==="Total Due"?0:5,borderBottom:l==="Total Due"?"none":"1px solid #f3f4f6"}}>
+              <span style={{fontSize:11,color:l==="Total Due"?"#212121":"#6b7280",fontWeight:l==="Total Due"?700:400}}>{l}</span>
+              <span style={{fontSize:l==="Total Due"?15:12,fontWeight:l==="Total Due"?800:600,color:c}}>{v}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Payment method */}
+      <div className="card" style={{padding:"14px 16px",marginBottom:12}}>
+        <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:8}}>PAYMENT METHOD</label>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+          {[["cash","💵 Cash"],["check","🧾 Check"],["zelle","⚡ Zelle"],["money_order","📮 M.O."],["card","💳 Card"]].map(([id,label])=>(
+            <button key={id} onClick={()=>setWiPay(id)}
+              style={{padding:"9px 8px",borderRadius:9,border:`1.5px solid ${wiPay===id?"#0a1628":"#e5e7eb"}`,background:wiPay===id?"#0a1628":"#fff",color:wiPay===id?"#fff":"#6b7280",fontSize:12,fontWeight:wiPay===id?700:400,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {wiPay==="check"&&<input value={wiCheck} onChange={e=>setWiCheck(e.target.value)} placeholder="Check number"
+          style={{width:"100%",marginTop:8,border:"1.5px solid #e5e7eb",borderRadius:8,padding:"9px 12px",fontSize:13,boxSizing:"border-box",background:"#fff"}}/>}
+        {wiPay==="zelle"&&<input value={wiZelle} onChange={e=>setWiZelle(e.target.value)} placeholder="Zelle reference"
+          style={{width:"100%",marginTop:8,border:"1.5px solid #e5e7eb",borderRadius:8,padding:"9px 12px",fontSize:13,boxSizing:"border-box",background:"#fff"}}/>}
+      </div>
+
+      {/* Receipt upload */}
+      <div className="card" style={{padding:"14px 16px",marginBottom:14}}>
+        <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:8}}>RECEIPT / PAYMENT PROOF</label>
+        <div style={{border:"2px dashed #e5e7eb",borderRadius:9,padding:"14px",textAlign:"center",background:"#fafafa",cursor:"pointer"}}
+          onClick={()=>document.getElementById("wiReceiptInputDriver").click()}>
+          {wiReceiptUrl
+            ?<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+              <img src={wiReceiptUrl} alt="receipt" style={{maxHeight:80,maxWidth:"100%",borderRadius:6}}/>
+              <span style={{fontSize:10,color:"#059669",fontWeight:600}}>✅ Attached — tap to change</span>
+            </div>
+            :<div style={{color:"#9ca3af",fontSize:12}}>
+              <div style={{fontSize:22,marginBottom:4}}>📸</div>
+              <div>Tap to snap or upload receipt</div>
+            </div>}
+          <input id="wiReceiptInputDriver" type="file" accept="image/*,application/pdf" capture="environment" style={{display:"none"}}
+            onChange={e=>{const f=e.target.files[0];if(f){setWiReceiptFile(f);setWiReceiptUrl(URL.createObjectURL(f));}}}/>
+        </div>
+      </div>
+
+      {/* Message + submit */}
+      {wiMsg&&<div style={{background:wiMsg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${wiMsg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:13,color:wiMsg.t==="success"?"#065f46":"#dc2626",marginBottom:10}}>{wiMsg.m}</div>}
+      <button onClick={createWiSale} disabled={wiSaving||!wiCust||sub===0} className="btn-primary"
+        style={{width:"100%",justifyContent:"center",padding:"13px",marginBottom:24,background:(!wiCust||sub===0)?"#9ca3af":"#0a1628"}}>
+        {wiSaving?<><span className="sp">⟳</span> Creating…</>:"🧾 Create Invoice & Record Payment"}
+      </button>
+    </div>
+  );
+}
+
 // ── DRIVER EXPENSES TAB ───────────────────────────────────────────────────────
 function DriverExpensesTab({driverData, supabase}){
   const [form, setForm] = useState({category:"gas",amount:"",description:"",receipt_url:""});
@@ -1562,11 +1815,12 @@ export default function OrderPortal() {
               </div>
 
               {/* Tab navigation */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:6,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr 1fr",gap:5,marginBottom:16}}>
                 {[
                   {k:"dashboard",e:"🏠",l:"Home"},
                   {k:"load",e:"📦",l:"Load"},
                   {k:"sell",e:"💳",l:"Sell"},
+                  {k:"walkin",e:"🏪",l:"Walk-in"},
                   {k:"expenses",e:"💸",l:"Expenses"},
                   {k:"history",e:"📄",l:"History"},
                 ].map(t=>(
@@ -1675,6 +1929,9 @@ export default function OrderPortal() {
 
               {/* ── EXPENSES TAB ── */}
               {driverTab==="expenses"&&<DriverExpensesTab driverData={driverData} supabase={supabase}/>}
+
+              {/* ── WALK-IN TAB ── */}
+              {driverTab==="walkin"&&<DriverWalkInTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase}/>}
 
               {/* ── HISTORY TAB ── */}
               {driverTab==="history"&&<div>
