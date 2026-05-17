@@ -1699,7 +1699,7 @@ export default function App(){
   // ── CUSTOM PRICING ─────────────────────────────────────────────────────────────────────────────
   const parseCustomPrices=cust=>{try{const m=(cust?.notes||"").match(/CUSTOM_PRICES:({.*?})/);return m?JSON.parse(m[1]):{};}catch{return{};}};
   const hasReturnedCheck=cust=>!!(cust?.notes||"").includes("RETURNED_CHECK:1");
-  const RETURNED_CHECK_FEE=50;
+  const RETURNED_CHECK_FEE=parseFloat(co?.check_penalty||50);
   const markCheckReturned=async(custId)=>{
     const cust=getC(custId);if(!cust)return;
     if((cust.notes||"").includes("RETURNED_CHECK:1"))return; // already flagged, skip silently
@@ -1733,10 +1733,43 @@ export default function App(){
         await supabase.from("payments").insert({sale_id:saleId,status:"returned_check",returned_check_url:rcUrl});
       }
       setPayments(prev=>prev.map(p=>p.sale_id===saleId?{...p,status:"returned_check",returned_check_url:rcUrl}:p));
+
+      // ── ADD PENALTY TO LATEST UNPAID INVOICE ──────────────────────────────
+      const penalty=parseFloat(co?.check_penalty||50);
+      // Find all unpaid invoices for this customer (excluding the returned check one)
+      const custSales=sales.filter(s=>s.cust_id===custId);
+      const unpaidSales=custSales.filter(s=>{
+        const p=pmtFor(s.id);
+        return !p||(p.status!=="paid"&&s.id!==saleId);
+      });
+      // Sort by date descending — add penalty to the most recent unpaid invoice
+      unpaidSales.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+      const targetSale=unpaidSales[0];
+      if(targetSale){
+        const newPrevBal=parseFloat(targetSale.previous_balance||0)+penalty;
+        await supabase.from("sales").update({
+          previous_balance:newPrevBal,
+          check_penalty_applied:penalty,
+          check_penalty_invoice:saleId,
+        }).eq("id",targetSale.id);
+        setSales(prev=>prev.map(s=>s.id===targetSale.id?{...s,previous_balance:newPrevBal,check_penalty_applied:penalty,check_penalty_invoice:saleId}:s));
+        showToast(`🔴 $${penalty} penalty added to invoice ${targetSale.id}`);
+      } else {
+        // No unpaid invoice — create a standalone penalty record on the returned check invoice
+        const newPrevBal=parseFloat(sales.find(s=>s.id===saleId)?.previous_balance||0)+penalty;
+        await supabase.from("sales").update({
+          previous_balance:newPrevBal,
+          check_penalty_applied:penalty,
+        }).eq("id",saleId);
+        setSales(prev=>prev.map(s=>s.id===saleId?{...s,previous_balance:newPrevBal,check_penalty_applied:penalty}:s));
+        showToast(`🔴 $${penalty} penalty added to invoice ${saleId} (no other unpaid invoice found)`);
+      }
+      // ──────────────────────────────────────────────────────────────────────
+
       // Auto-flag the customer
       await markCheckReturned(custId);
       setRcModal(null);
-      showToast("🔴 Returned check uploaded — customer flagged");
+      showToast("🔴 Returned check uploaded — customer flagged & penalty applied");
     }catch(e){showToast(e.message,"error");}
     setRcUploading(false);
   };
@@ -2329,6 +2362,7 @@ export default function App(){
     {id:"ar",label:"Accounts Receivable",icon:ic.ar},
     {id:"payments",label:"Payments",icon:ic.settle,badge:visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length||0},
     {id:"settlement",label:"Daily Settlement",icon:ic.settle},
+    ...(isAdmin?[{id:"returnedchecks",label:"Returned Checks",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🔴</span>,badge:payments.filter(p=>p.status==="returned_check").length||0}]:[]),
     ...(isAdmin?[{id:"pl",label:"P&L Report",icon:ic.pl}]:[]),
     ...(isAdmin?[{id:"irs",label:"IRS Reports",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13,marginRight:0}}>🏛</span>}]:[]),
     {id:"customers",label:"Customers",icon:ic.users},
@@ -3508,6 +3542,149 @@ export default function App(){
             </div>
           </div>}
 
+          {/* ══ RETURNED CHECKS ══ */}
+          {tab==="returnedchecks"&&isAdmin&&(()=>{
+            const rcPayments=payments.filter(p=>p.status==="returned_check");
+            const flaggedCustomers=customers.filter(c=>hasReturnedCheck(c));
+            const [penaltyEdit,setPenaltyEdit]=useState(String(co?.check_penalty||50));
+            const [penaltySaving,setPenaltySaving]=useState(false);
+
+            const savePenalty=async()=>{
+              const val=parseFloat(penaltyEdit);
+              if(isNaN(val)||val<0)return showToast("Enter a valid amount","error");
+              setPenaltySaving(true);
+              await supabase.from("company").update({check_penalty:val}).eq("id",co.id);
+              setCo(prev=>({...prev,check_penalty:val}));
+              setCoEdit(prev=>({...prev,check_penalty:val}));
+              setPenaltySaving(false);
+              showToast(`✅ Penalty fee updated to $${val}`);
+            };
+
+            return(
+              <div className="fu">
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:10}}>
+                  <div>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#212121"}}>🔴 Returned Checks</div>
+                    <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Track returned checks, flagged customers, and penalty fees</div>
+                  </div>
+                </div>
+
+                {/* ── PENALTY SETTING ── */}
+                <div className="card" style={{padding:20,marginBottom:16,borderLeft:"4px solid #dc2626"}}>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#212121",marginBottom:4}}>💰 Returned Check Penalty Fee</div>
+                  <div style={{fontSize:12,color:"#6b7280",marginBottom:12}}>This amount is automatically added to the customer's latest unpaid invoice when a check is returned.</div>
+                  <div style={{display:"flex",gap:10,alignItems:"center",maxWidth:340}}>
+                    <div style={{position:"relative",flex:1}}>
+                      <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:14,fontWeight:700,color:"#374151"}}>$</span>
+                      <input type="number" min="0" step="1" value={penaltyEdit}
+                        onChange={e=>setPenaltyEdit(e.target.value)}
+                        onKeyDown={e=>e.key==="Enter"&&savePenalty()}
+                        style={{paddingLeft:28,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,width:"100%",border:"2px solid #fecaca",borderRadius:8,padding:"10px 12px 10px 28px",color:"#dc2626"}}/>
+                    </div>
+                    <button className="btn ba" onClick={savePenalty} disabled={penaltySaving} style={{background:"#dc2626",whiteSpace:"nowrap"}}>
+                      {penaltySaving?"Saving…":"Save Penalty"}
+                    </button>
+                  </div>
+                  <div style={{marginTop:8,fontSize:11,color:"#9ca3af"}}>Current: <strong style={{color:"#dc2626"}}>${co?.check_penalty||50}</strong></div>
+                </div>
+
+                {/* ── KPIs ── */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
+                  {[
+                    {l:"Returned Checks",v:rcPayments.length,c:"#dc2626",bg:"#fef2f2"},
+                    {l:"Flagged Customers",v:flaggedCustomers.length,c:"#f59e0b",bg:"#fffbeb"},
+                    {l:"Total Penalties",v:fmt(sales.reduce((a,s)=>a+parseFloat(s.check_penalty_applied||0),0)),c:"#7c3aed",bg:"#f5f3ff"},
+                  ].map(k=>(
+                    <div key={k.l} className="kpi" style={{background:k.bg,border:`1px solid ${k.c}30`}}>
+                      <div className="kv" style={{color:k.c}}>{k.v}</div>
+                      <div className="kl">{k.l}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── FLAGGED CUSTOMERS ── */}
+                {flaggedCustomers.length>0&&<>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,color:"#92400e",letterSpacing:".06em",marginBottom:8}}>⚠️ FLAGGED CUSTOMERS</div>
+                  <div className="card" style={{marginBottom:16,overflow:"hidden"}}>
+                    <table>
+                      <thead><tr>
+                        {["Customer","Phone","Returned Invoice","Penalty Applied To","Penalty Amt","Action"].map(h=><th key={h}>{h}</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {flaggedCustomers.map(c=>{
+                          // Find invoices with penalty applied to this customer
+                          const penaltySales=sales.filter(s=>s.cust_id===c.id&&s.check_penalty_applied>0);
+                          const rcPmt=rcPayments.find(p=>sales.find(s=>s.id===p.sale_id&&s.cust_id===c.id));
+                          const rcSaleId=rcPmt?.sale_id;
+                          return(
+                            <tr key={c.id}>
+                              <td><div style={{fontWeight:700}}>{c.name}</div>{c.address&&<div style={{fontSize:10,color:"#9ca3af"}}>{c.address}</div>}</td>
+                              <td style={{color:"#6b7280"}}>{c.phone||"—"}</td>
+                              <td>
+                                {rcSaleId?<span style={{background:"#fef2f2",color:"#dc2626",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:700}}>{rcSaleId}</span>:<span style={{color:"#9ca3af",fontSize:11}}>—</span>}
+                                {rcPmt?.returned_check_url&&<button onClick={()=>window.open(rcPmt.returned_check_url,"_blank")} style={{marginLeft:6,background:"none",border:"1px solid #fecaca",color:"#dc2626",borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer"}}>📄 View</button>}
+                              </td>
+                              <td>
+                                {penaltySales.length>0
+                                  ?penaltySales.map(s=><div key={s.id}><span style={{fontWeight:700,color:"#7c3aed",fontSize:11}}>{s.id}</span><span style={{fontSize:10,color:"#9ca3af",marginLeft:4}}>(+${s.check_penalty_applied} added)</span></div>)
+                                  :<span style={{color:"#9ca3af",fontSize:11}}>—</span>}
+                              </td>
+                              <td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#dc2626"}}>${co?.check_penalty||50}</span></td>
+                              <td>
+                                <button className="btn bg" style={{fontSize:10,padding:"5px 10px"}} onClick={()=>clearReturnedCheck(c.id)}>✅ Clear Flag</button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>}
+
+                {/* ── RETURNED CHECK HISTORY ── */}
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,color:"#991b1b",letterSpacing:".06em",marginBottom:8}}>📋 RETURNED CHECK HISTORY</div>
+                {rcPayments.length===0
+                  ?<div className="card" style={{padding:32,textAlign:"center",color:"#9ca3af"}}>
+                    <div style={{fontSize:28,marginBottom:6}}>✅</div>
+                    <div style={{fontSize:13}}>No returned checks on record</div>
+                  </div>
+                  :<div className="card" style={{overflow:"hidden"}}>
+                    <table>
+                      <thead><tr>
+                        {["Invoice","Customer","Driver","Date","Check Image","Penalty Applied"].map(h=><th key={h}>{h}</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {rcPayments.map(p=>{
+                          const sale=sales.find(s=>s.id===p.sale_id);
+                          const cust=sale?getC(sale.cust_id):null;
+                          const truck=sale?getT(sale.truck_id):null;
+                          const penaltySale=sales.find(s=>s.check_penalty_invoice===p.sale_id);
+                          return(
+                            <tr key={p.sale_id}>
+                              <td><span style={{fontWeight:700,color:"#7c3aed"}}>{p.sale_id}</span></td>
+                              <td>{cust?.name||"—"}</td>
+                              <td style={{color:"#6b7280"}}>{truck?.driver||"Walk-in"}</td>
+                              <td style={{color:"#6b7280",fontSize:11}}>{sale?.date||"—"}</td>
+                              <td>
+                                {p.returned_check_url
+                                  ?<button onClick={()=>window.open(p.returned_check_url,"_blank")} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>📄 View Check</button>
+                                  :<span style={{color:"#9ca3af",fontSize:11}}>No image</span>}
+                              </td>
+                              <td>
+                                {penaltySale
+                                  ?<div><span style={{fontWeight:700,color:"#dc2626"}}>${sale?.check_penalty_applied||co?.check_penalty||50}</span><span style={{fontSize:10,color:"#9ca3af",marginLeft:4}}>→ {penaltySale.id}</span></div>
+                                  :<span style={{fontSize:11,color:"#9ca3af"}}>Added to same invoice</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>}
+              </div>
+            );
+          })()}
+
           {/* ══ NEW USERS APPROVAL ══ */}
           {tab==="userapprovals"&&isAdmin&&(()=>{
             const pending=walkinRegs.filter(r=>r.status==="pending");
@@ -3966,7 +4143,7 @@ export default function App(){
                 <span style={{fontSize:24}}>🚨</span>
                 <div>
                   <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#dc2626",letterSpacing:".04em"}}>RETURNED CHECK — DO NOT ACCEPT CHECKS</div>
-                  <div style={{fontSize:12,color:"#f87171",marginTop:3}}>This customer has a returned check on file. A <strong style={{color:"#fbbf24"}}>$50 penalty fee</strong> will be applied if a check is accepted again.</div>
+                  <div style={{fontSize:12,color:"#f87171",marginTop:3}}>This customer has a returned check on file. A <strong style={{color:"#fbbf24"}}>${RETURNED_CHECK_FEE} penalty fee</strong> will be applied if a check is accepted again.</div>
                   <div style={{fontSize:11,color:"#6b7280",marginTop:4}}>Accepted payment: 💵 Cash · 📱 Zelle · 💳 Card only</div>
                 </div>
               </div>
@@ -4071,7 +4248,7 @@ export default function App(){
                 <div style={{fontSize:12,color:"#f87171",lineHeight:1.6}}>
                   Once uploaded, <strong style={{color:"#fbbf24"}}>{cust?.name}</strong> will be flagged system-wide.<br/>
                   All drivers will see a <strong style={{color:"#fbbf24"}}>🚨 warning</strong> when creating any new sale for this customer.<br/>
-                  A <strong style={{color:"#fbbf24"}}>$50 penalty fee</strong> will be required on their next check.
+                  A <strong style={{color:"#fbbf24"}}>${RETURNED_CHECK_FEE} penalty fee</strong> will be required on their next check.
                 </div>
               </div>
             </div>

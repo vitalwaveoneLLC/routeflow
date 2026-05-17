@@ -754,7 +754,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
             <span style={{fontSize:24,flexShrink:0}}>🚨</span>
             <div>
               <div style={{fontFamily:"'Inter',sans-serif",fontWeight:800,fontSize:14,color:"#dc2626",marginBottom:3}}>RETURNED CHECK ON FILE</div>
-              <div style={{fontSize:12,color:"#f87171",lineHeight:1.6}}>This customer has a returned check. <strong style={{color:"#fbbf24"}}>DO NOT accept a check.</strong><br/>A <strong style={{color:"#fbbf24"}}>$50 penalty fee</strong> applies on next check. Accept cash, Zelle, or card only.</div>
+              <div style={{fontSize:12,color:"#f87171",lineHeight:1.6}}>This customer has a returned check. <strong style={{color:"#fbbf24"}}>DO NOT accept a check.</strong><br/>A <strong style={{color:"#fbbf24"}}>${co?.check_penalty||50} penalty fee</strong> applies on next check. Accept cash, Zelle, or card only.</div>
             </div>
           </div>
         </div>}
@@ -858,7 +858,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
 
   const wiCustObj = customers.find(c=>c.id===wiCust);
   const wiHasReturnedCheck = wiCustObj&&(wiCustObj.notes||"").includes("RETURNED_CHECK:1");
-  const RETURNED_CHECK_FEE = 50;
+  const RETURNED_CHECK_FEE = parseFloat(driverData.co?.check_penalty||50);
 
   // Auto-load balance when customer is pre-set (walk-in portal flow)
   useEffect(()=>{ if(initCust) handleWiCust(initCust); },[initCust]);
