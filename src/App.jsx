@@ -3375,8 +3375,10 @@ export default function App(){
                       <td style={{fontFamily:"monospace",fontSize:11,color:"#6b7280"}}>{p.check_number||"—"}{p.bank_name&&<div style={{fontSize:9,color:"#9ca3af"}}>{p.bank_name}</div>}</td>
                       <td style={{fontSize:11,color:"#7c3aed"}}>{(p.invoice_ids||[]).join(", ")||"—"}</td>
                       <td style={{fontSize:11,color:"#6b7280",fontStyle:p.note?"normal":"italic"}}>{p.note||"—"}</td>
-                      <td>{isAdmin&&(()=>{const cust=getC(p.cust_id);const flagged=hasReturnedCheck(cust);return flagged?(
-                        <button onClick={()=>clearReturnedCheck(p.cust_id)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",color:"#065f46",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow',sans-serif",whiteSpace:"nowrap"}}>✅ Clear Flag</button>
+                      <td>{isAdmin&&p.method==="check"&&(()=>{const cust=getC(p.cust_id);const flagged=hasReturnedCheck(cust);const firstInv=(p.invoice_ids||[])[0];return flagged?(
+                        <button onClick={()=>clearReturnedCheck(p.cust_id)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",color:"#065f46",borderRadius:6,padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow',sans-serif",whiteSpace:"nowrap"}}>✅ Clear Flag</button>
+                      ):firstInv?(
+                        <button onClick={()=>setRcModal({saleId:firstInv,custId:p.cust_id})} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow',sans-serif",whiteSpace:"nowrap"}}>🔴 Upload Returned Check</button>
                       ):null;})()}</td>
                     </tr>
                   ))}</tbody>
