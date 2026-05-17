@@ -1176,6 +1176,7 @@ export default function OrderPortal() {
   const [isNew,     setIsNew]     = useState(false);
   const [isExisting,setIsExisting]= useState(false);
   const [isDriver,  setIsDriver]  = useState(false);
+  const [isWalkIn,  setIsWalkIn]  = useState(false);
   const [driverEmail, setDriverEmail] = useState("");
   const [driverPw,    setDriverPw]    = useState("");
   const [driverUser,  setDriverUser]  = useState(null);
@@ -1434,7 +1435,7 @@ export default function OrderPortal() {
   };
 
   const resetAll = () => {
-    setStep("home"); setIsNew(false); setIsExisting(false); setIsDriver(false); setSelCust(null);
+    setStep("home"); setIsNew(false); setIsExisting(false); setIsDriver(false); setIsWalkIn(false); setSelCust(null);
     setCustSearch(""); setCustPhone(""); setVerifyError(""); setQuantities({}); setNotes(""); setOrder(null);
     setPayMethod("delivery"); setClientSecret(null); setStripeError(null); setStripeReady(false);
     setDriverUser(null); setDriverData(null); setDriverEmail(""); setDriverPw(""); setDriverError("");
@@ -1695,7 +1696,7 @@ export default function OrderPortal() {
 
         {/* Back to home — for non-logged-in selection screens */}
         {!driverUser&&(isNew||isExisting||(isDriver&&!driverUser))&&step==="home"&&(
-          <button onClick={()=>{setIsNew(false);setIsExisting(false);setIsDriver(false);}} style={{background:"#1e3050",border:"1px solid #2e4060",borderRadius:8,padding:"7px 14px",color:"#b0c8e0",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6,fontFamily:"'Inter',sans-serif"}}>
+          <button onClick={()=>{setIsNew(false);setIsExisting(false);setIsDriver(false);setIsWalkIn(false);}} style={{background:"#1e3050",border:"1px solid #2e4060",borderRadius:8,padding:"7px 14px",color:"#b0c8e0",fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6,fontFamily:"'Inter',sans-serif"}}>
             ← Back
           </button>
         )}
@@ -1706,7 +1707,7 @@ export default function OrderPortal() {
       {/* ══ HOME — New or Existing ══ */}
       {step==="home"&&<div className="fu">
         {/* Only show welcome + cards if no role selected yet */}
-        {!isNew&&!isDriver&&!isExisting&&<>
+        {!isNew&&!isDriver&&!isExisting&&!isWalkIn&&<>
         <div style={{textAlign:"center",marginBottom:36}}>
           <div style={{fontFamily:"'Playfair Display',serif",fontSize:42,color:"#0a1628",lineHeight:1.15,marginBottom:10}}>
             Welcome to VitalWaveOne
@@ -1719,29 +1720,36 @@ export default function OrderPortal() {
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,maxWidth:900,margin:"0 auto 40px"}} className="grid2">
           {/* Existing Customer */}
           <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb"}}
-            onClick={()=>{setIsExisting(true);setIsNew(false);setIsDriver(false);}}
+            onClick={()=>{setIsExisting(true);setIsNew(false);setIsDriver(false);setIsWalkIn(false);}}
             onMouseEnter={e=>{e.currentTarget.style.borderColor="#0a1628";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #0a162820";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
             <div style={{fontSize:36,marginBottom:12}}>💎</div>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#0a1628",marginBottom:8}}>Existing Customer</div>
             <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>Welcome back! Access your account and place your order.</div>
             <div style={{marginTop:16,color:"#0a1628",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>Access my account →</div>
+            <div style={{marginTop:10,fontSize:12,color:"#9ca3af"}}>
+              New customer?{" "}
+              <span style={{color:"#f59e0b",fontWeight:600,cursor:"pointer",textDecoration:"underline"}}
+                onClick={e=>{e.stopPropagation();setIsNew(true);setIsExisting(false);setIsDriver(false);setIsWalkIn(false);}}>
+                Sign up →
+              </span>
+            </div>
           </div>
 
-          {/* New Customer */}
-          <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb",background:"linear-gradient(135deg,#fff,#fffbf0)"}}
-            onClick={()=>{setIsNew(true);setIsDriver(false);}}
-            onMouseEnter={e=>{e.currentTarget.style.borderColor="#f59e0b";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #f59e0b20";}}
+          {/* Walk-in */}
+          <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb",background:"linear-gradient(135deg,#fff,#f5f3ff)"}}
+            onClick={()=>{setIsWalkIn(true);setIsNew(false);setIsDriver(false);setIsExisting(false);}}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor="#7c3aed";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #7c3aed20";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
-            <div style={{fontSize:36,marginBottom:12}}>🆕</div>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#0a1628",marginBottom:8}}>New Customer</div>
-            <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>First time ordering with VitalWaveOne. Register your business.</div>
-            <div style={{marginTop:16,color:"#f59e0b",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>Register & Order →</div>
+            <div style={{fontSize:36,marginBottom:12}}>🏪</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#0a1628",marginBottom:8}}>Walk-in</div>
+            <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>Purchase directly from the warehouse. Sell from shelf stock on the spot.</div>
+            <div style={{marginTop:16,color:"#7c3aed",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>Walk-in sale →</div>
           </div>
 
           {/* Driver */}
           <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb",background:"linear-gradient(135deg,#fff,#f0f9ff)"}}
-            onClick={()=>{setIsDriver(true);setIsNew(false);}}
+            onClick={()=>{setIsDriver(true);setIsNew(false);setIsWalkIn(false);setIsExisting(false);}}
             onMouseEnter={e=>{e.currentTarget.style.borderColor="#0ea5e9";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #0ea5e920";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
             <div style={{fontSize:36,marginBottom:12}}>🚚</div>
@@ -1815,12 +1823,11 @@ export default function OrderPortal() {
               </div>
 
               {/* Tab navigation */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr 1fr",gap:5,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:6,marginBottom:16}}>
                 {[
                   {k:"dashboard",e:"🏠",l:"Home"},
                   {k:"load",e:"📦",l:"Load"},
                   {k:"sell",e:"💳",l:"Sell"},
-                  {k:"walkin",e:"🏪",l:"Walk-in"},
                   {k:"expenses",e:"💸",l:"Expenses"},
                   {k:"history",e:"📄",l:"History"},
                 ].map(t=>(
@@ -1929,9 +1936,6 @@ export default function OrderPortal() {
 
               {/* ── EXPENSES TAB ── */}
               {driverTab==="expenses"&&<DriverExpensesTab driverData={driverData} supabase={supabase}/>}
-
-              {/* ── WALK-IN TAB ── */}
-              {driverTab==="walkin"&&<DriverWalkInTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase}/>}
 
               {/* ── HISTORY TAB ── */}
               {driverTab==="history"&&<div>
@@ -2057,6 +2061,22 @@ export default function OrderPortal() {
             </div>
           )}
         </div>}
+        {isWalkIn&&<div className="fu">
+          <div style={{marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:2}}>🏪 Walk-in Sale</div>
+              <div style={{fontSize:12,color:"#9ca3af"}}>Sell directly from warehouse shelf</div>
+            </div>
+            <button onClick={()=>setIsWalkIn(false)} style={{background:"#f3f4f6",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,color:"#6b7280",cursor:"pointer",fontFamily:"'Inter',sans-serif",fontWeight:600}}>← Back</button>
+          </div>
+          <DriverWalkInTab
+            driverData={{customers, stateTaxes:portalStateTaxes, sales:[], co}}
+            setDriverData={()=>{}}
+            products={products.filter(p=>p.shelf>0)}
+            supabase={supabase}
+          />
+        </div>}
+
         {isExisting&&<div className="fu">
           <div style={{maxWidth:460,margin:"0 auto"}}>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:6,textAlign:"center"}}>Access Your Account</div>
