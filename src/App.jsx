@@ -4020,7 +4020,6 @@ export default function App(){
                     </div>
                   </div>
                 </div>}
-              </>}
 
               {/* ── OVERVIEW ── */}
               {tmTab==="overview"&&<>
