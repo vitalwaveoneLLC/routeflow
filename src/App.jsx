@@ -1814,6 +1814,7 @@ export default function App(){
   const[payments,setPayments]=useState([]);
   const[orders,setOrders]=useState([]);
   const[expenses,setExpenses]=useState([]);
+  const[paymentsLog,setPaymentsLog]=useState([]);
   const[loading,setLoading]=useState(true);
 
   // UI
@@ -1901,6 +1902,9 @@ export default function App(){
       if(orR.data)setOrders(orR.data);
       if(stR.data)setStateTaxes(stR.data);
       if(exR.data)setExpenses(exR.data);
+      // Also reload paymentsLog
+      const pmLR = await supabase.from("payments_log").select("*").order("created_at",{ascending:false});
+      if(pmLR.data)setPaymentsLog(pmLR.data);
     }catch(e){showToast("Error loading data","error");}
     setLoading(false);
   },[profile]);
@@ -1913,8 +1917,7 @@ export default function App(){
   const pmtFor=sid=>payments.find(p=>p.sale_id===sid);
 
   // ── STATE TAX HELPERS ──────────────────────────────────────────────────────
-  // Tax applies to tobacco/nicotine category ONLY
-  const isTaxableProd = p => TAXABLE_CATS.some(t=>p?.cat?.toLowerCase().includes(t)||p?.name?.toLowerCase().includes(t));
+  // isTaxableProd defined at module level — used consistently everywhere
 
   const getStateTaxRate = stateId => {
     if(!stateId) return parseFloat(co?.tax_rate||0);
@@ -2233,17 +2236,9 @@ export default function App(){
 
   // ── PAYMENTS ───────────────────────────────────────────────────────────────
   // ── PAYMENT STATE ──────────────────────────────────────────────────────────
-  const[paymentsLog,setPaymentsLog]=useState([]);
   const[pmModal,setPmModal]=useState(false);
   const[pmForm,setPmForm]=useState({method:"cash",amount:"",check_number:"",bank_name:"",note:"",cust_id:"",truck_id:"",invoice_ids:[],receipt_url:""});
   const[pmTab,setPmTab]=useState("log"); // "log" | "collect"
-
-  // Load payments log
-  useEffect(()=>{
-    if(authReady&&session&&profile){
-      supabase.from("payments_log").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data)setPaymentsLog(data);});
-    }
-  },[authReady,session,profile]);
 
   const markPaid=async(sid,method="cash",amount=0,checkNum="",note="",collectedBy="",receiptUrl="")=>{
     const ex=pmtFor(sid);
