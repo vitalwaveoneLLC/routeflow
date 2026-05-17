@@ -1817,6 +1817,9 @@ export default function App(){
                     tryStrategy(idx+1); return;
                   }
                   L.marker([lat,lon],{icon:makeIcon(true)}).addTo(m).bindPopup(popup);
+                  allLatLngs.push([lat,lon]);
+                  // Re-fit bounds to include this new pin
+                  try{ m.fitBounds(allLatLngs,{padding:[50,50],maxZoom:14,animate:true}); }catch(e){}
                   console.log(`[Map] "${c.name}" -> ${result.display_name.slice(0,60)} (type:${result.type}, imp:${imp.toFixed(2)}, strategy:${idx+1})`);
                 } else {
                   tryStrategy(idx+1);
@@ -1829,6 +1832,8 @@ export default function App(){
         });
 
         // -- DRIVER LOCATION PINS ----------------------------------------------
+        const allLatLngs = []; // collect all pin coords for auto-fit
+
         driverProfiles.filter(p=>p.lat&&p.lng).forEach(p=>{
           if(cancelled||!mapInst.current) return;
           const truck=trucks.find(t=>t.id===p.truck_id);
@@ -1840,12 +1845,61 @@ export default function App(){
           L.marker([p.lat,p.lng],{icon:driverIcon})
             .addTo(mapInst.current)
             .bindPopup(`<b>🚚 ${truck?.driver||"Driver"}</b><br/>Last seen: ${p.last_seen?new Date(p.last_seen).toLocaleTimeString():"Unknown"}<br/>Route: ${truck?.route||"—"}`);
+          allLatLngs.push([p.lat,p.lng]);
         });
 
-        // Auto-fit bounds if we have driver pins
-        const driverPins=driverProfiles.filter(p=>p.lat&&p.lng);
-        if(driverPins.length>0){
-          map.fitBounds(driverPins.map(p=>[p.lat,p.lng]),{padding:[40,40],maxZoom:12});
+        // -- AUTO-FIT BOUNDS ---------------------------------------------------
+        // Customer pins geocode asynchronously - fit after the LAST one resolves
+        // We also fit immediately if we already have driver pins, then re-fit as
+        // customer pins come in
+        const fitMap=()=>{
+          const m=mapInst.current; if(!m||cancelled) return;
+          if(allLatLngs.length>0){
+            try{
+              m.fitBounds(allLatLngs,{padding:[50,50],maxZoom:14,animate:true});
+            }catch(e){}
+          }
+        };
+
+        // Fit immediately on driver pins (if any)
+        if(allLatLngs.length>0) fitMap();
+
+        // Hook into the geocoding to collect customer coords and re-fit
+        // Inject a callback that runs after each customer pin is placed
+        // We do this by scheduling a final fit after all geocodes complete
+        const totalCustomers=custWithAddr.length;
+        if(totalCustomers>0){
+          // Schedule fit after the LAST customer geocode finishes
+          // Last geocode fires at index (totalCustomers-1) * 1200ms + network time
+          // Add generous buffer for network round-trip
+          const lastGeoDelay=(totalCustomers-1)*1200+5000;
+          setTimeout(()=>{
+            if(cancelled||!mapInst.current) return;
+            // Collect all marker positions from the map
+            const bounds=[];
+            mapInst.current.eachLayer(layer=>{
+              if(layer.getLatLng) bounds.push([layer.getLatLng().lat,layer.getLatLng().lng]);
+            });
+            if(bounds.length>0){
+              try{
+                mapInst.current.fitBounds(bounds,{padding:[50,50],maxZoom:14,animate:true});
+              }catch(e){}
+            }
+          }, lastGeoDelay);
+
+          // Also do an intermediate fit after first customer pin (fast feedback)
+          setTimeout(()=>{
+            if(cancelled||!mapInst.current) return;
+            const bounds=[];
+            mapInst.current.eachLayer(layer=>{
+              if(layer.getLatLng) bounds.push([layer.getLatLng().lat,layer.getLatLng().lng]);
+            });
+            if(bounds.length>0){
+              try{
+                mapInst.current.fitBounds(bounds,{padding:[50,50],maxZoom:14,animate:true});
+              }catch(e){}
+            }
+          }, 1200+3000); // after first customer pin + network buffer
         }
       },100); // 100ms defer - enough for React to finish painting
     };
