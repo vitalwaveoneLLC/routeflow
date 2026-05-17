@@ -1943,9 +1943,7 @@ export default function App(){
   };
   const clearReturnedCheck=async(custId)=>{
     const cust=getC(custId);if(!cust)return;
-    const newNotes=(cust.notes||"").replace(/
-RETURNED_CHECK:1/g,"").replace(/RETURNED_CHECK:1
-?/g,"").trim();
+    const newNotes=(cust.notes||"").replace(/\nRETURNED_CHECK:1/g,"").replace(/RETURNED_CHECK:1\n?/g,"").trim();
     await supabase.from("customers").update({notes:newNotes}).eq("id",custId);
     setCustomers(prev=>prev.map(c=>c.id===custId?{...c,notes:newNotes}:c));
     showToast("✅ Returned check flag cleared");
