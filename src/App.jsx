@@ -1924,8 +1924,7 @@ export default function App(){
     const baseNotes=(cust.notes||"").replace(/CUSTOM_PRICES:\{[^{}]*\}/g,"").trim();
     const hasAny=Object.values(newPrices).some(v=>v&&parseFloat(v)>0);
     const filtered=Object.fromEntries(Object.entries(newPrices).filter(([,v])=>v&&parseFloat(v)>0).map(([k,v])=>[k,parseFloat(v)]));
-    const newNotes=hasAny?(baseNotes+(baseNotes?"
-":"")+"CUSTOM_PRICES:"+JSON.stringify(filtered)):baseNotes;
+    const newNotes=hasAny?(baseNotes+(baseNotes?"\n":"")+"CUSTOM_PRICES:"+JSON.stringify(filtered)):baseNotes;
     const{error}=await supabase.from("customers").update({notes:newNotes}).eq("id",custId);
     if(error)throw error;
     setCustomers(prev=>prev.map(c=>c.id===custId?{...c,notes:newNotes}:c));
@@ -3550,8 +3549,7 @@ export default function App(){
                     const cleanNote=e.target.value;
                     const cp=parseCustomPrices(editCust);
                     const hasCP=Object.keys(cp).length>0;
-                    const newNotes=hasCP?(cleanNote+(cleanNote?"
-":"")+"CUSTOM_PRICES:"+JSON.stringify(cp)):cleanNote;
+                    const newNotes=hasCP?(cleanNote+(cleanNote?"\n":"")+"CUSTOM_PRICES:"+JSON.stringify(cp)):cleanNote;
                     setEditCust(x=>({...x,notes:newNotes}));
                   }}
                 /></div>
@@ -3601,8 +3599,7 @@ export default function App(){
                                   else delete newCp[p.id];
                                   const baseNotes=(editCust.notes||"").replace(/CUSTOM_PRICES:\{[^{}]*\}/g,"").trim();
                                   const hasAny=Object.keys(newCp).length>0;
-                                  const newNotes=hasAny?(baseNotes+(baseNotes?"
-":"")+"CUSTOM_PRICES:"+JSON.stringify(newCp)):baseNotes;
+                                  const newNotes=hasAny?(baseNotes+(baseNotes?"\n":"")+"CUSTOM_PRICES:"+JSON.stringify(newCp)):baseNotes;
                                   setEditCust(x=>({...x,notes:newNotes}));
                                 }}
                                 style={{width:"100%",border:`1.5px solid ${hasCustom?"#7c3aed":"#d1d5db"}`,borderRadius:6,padding:"5px 8px",fontSize:13,fontWeight:hasCustom?800:400,color:hasCustom?"#7c3aed":"#6b7280",background:hasCustom?"#f5f3ff":"#fff"}}
