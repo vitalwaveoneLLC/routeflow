@@ -1703,32 +1703,61 @@ export default function App(){
         }).addTo(map);
         mapInst.current=map;
 
-        // ── CUSTOMER PINS — rate-limited geocoding (1 req / 1100ms per Nominatim TOS) ──
-        const custWithAddr=customers.filter(c=>c.address);
+        // ── CUSTOMER PINS — geocoded via Nominatim, rate-limited 1/sec ──────
+        const custWithAddr=customers.filter(c=>c.address&&c.address.trim());
         custWithAddr.forEach((c,i)=>{
           const truck=trucks.find(t=>t.id===c.truck_id);
-          const icon=L.divIcon({
+
+          const makeIcon=(found)=>L.divIcon({
             className:"",
-            html:`<div style="background:#0a1628;color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;border:2px solid #fff;box-shadow:0 2px 8px #0004;font-family:monospace">${i+1}</div>`,
-            iconSize:[26,26],iconAnchor:[13,13],
+            html:`<div style="background:${found?"#0a1628":"#dc2626"};color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;border:2px solid #fff;box-shadow:0 2px 8px #0004;font-family:monospace">${i+1}</div>`,
+            iconSize:[28,28],iconAnchor:[14,14],
           });
+
           const popup=`<b style="font-size:13px">${c.name}</b><br/><span style="color:#6b7280;font-size:11px">📍 ${c.address}</span><br/><span style="font-size:11px">🚚 ${truck?.driver||"Unassigned"}</span>${c.phone?`<br/><span style="font-size:11px">📞 ${c.phone}</span>`:""}<br/><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" style="color:#0ea5e9;font-size:11px;font-weight:700">🗺 Open in Maps →</a>`;
 
-          // Stagger requests: 1100ms apart to respect Nominatim rate limit
+          // Stagger 1100ms per Nominatim TOS — pass local `map` ref directly
           setTimeout(()=>{
-            if(cancelled||!mapInst.current) return;
-            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(c.address)}&limit=1&addressdetails=0`,{
-              headers:{"Accept-Language":"en","User-Agent":"VitalWaveOne/1.0"}
-            })
-            .then(r=>r.ok?r.json():Promise.reject(r.status))
-            .then(data=>{
-              if(cancelled||!mapInst.current||!data[0]) return;
-              L.marker([parseFloat(data[0].lat),parseFloat(data[0].lon)],{icon})
-                .addTo(mapInst.current)
-                .bindPopup(popup);
-            })
-            .catch(()=>{}); // silently skip failed geocodes
-          }, i * 1100);
+            if(cancelled) return;
+            const currentMap = mapInst.current;
+            if(!currentMap) return;
+
+            // Try full address first, then fallback to city+state only
+            const queries = [
+              c.address.trim(),                              // full address
+              c.address.split(',').slice(-2).join(',').trim(), // city, state
+            ];
+
+            const tryQuery=(qIdx)=>{
+              if(qIdx>=queries.length){
+                // All queries failed — show red numbered pin at map center with note
+                console.warn(`[Map] Could not geocode: "${c.address}"`);
+                return;
+              }
+              const q=queries[qIdx];
+              if(!q) return tryQuery(qIdx+1);
+
+              fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&countrycodes=us`,{
+                headers:{"Accept-Language":"en","User-Agent":"VitalWaveOne/1.0"}
+              })
+              .then(r=>r.ok?r.json():Promise.reject(r.status))
+              .then(data=>{
+                if(cancelled) return;
+                const currentM=mapInst.current; if(!currentM) return;
+                if(data&&data[0]){
+                  const lat=parseFloat(data[0].lat), lon=parseFloat(data[0].lon);
+                  L.marker([lat,lon],{icon:makeIcon(true)})
+                    .addTo(currentM)
+                    .bindPopup(popup);
+                } else {
+                  tryQuery(qIdx+1); // try next fallback
+                }
+              })
+              .catch(()=>tryQuery(qIdx+1));
+            };
+            tryQuery(0);
+          }, i * 1200); // 1200ms between each to safely stay under rate limit
+        });
         });
 
         // ── DRIVER LOCATION PINS ──────────────────────────────────────────────
@@ -4057,11 +4086,16 @@ export default function App(){
 
               {/* ── LIVE MAP ── */}
               {tmTab==="map"&&<>
-                <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"12px 16px",marginBottom:12,fontSize:12,color:"#0369a1"}}>
-                  🗺 <strong>OpenStreetMap + Leaflet</strong> — free, no API key.
+                <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"12px 16px",marginBottom:12,fontSize:12,color:"#0369a1",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                  <span>🗺 <strong>OpenStreetMap + Leaflet</strong> — free, no API key.
                   {customers.filter(c=>c.address).length>0
-                    ?<> Customer pins load progressively (~1/sec to respect geocoding limits). <strong>Click any pin</strong> for details.</>
-                    :<span style={{color:"#dc2626"}}> ⚠️ No customers have addresses — add addresses to customers to see them on the map.</span>}
+                    ?<> Pins load ~1/sec. <strong>Click any pin</strong> for details.</>
+                    :<span style={{color:"#dc2626"}}> ⚠️ No customers have addresses yet.</span>}
+                  </span>
+                  <button onClick={()=>{if(mapInst.current){mapInst.current.remove();mapInst.current=null;}setTmTab("overview");setTimeout(()=>setTmTab("map"),50);}}
+                    style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:7,padding:"6px 14px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
+                    ↺ Refresh Map
+                  </button>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
                   {[["🚚 Drivers Online",driverProfiles.filter(p=>p.last_seen&&(Date.now()-new Date(p.last_seen).getTime())<5*60*1000).length,"#059669","#f0fdf4"],
