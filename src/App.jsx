@@ -2152,6 +2152,41 @@ export default function App(){
     }catch(e){showToast(e.message,"error");}
   };
 
+  const deleteProduct=async(id,name)=>{
+    if(!window.confirm(`Delete product "${name}"? This cannot be undone.`))return;
+    try{
+      await supabase.from("products").delete().eq("id",id);
+      setProducts(prev=>prev.filter(p=>p.id!==id));
+      showToast(`"${name}" deleted`);
+    }catch(e){showToast(e.message,"error");}
+  };
+
+  const deleteTruck=async(id,driver)=>{
+    if(!window.confirm(`Delete truck for "${driver}"? Remaining inventory on this truck will be returned to the warehouse shelf. This cannot be undone.`))return;
+    try{
+      // Calculate remaining inventory on this truck and return it to shelf
+      const inv=truckInv(id);
+      if(inv.length>0){
+        for(const item of inv){
+          if(item.remaining>0){
+            const p=getP(item.pid);
+            if(p){
+              const newShelf=p.shelf+item.remaining;
+              await supabase.from("products").update({shelf:newShelf}).eq("id",item.pid);
+              setProducts(prev=>prev.map(x=>x.id===item.pid?{...x,shelf:newShelf}:x));
+            }
+          }
+        }
+        showToast(`↩️ ${inv.reduce((a,i)=>a+i.remaining,0)} units returned to warehouse`);
+      }
+      await supabase.from("loads").delete().eq("truck_id",id);
+      await supabase.from("trucks").delete().eq("id",id);
+      setTrucks(prev=>prev.filter(t=>t.id!==id));
+      setLoads(prev=>prev.filter(l=>l.truck_id!==id));
+      showToast(`"${driver}" truck deleted — inventory returned to shelf`);
+    }catch(e){showToast(e.message,"error");}
+  };
+
   // State tax is now managed in StateTaxManager component (State Activation tab)
 
   // ── LOAD / SALE / RETURN ───────────────────────────────────────────────────
@@ -2758,6 +2793,7 @@ export default function App(){
                           {isAdmin&&<td><div style={{display:"flex",gap:4}}>
                             <button className="btn bgh" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>startEditProduct(p)}>{ic.edit}</button>
                             <button className="btn bb" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>{setRsPid(p.id);setRsQty("");setModal("restock");}}>{ic.plus}</button>
+                            <button className="btn br" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>deleteProduct(p.id,p.name)}>{ic.X}</button>
                           </div></td>}
                         </>
                       )}
@@ -2804,6 +2840,7 @@ export default function App(){
                             ?<button className="btn bg" style={{fontSize:11}} onClick={()=>unlockTruck(t.id)}>🔓 Unlock</button>
                             :<button className="btn br" style={{fontSize:11}} onClick={()=>lockTruck(t.id)}>🔒 Lock</button>
                           }
+                          <button className="btn br" style={{fontSize:11}} onClick={()=>deleteTruck(t.id,t.driver)}>{ic.X} Delete</button>
                         </>}
                       </div>
                     </div>
