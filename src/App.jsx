@@ -1756,8 +1756,7 @@ export default function App(){
               .catch(()=>tryQuery(qIdx+1));
             };
             tryQuery(0);
-          }, i * 1200); // 1200ms between each to safely stay under rate limit
-        });
+          }, i * 1200); // 1200ms between each
         });
 
         // -- DRIVER LOCATION PINS ----------------------------------------------
