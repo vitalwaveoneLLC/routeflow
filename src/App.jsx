@@ -1641,7 +1641,7 @@ export default function App(){
 
   // Edit states - truck
   const[editingTid,setEditingTid]=useState(null);
-  const[editTruck,setEditTruck]=useState({});
+  const[editTruck,setEditTruck]=useState(null);
 
   // Form states
   const[selTruck,setSelTruck]=useState("");
@@ -3958,12 +3958,13 @@ export default function App(){
             };
 
             const saveTruckEdit = async () => {
-              if(!editTruck) return;
-              const {error} = await supabase.from("trucks").update({driver:editTruck.driver,plate:editTruck.plate,route:editTruck.route}).eq("id",editTruck.id);
+              if(!editTruck||!editTruck.id) return;
+              if(!editTruck.driver?.trim()||!editTruck.plate?.trim()) return showToast("Driver name and plate required","error");
+              const {error} = await supabase.from("trucks").update({driver:editTruck.driver.trim(),plate:editTruck.plate.trim(),route:editTruck.route?.trim()||""}).eq("id",editTruck.id);
               if(error) return showToast(error.message,"error");
-              setTrucks(prev=>prev.map(t=>t.id===editTruck.id?{...t,...editTruck}:t));
+              setTrucks(prev=>prev.map(t=>t.id===editTruck.id?{...t,driver:editTruck.driver.trim(),plate:editTruck.plate.trim(),route:editTruck.route?.trim()||""}:t));
               setEditTruck(null);
-              showToast("Truck updated");
+              showToast(`✅ ${editTruck.driver} updated`);
             };
 
             const assignCustomer = async () => {
@@ -4002,6 +4003,25 @@ export default function App(){
                 ))}
               </div>
 
+                {/* Edit modal - rendered regardless of sub-tab */}
+                {editTruck&&editTruck.id&&<div style={{position:"fixed",inset:0,background:"#00000060",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,backdropFilter:"blur(3px)"}}>
+                  <div style={{background:"#fff",borderRadius:14,padding:24,maxWidth:400,width:"90%",boxShadow:"0 8px 40px #00000030"}}>
+                    <div style={{fontWeight:700,fontSize:15,color:"#0a1628",marginBottom:14}}>✏️ Edit Truck — {editTruck.driver}</div>
+                    {[["Driver Name","driver"],["Plate","plate"],["Route","route"]].map(([l,k])=>(
+                      <div key={k} className="field" style={{marginBottom:10}}>
+                        <label>{l}</label>
+                        <input value={editTruck[k]||""} onChange={e=>setEditTruck(prev=>({...prev,[k]:e.target.value}))}
+                          onKeyDown={e=>e.key==="Enter"&&saveTruckEdit()}/>
+                      </div>
+                    ))}
+                    <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}>
+                      <button className="btn bgh" onClick={()=>setEditTruck(null)}>Cancel</button>
+                      <button className="btn ba" onClick={saveTruckEdit}>💾 Save</button>
+                    </div>
+                  </div>
+                </div>}
+              </>}
+
               {/* ── OVERVIEW ── */}
               {tmTab==="overview"&&<>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12,marginBottom:20}}>
@@ -4036,23 +4056,6 @@ export default function App(){
                     );
                   })}
                 </div>
-
-                {/* Edit modal */}
-                {editTruck&&<div style={{position:"fixed",inset:0,background:"#00000060",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,backdropFilter:"blur(3px)"}}>
-                  <div style={{background:"#fff",borderRadius:14,padding:24,maxWidth:400,width:"90%",boxShadow:"0 8px 40px #00000030"}}>
-                    <div style={{fontWeight:700,fontSize:15,color:"#0a1628",marginBottom:14}}>✏️ Edit Truck — {editTruck.driver}</div>
-                    {[["Driver Name","driver"],["Plate","plate"],["Route","route"]].map(([l,k])=>(
-                      <div key={k} className="field" style={{marginBottom:10}}>
-                        <label>{l}</label>
-                        <input value={editTruck[k]||""} onChange={e=>setEditTruck(prev=>({...prev,[k]:e.target.value}))}/>
-                      </div>
-                    ))}
-                    <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}>
-                      <button className="btn bgh" onClick={()=>setEditTruck(null)}>Cancel</button>
-                      <button className="btn ba" onClick={saveTruckEdit}>Save</button>
-                    </div>
-                  </div>
-                </div>}
               </>}
 
               {/* ── DRIVERS ── */}
