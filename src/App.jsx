@@ -1606,6 +1606,9 @@ export default function App(){
   const[viewSale,setViewSale]=useState(null);
   const[viewTruck,setViewTruck]=useState(null);
   const[stripeModal,setStripeModal]=useState(null);
+  const[amendSale,setAmendSale]=useState(null);
+  const[amendItems,setAmendItems]=useState({});
+  const[amendSaving,setAmendSaving]=useState(false);
   const[scanning,setScanning]=useState(false);
   const[rcModal,setRcModal]=useState(null); // {saleId, custId} for returned check upload
   const[rcUploading,setRcUploading]=useState(false);
@@ -2160,24 +2163,75 @@ export default function App(){
   const deleteInvoice=async sid=>{
     if(!window.confirm(`Delete invoice ${sid} and all linked payments and orders? This cannot be undone.`)) return;
     try{
-      // Delete from payments table
       await supabase.from("payments").delete().eq("sale_id",sid);
-      // Delete from payments_log where invoice is linked
       await supabase.from("payments_log").delete().contains("invoice_ids",[sid]);
-      // Delete linked orders (where this invoice ID was created from)
       const orderId="ORD-"+sid.replace("INV-","");
       await supabase.from("orders").delete().eq("id",orderId);
-      // Delete the sale itself
       await supabase.from("sales").delete().eq("id",sid);
-      // Update local state
       setSales(prev=>prev.filter(s=>s.id!==sid));
       setPayments(prev=>prev.filter(p=>p.sale_id!==sid));
       setPaymentsLog(prev=>prev.filter(p=>!(p.invoice_ids||[]).includes(sid)));
       setOrders(prev=>prev.filter(o=>o.id!==orderId));
       showToast(`Invoice ${sid} and linked records deleted`);
-    }catch(e){
-      showToast("Error deleting: "+e.message,"error");
-    }
+    }catch(e){showToast("Error deleting: "+e.message,"error");}
+  };
+
+  const openAmend=(sale)=>{
+    const init={};
+    (sale.items||[]).forEach(i=>{init[i.pid]=i.qty;});
+    setAmendItems(init);
+    setAmendSale(sale);
+    setModal("amend");
+  };
+
+  const saveAmend=async()=>{
+    if(!amendSale)return;
+    setAmendSaving(true);
+    try{
+      const cust=getC(amendSale.cust_id);
+      const custSt=(cust?.state||"").trim();
+      const st=stateTaxes.find(x=>x.id?.toUpperCase()===custSt.toUpperCase()||x.name?.toLowerCase()===custSt.toLowerCase());
+      const tRate=st?.exempt?0:parseFloat(st?.rate||0);
+
+      const newItems=Object.entries(amendItems)
+        .filter(([,q])=>parseInt(q)>0)
+        .map(([pid,qty])=>({pid,qty:parseInt(qty)}));
+      if(!newItems.length){showToast("Must keep at least one product","error");setAmendSaving(false);return;}
+
+      const newSub=newItems.reduce((a,i)=>a+(getEffectivePrice(amendSale.cust_id,i.pid)||0)*i.qty,0);
+      const newTaxable=newItems.reduce((a,i)=>{const p=getP(i.pid);return isTaxableProd(p)?a+(getEffectivePrice(amendSale.cust_id,i.pid)||0)*i.qty:a;},0);
+      const newProfit=newItems.reduce((a,i)=>{const p=getP(i.pid);return a+(getEffectivePrice(amendSale.cust_id,i.pid)-(p?.cost||0))*i.qty;},0);
+
+      // Adjust shelf: return old qty, deduct new qty
+      const oldMap={};(amendSale.items||[]).forEach(i=>{oldMap[i.pid]=i.qty;});
+      const allPids=new Set([...Object.keys(oldMap),...newItems.map(i=>i.pid)]);
+      for(const pid of allPids){
+        const oldQ=oldMap[pid]||0;
+        const newQ=parseInt(amendItems[pid]||0);
+        const diff=oldQ-newQ;
+        if(diff!==0){
+          const prod=getP(pid);
+          if(prod){
+            const newShelf=Math.max(0,prod.shelf+diff);
+            await supabase.from("products").update({shelf:newShelf}).eq("id",pid);
+            setProducts(prev=>prev.map(p=>p.id===pid?{...p,shelf:newShelf}:p));
+          }
+        }
+      }
+
+      await supabase.from("sales").update({
+        items:newItems, total:newSub, profit:newProfit,
+        amended_at:new Date().toISOString(),
+      }).eq("id",amendSale.id);
+
+      setSales(prev=>prev.map(s=>s.id===amendSale.id
+        ?{...s,items:newItems,total:newSub,profit:newProfit,amended_at:new Date().toISOString()}
+        :s
+      ));
+      showToast(`✅ Invoice ${amendSale.id} amended`);
+      setModal(null);setAmendSale(null);setAmendItems({});
+    }catch(e){showToast("Error: "+e.message,"error");}
+    setAmendSaving(false);
   };
 
   // ── CARD SURCHARGE ─────────────────────────────────────────────────────────
@@ -2853,6 +2907,7 @@ export default function App(){
                     </td>
                     <td><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                       <button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt} Invoice</button>
+                      {isAdmin&&<button className="btn bp" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>openAmend(s)}>✏️ Amend</button>}
                       {isAdmin&&pmt?.returned_check_url&&<button onClick={()=>window.open(pmt.returned_check_url,"_blank")} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif"}}>📄 Check</button>}
                       {isAdmin&&!isReturnedCheck&&(pmt?.method==="check"||paymentsLog.some(pl=>pl.method==="check"&&(pl.invoice_ids||[]).includes(s.id)))&&<button onClick={()=>setRcModal({saleId:s.id,custId:s.cust_id})} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",whiteSpace:"nowrap"}}>🔴 Returned?</button>}
                       {!isPaid&&!isReturnedCheck&&<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>}
@@ -3074,7 +3129,7 @@ export default function App(){
                   <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Driver</th><th>Grand Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
                   <tbody>{filtered.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid;return(
                     <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
-                    <td><div style={{display:"flex",gap:5}}>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}<button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.inv}</button>{isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}</div></td>
+                    <td><div style={{display:"flex",gap:5}}>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}<button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.inv}</button>{isAdmin&&<button className="btn bp" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>openAmend(s)}>✏️</button>}{isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}</div></td>
                   </tr>);})}
                   </tbody></table></div>
                 );
@@ -4302,6 +4357,98 @@ export default function App(){
           </div>
         </div>
       </Modal>}
+
+      {/* ── AMEND INVOICE MODAL ── */}
+      {modal==="amend"&&amendSale&&(()=>{
+        const cust=getC(amendSale.cust_id);
+        const custSt=(cust?.state||"").trim();
+        const st=stateTaxes.find(x=>x.id?.toUpperCase()===custSt.toUpperCase()||x.name?.toLowerCase()===custSt.toLowerCase());
+        const tRate=st?.exempt?0:parseFloat(st?.rate||0);
+
+        const newItems=Object.entries(amendItems).filter(([,q])=>parseInt(q)>0).map(([pid,qty])=>({pid,qty:parseInt(qty)}));
+        const newSub=newItems.reduce((a,i)=>a+(getEffectivePrice(amendSale.cust_id,i.pid)||0)*i.qty,0);
+        const newTaxable=newItems.reduce((a,i)=>{const p=getP(i.pid);return isTaxableProd(p)?a+(getEffectivePrice(amendSale.cust_id,i.pid)||0)*i.qty:a;},0);
+        const newTax=parseFloat((newTaxable*tRate/100).toFixed(2));
+        const newTotal=newSub+newTax+parseFloat(amendSale.previous_balance||0);
+        const origTotal=calcSaleGrandTotal(amendSale);
+
+        return(
+          <Modal title={`✏️ Amend Invoice ${amendSale.id}`} onClose={()=>{setModal(null);setAmendSale(null);setAmendItems({});}}>
+            <div style={{marginBottom:10,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <span className="bdg bb2">{amendSale.id}</span>
+              <span style={{fontSize:12,color:"#6b7280"}}>{cust?.name} · {amendSale.date}</span>
+              {amendSale.amended_at&&<span className="bdg bp2">PREVIOUSLY AMENDED</span>}
+            </div>
+            <div style={{fontSize:11,color:"#9ca3af",marginBottom:16}}>Adjust quantities only — prices remain fixed at invoice rates</div>
+
+            {/* Product rows */}
+            <div style={{marginBottom:16}}>
+              {(amendSale.items||[]).map(item=>{
+                const p=getP(item.pid);
+                const qty=parseInt(amendItems[item.pid]||0);
+                const origQty=item.qty;
+                const ep=getEffectivePrice(amendSale.cust_id,item.pid);
+                const diff=qty-origQty;
+                const changed=qty!==origQty;
+                return(
+                  <div key={item.pid} style={{border:`1.5px solid ${changed?"#7c3aed":"#e5e7eb"}`,borderRadius:10,padding:"12px 14px",marginBottom:8,background:changed?"#faf5ff":"#fff",transition:"all .15s"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                      <div>
+                        <div style={{fontWeight:700,fontSize:13,color:"#212121"}}>{p?.name||item.pid}</div>
+                        <div style={{fontSize:10,color:"#9ca3af",marginTop:2}}>
+                          {p?.sku&&`${p.sku} · `}{fmt(ep)} each{isTaxableProd(p)&&<span style={{marginLeft:4,color:"#7c3aed",fontWeight:700,fontSize:9}}>TOBACCO TAX</span>}
+                          {" · "}<span style={{color:p?.shelf<5?"#dc2626":"#9ca3af"}}>{p?.shelf} on shelf</span>
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:changed?"#7c3aed":"#212121"}}>{fmt(qty*ep)}</div>
+                        {changed&&<div style={{fontSize:10,fontWeight:700,color:diff>0?"#dc2626":"#059669",marginTop:1}}>
+                          {diff>0?`▲ +${diff}`:`▼ ${diff}`} from original ({origQty})
+                        </div>}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <button className="btn br" style={{width:30,height:30,padding:0,justifyContent:"center",borderRadius:"50%",fontSize:16}}
+                        onClick={()=>setAmendItems(prev=>({...prev,[item.pid]:Math.max(0,(parseInt(prev[item.pid]||0))-1)}))}>−</button>
+                      <input type="number" min="0" value={qty||""} placeholder="0"
+                        onChange={e=>setAmendItems(prev=>({...prev,[item.pid]:Math.max(0,parseInt(e.target.value)||0)}))}
+                        style={{flex:1,textAlign:"center",border:`2px solid ${changed?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"8px 6px",fontSize:18,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",color:changed?"#7c3aed":"#212121"}}/>
+                      <button className="btn ba" style={{width:30,height:30,padding:0,justifyContent:"center",borderRadius:"50%",fontSize:16}}
+                        onClick={()=>setAmendItems(prev=>({...prev,[item.pid]:(parseInt(prev[item.pid]||0))+1}))}>+</button>
+                      <span style={{minWidth:64,fontSize:11,color:"#9ca3af",textAlign:"center",flexShrink:0}}>was {origQty}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Updated totals */}
+            <div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:10,padding:"14px 16px",marginBottom:16}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:12,color:"#5b21b6",marginBottom:10,letterSpacing:".06em"}}>UPDATED TOTALS</div>
+              {[
+                ["Subtotal",fmt(newSub),"#212121"],
+                tRate>0?["Tobacco Tax ("+tRate+"%)",fmt(newTax),"#7c3aed"]:null,
+                parseFloat(amendSale.previous_balance||0)>0?["Previous Balance",fmt(parseFloat(amendSale.previous_balance||0)),"#dc2626"]:null,
+                ["New Grand Total",fmt(newTotal),"#059669"],
+                ["Original Total",fmt(origTotal),"#9ca3af"],
+                newTotal!==origTotal?["Difference",`${newTotal>origTotal?"+":""}${fmt(newTotal-origTotal)}`,newTotal>origTotal?"#dc2626":"#059669"]:null,
+              ].filter(Boolean).map(([l,v,c])=>(
+                <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:6,paddingBottom:l==="New Grand Total"?6:0,borderBottom:l==="New Grand Total"?"1px solid #ddd6fe":"none"}}>
+                  <span style={{fontSize:12,color:l==="New Grand Total"?"#212121":"#6b7280",fontWeight:l==="New Grand Total"?700:400}}>{l}</span>
+                  <span style={{fontSize:l==="New Grand Total"?15:12,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:l==="New Grand Total"?800:600,color:c}}>{v}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn ba" style={{flex:1,justifyContent:"center",padding:"11px"}} onClick={saveAmend} disabled={amendSaving}>
+                {amendSaving?<><span className="spin" style={{display:"inline-block",width:12,height:12,border:"2px solid #fff",borderTopColor:"transparent",borderRadius:"50%",animation:"spin .7s linear infinite",marginRight:6}}/>Saving…</>:"💾 Save Amendment"}
+              </button>
+              <button className="btn bgh" style={{padding:"11px 18px"}} onClick={()=>{setModal(null);setAmendSale(null);setAmendItems({});}}>Cancel</button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {modal==="invoice"&&viewSale&&<Modal title="" onClose={()=>setModal(null)} wide>
         <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
