@@ -842,6 +842,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
   const stateTaxes = driverData.stateTaxes||[];
   const customers  = driverData.customers||[];
 
+  const [wiView,    setWiView]    = useState("sale"); // "sale" | "history"
   const [wiCust,    setWiCust]    = useState(initCust||"");
   const [wiSearch,  setWiSearch]  = useState("");
   const [wiItems,   setWiItems]   = useState({});
@@ -856,12 +857,35 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
   const [wiReceiptFile,setWiReceiptFile]=useState(null);
   const [wiReceiptUrl,setWiReceiptUrl]=useState("");
 
+  // History
+  const [wiSales,   setWiSales]   = useState([]);
+  const [wiPayments,setWiPayments]= useState([]);
+  const [wiHistLoading,setWiHistLoading]=useState(false);
+
+  // Amendment
+  const [amendSale, setAmendSale] = useState(null);   // sale being amended
+  const [amendItems,setAmendItems]= useState({});      // {pid: qty}
+  const [amendSaving,setAmendSaving]=useState(false);
+  const [amendMsg,  setAmendMsg]  = useState(null);
+
   const wiCustObj = customers.find(c=>c.id===wiCust);
   const wiHasReturnedCheck = wiCustObj&&(wiCustObj.notes||"").includes("RETURNED_CHECK:1");
   const RETURNED_CHECK_FEE = parseFloat(driverData.co?.check_penalty||50);
 
-  // Auto-load balance when customer is pre-set (walk-in portal flow)
-  useEffect(()=>{ if(initCust) handleWiCust(initCust); },[initCust]);
+  // Auto-load balance + history when customer is pre-set
+  useEffect(()=>{ if(initCust){ handleWiCust(initCust); loadHistory(initCust); } },[initCust]);
+
+  const loadHistory = async(cid)=>{
+    if(!cid) return;
+    setWiHistLoading(true);
+    const [{data:s},{data:p}] = await Promise.all([
+      supabase.from("sales").select("*").eq("cust_id",cid).order("created_at",{ascending:false}),
+      supabase.from("payments").select("*"),
+    ]);
+    setWiSales(s||[]);
+    setWiPayments(p||[]);
+    setWiHistLoading(false);
+  };
 
   // Shelf products only
   const shelfProds = products.filter(p=>p.shelf>0);
@@ -887,12 +911,14 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     try{const m=(c.notes||"").match(/CUSTOM_PRICES:({.*?})/);const cp=m?JSON.parse(m[1]):{};const cv=cp[pid];return(cv&&parseFloat(cv)>0)?parseFloat(cv):p.price;}catch{return p?.price||0;}
   };
 
-  const taxRate2 = wiCustObj?(()=>{
-    const cs=(wiCustObj.state||"").trim();
+  const getTaxRate = (custObj)=>{
+    if(!custObj) return 0;
+    const cs=(custObj.state||"").trim();
     const st=stateTaxes.find(s=>s.id?.toUpperCase()===cs.toUpperCase()||s.name?.toLowerCase()===cs.toLowerCase());
     return st?.exempt?0:parseFloat(st?.rate||0);
-  })():0;
+  };
 
+  const taxRate2 = getTaxRate(wiCustObj);
   const sub = shelfProds.reduce((a,p)=>a+(getEffP(wiCust,p.id)||0)*(wiItems[p.id]||0),0);
   const taxable = shelfProds.reduce((a,p)=>isTaxableProd(p)?(a+(getEffP(wiCust,p.id)||0)*(wiItems[p.id]||0)):a,0);
   const tax = parseFloat((taxable*taxRate2/100).toFixed(2));
@@ -941,17 +967,80 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
         if(!upE) wiRecUrl=supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
       }
       await supabase.from("payments").insert({id:"PMT-"+uid2(),sale_id:invId,status:"paid",method:wiPay,amount:totalDue,check_number:wiCheck||"",zelle_ref:wiZelle||"",note:"Walk-in sale",receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
-      // Update local driver sales
       setDriverData(prev=>({...prev, sales:[{...ns,_paid:true},...prev.sales]}));
-      setWiItems({});setWiCust("");setWiPrevBal(0);setWiPrevInvs([]);setWiCheck("");setWiZelle("");setWiReceiptFile(null);setWiReceiptUrl("");
-      setWiMsg({t:"success",m:`✅ Invoice ${invId} created & payment recorded!`});
+      setWiSales(prev=>[{...ns,_paid:true},...prev]);
+      setWiItems({});setWiPrevBal(0);setWiPrevInvs([]);setWiCheck("");setWiZelle("");setWiReceiptFile(null);setWiReceiptUrl("");
+      setWiMsg({t:"success",m:`✅ Invoice ${invId} created! View it in History.`});
     }catch(e){setWiMsg({t:"error",m:e.message});}
     setWiSaving(false);
   };
 
-  return(
-    <div className="fu">
-      <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:12}}>🏪 Walk-in Sale</div>
+  // ── OPEN AMENDMENT ─────────────────────────────────────────────────────────
+  const openAmend = (sale)=>{
+    const init={};
+    (sale.items||[]).forEach(i=>{ init[i.pid]=i.qty; });
+    setAmendItems(init);
+    setAmendSale(sale);
+    setAmendMsg(null);
+  };
+
+  // ── SAVE AMENDMENT ─────────────────────────────────────────────────────────
+  const saveAmend = async()=>{
+    if(!amendSale) return;
+    setAmendSaving(true); setAmendMsg(null);
+    try{
+      const custObj = customers.find(c=>c.id===amendSale.cust_id);
+      const tRate = getTaxRate(custObj);
+
+      // Build new items — remove any with qty=0
+      const newItems = Object.entries(amendItems)
+        .filter(([,q])=>parseInt(q)>0)
+        .map(([pid,qty])=>({pid,qty:parseInt(qty)}));
+      if(!newItems.length) throw new Error("Must keep at least one product");
+
+      // Recalculate totals
+      const newSub = newItems.reduce((a,i)=>a+(getEffP(amendSale.cust_id,i.pid)||0)*i.qty, 0);
+      const newTaxable = newItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(getEffP(amendSale.cust_id,i.pid)||0)*i.qty:a;},0);
+      const newTax = parseFloat((newTaxable*tRate/100).toFixed(2));
+      const newProfit = newItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(amendSale.cust_id,i.pid)-(p?.cost||0))*i.qty;},0);
+
+      // Adjust shelf stock: return old qty, deduct new qty
+      const oldMap = {};
+      (amendSale.items||[]).forEach(i=>{ oldMap[i.pid]=i.qty; });
+      const allPids = new Set([...Object.keys(oldMap), ...newItems.map(i=>i.pid)]);
+      for(const pid of allPids){
+        const oldQ = oldMap[pid]||0;
+        const newQ = (amendItems[pid]||0);
+        const diff = oldQ - newQ; // positive = return to shelf, negative = take more
+        if(diff!==0){
+          const prod = products.find(p=>p.id===pid);
+          if(prod){
+            const newShelf = Math.max(0, prod.shelf + diff);
+            await supabase.from("products").update({shelf:newShelf}).eq("id",pid);
+          }
+        }
+      }
+
+      // Save updated sale
+      await supabase.from("sales").update({
+        items: newItems,
+        total: newSub,
+        profit: newProfit,
+        amended_at: new Date().toISOString(),
+      }).eq("id",amendSale.id);
+
+      // Update local history
+      const updated = {...amendSale, items:newItems, total:newSub, profit:newProfit, amended_at:new Date().toISOString()};
+      setWiSales(prev=>prev.map(s=>s.id===amendSale.id?updated:s));
+      setAmendMsg({t:"success",m:"✅ Invoice updated successfully!"});
+      setTimeout(()=>setAmendSale(null),1400);
+    }catch(e){ setAmendMsg({t:"error",m:e.message}); }
+    setAmendSaving(false);
+  };
+
+  // ── SALE TAB UI ───────────────────────────────────────────────────────────
+  const SaleTab = ()=>(
+    <div>
       <div style={{fontSize:11,color:"#9ca3af",marginBottom:14}}>Sell directly from warehouse shelf — deducts shelf stock</div>
 
       {/* Customer + summary card */}
@@ -1083,12 +1172,167 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
         </div>
       </div>
 
-      {/* Message + submit */}
       {wiMsg&&<div style={{background:wiMsg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${wiMsg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:13,color:wiMsg.t==="success"?"#065f46":"#dc2626",marginBottom:10}}>{wiMsg.m}</div>}
       <button onClick={createWiSale} disabled={wiSaving||!wiCust||sub===0} className="btn-primary"
         style={{width:"100%",justifyContent:"center",padding:"13px",marginBottom:24,background:(!wiCust||sub===0)?"#9ca3af":"#0a1628"}}>
         {wiSaving?<><span className="sp">⟳</span> Creating…</>:"🧾 Create Invoice & Record Payment"}
       </button>
+    </div>
+  );
+
+  // ── HISTORY TAB UI ────────────────────────────────────────────────────────
+  const HistoryTab = ()=>{
+    if(wiHistLoading) return <div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>Loading history…</div>;
+    if(!wiCust&&!initCust) return <div className="card" style={{padding:28,textAlign:"center",color:"#9ca3af"}}>Select a customer first to see their invoice history.</div>;
+    if(wiSales.length===0) return <div className="card" style={{padding:32,textAlign:"center",color:"#9ca3af"}}><div style={{fontSize:28,marginBottom:6}}>📋</div><div>No invoices yet</div></div>;
+
+    return(
+      <div>
+        {wiSales.map(s=>{
+          const pmt = wiPayments.find(p=>p.sale_id===s.id);
+          const isPaid = pmt?.status==="paid";
+          const tRate = getTaxRate(customers.find(c=>c.id===s.cust_id));
+          const sTax = parseFloat(((s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(getEffP(s.cust_id,i.pid)||0)*i.qty:a;},0)*tRate/100).toFixed(2));
+          const gt = parseFloat((s.total+sTax+parseFloat(s.previous_balance||0)).toFixed(2));
+          return(
+            <div key={s.id} className="card" style={{marginBottom:10,borderLeft:`4px solid ${isPaid?"#059669":"#f59e0b"}`}}>
+              <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:3}}>
+                    <span style={{fontFamily:"'Inter',sans-serif",fontWeight:800,fontSize:14,color:"#0a1628"}}>{s.id}</span>
+                    <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,background:isPaid?"#dcfce7":"#fef9c3",color:isPaid?"#166534":"#92400e"}}>{isPaid?"PAID":"UNPAID"}</span>
+                    {s.amended_at&&<span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,background:"#ede9fe",color:"#5b21b6"}}>AMENDED</span>}
+                  </div>
+                  <div style={{fontSize:11,color:"#9ca3af"}}>{s.date} · {(s.items||[]).length} product{(s.items||[]).length!==1?"s":""}</div>
+                  {/* Items summary */}
+                  <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
+                    {(s.items||[]).map(i=>{
+                      const p=products.find(x=>x.id===i.pid);
+                      return<span key={i.pid} style={{fontSize:10,background:"#f3f4f6",borderRadius:5,padding:"2px 7px",color:"#374151"}}>
+                        {p?.name||i.pid} ×{i.qty}
+                      </span>;
+                    })}
+                  </div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontFamily:"'Inter',sans-serif",fontWeight:800,fontSize:18,color:"#0a1628"}}>{fmt2(gt)}</div>
+                  {sTax>0&&<div style={{fontSize:10,color:"#7c3aed"}}>incl. ${sTax.toFixed(2)} tax</div>}
+                  <button onClick={()=>openAmend(s)}
+                    style={{marginTop:6,background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"6px 14px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:4}}>
+                    ✏️ Amend
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── AMENDMENT MODAL ───────────────────────────────────────────────────────
+  const AmendModal = ()=>{
+    if(!amendSale) return null;
+    const allPids = new Set([...(amendSale.items||[]).map(i=>i.pid), ...Object.keys(amendItems).filter(pid=>amendItems[pid]>0)]);
+    const amendSub = [...allPids].reduce((a,pid)=>{
+      const q=parseInt(amendItems[pid]||0);
+      return a+(getEffP(amendSale.cust_id,pid)||0)*q;
+    },0);
+    const custObj = customers.find(c=>c.id===amendSale.cust_id);
+    const tRate = getTaxRate(custObj);
+    const amendTaxable = [...allPids].reduce((a,pid)=>{
+      const p=products.find(x=>x.id===pid);
+      const q=parseInt(amendItems[pid]||0);
+      return isTaxableProd(p)?a+(getEffP(amendSale.cust_id,pid)||0)*q:a;
+    },0);
+    const amendTax = parseFloat((amendTaxable*tRate/100).toFixed(2));
+    const amendTotal = amendSub+amendTax+parseFloat(amendSale.previous_balance||0);
+
+    return(
+      <div style={{position:"fixed",inset:0,background:"#00000060",display:"flex",alignItems:"center",justifyContent:"center",zIndex:500,padding:16,backdropFilter:"blur(4px)"}}>
+        <div style={{background:"#fff",borderRadius:16,padding:24,maxWidth:560,width:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 8px 40px #00000020"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+            <div>
+              <div style={{fontFamily:"'Inter',sans-serif",fontWeight:800,fontSize:16,color:"#0a1628"}}>✏️ Amend Invoice {amendSale.id}</div>
+              <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>Adjust product quantities only — prices are fixed</div>
+            </div>
+            <button onClick={()=>setAmendSale(null)} style={{background:"#f3f4f6",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,color:"#6b7280",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>✕ Close</button>
+          </div>
+
+          {/* Product quantity editors */}
+          <div style={{marginBottom:16}}>
+            {(amendSale.items||[]).map(item=>{
+              const p = products.find(x=>x.id===item.pid);
+              const qty = parseInt(amendItems[item.pid]||0);
+              const ep = getEffP(amendSale.cust_id,item.pid);
+              const origQty = item.qty;
+              const diff = qty - origQty;
+              return(
+                <div key={item.pid} style={{border:`1.5px solid ${qty!==origQty?"#7c3aed":"#e5e7eb"}`,borderRadius:10,padding:"12px 14px",marginBottom:8,background:qty!==origQty?"#faf5ff":"#fff"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:13,color:"#0a1628"}}>{p?.name||item.pid}</div>
+                      <div style={{fontSize:10,color:"#9ca3af"}}>{p?.sku} · {fmt2(ep)} each{isTaxableProd(p)&&<span style={{marginLeft:4,color:"#7c3aed",fontWeight:700}}>+tax</span>}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontWeight:800,fontSize:14,color:"#7c3aed"}}>{fmt2(qty*ep)}</div>
+                      {diff!==0&&<div style={{fontSize:10,fontWeight:700,color:diff>0?"#dc2626":"#059669"}}>{diff>0?`+${diff}`:`${diff}`} from original ({origQty})</div>}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <button className="qty-btn" onClick={()=>setAmendItems(prev=>({...prev,[item.pid]:Math.max(0,(parseInt(prev[item.pid]||0))-1)}))} style={{width:32,height:32,fontSize:18}}>−</button>
+                    <input type="number" min="0" value={qty||""}  placeholder="0"
+                      onChange={e=>setAmendItems(prev=>({...prev,[item.pid]:Math.max(0,parseInt(e.target.value)||0)}))}
+                      style={{flex:1,textAlign:"center",border:`1.5px solid ${qty!==origQty?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"7px 4px",fontSize:16,fontWeight:800,background:"#fff"}}/>
+                    <button className="qty-btn" onClick={()=>setAmendItems(prev=>({...prev,[item.pid]:(parseInt(prev[item.pid]||0))+1}))} style={{width:32,height:32,fontSize:18}}>+</button>
+                    <div style={{minWidth:60,fontSize:11,color:"#9ca3af",textAlign:"center"}}>was {origQty}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Updated totals */}
+          <div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+            <div style={{fontWeight:700,fontSize:12,color:"#5b21b6",marginBottom:8}}>UPDATED TOTALS</div>
+            {[["Subtotal",fmt2(amendSub),"#212121"],amendTax>0?["Tax ("+tRate+"%)",fmt2(amendTax),"#7c3aed"]:null,parseFloat(amendSale.previous_balance||0)>0?["Prev. Balance",fmt2(parseFloat(amendSale.previous_balance||0)),"#dc2626"]:null,["New Total",fmt2(amendTotal),"#059669"]].filter(Boolean).map(([l,v,c])=>(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4,fontWeight:l==="New Total"?800:400}}>
+                <span style={{color:"#6b7280"}}>{l}</span><span style={{color:c,fontFamily:"'Inter',sans-serif"}}>{v}</span>
+              </div>
+            ))}
+          </div>
+
+          {amendMsg&&<div style={{background:amendMsg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${amendMsg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:13,color:amendMsg.t==="success"?"#065f46":"#dc2626",marginBottom:10}}>{amendMsg.m}</div>}
+
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={saveAmend} disabled={amendSaving} className="btn-primary"
+              style={{flex:1,justifyContent:"center",padding:"13px",background:"#7c3aed"}}>
+              {amendSaving?<><span className="sp">⟳</span> Saving…</>:"💾 Save Changes"}
+            </button>
+            <button onClick={()=>setAmendSale(null)} style={{padding:"13px 20px",borderRadius:10,border:"1.5px solid #e5e7eb",background:"#fff",color:"#6b7280",fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return(
+    <div className="fu">
+      {/* Tab switcher */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:16}}>
+        {[["sale","🛒 New Sale"],["history","📋 Invoice History"]].map(([v,l])=>(
+          <button key={v} onClick={()=>{setWiView(v);if(v==="history"&&(wiCust||initCust))loadHistory(wiCust||initCust);}}
+            style={{padding:"11px 8px",borderRadius:10,border:`1.5px solid ${wiView===v?"#7c3aed":"#e5e7eb"}`,background:wiView===v?"#7c3aed":"#fff",color:wiView===v?"#fff":"#6b7280",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",transition:"all .15s"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {wiView==="sale"&&<SaleTab/>}
+      {wiView==="history"&&<HistoryTab/>}
+      <AmendModal/>
     </div>
   );
 }
