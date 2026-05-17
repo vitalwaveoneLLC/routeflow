@@ -75,6 +75,9 @@ const calcOrderTax = (items, products, rate) => items.reduce((a,i)=>{
   const p = products.find(x=>x.id===i.pid);
   return a + calcItemTax(p, i.qty, rate);
 }, 0);
+// Parse custom prices stored in customer notes
+const parseCustomPrices=cust=>{try{const m=(cust?.notes||"").match(/CUSTOM_PRICES:({.*?})/);return m?JSON.parse(m[1]):{};}catch{return{};}};
+const getEffectivePrice=(cust,p)=>{if(!cust||!p)return p?.price||0;const cp=parseCustomPrices(cust);const custom=cp[p.id];return(custom&&parseFloat(custom)>0)?parseFloat(custom):(p?.price||0);};
 
 
 
@@ -83,10 +86,11 @@ const Invoice = ({order, products, co, stateTaxes, custState}) => {
 
   const stData = stateTaxes?.find(s=>s.id===(custState||"TX"));
   const stateRate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
-  const sub = order.items.reduce((a,i)=>a+(products.find(p=>p.id===i.pid)?.price||0)*i.qty, 0);
+  const custObj = {notes: order.custNotes||""};
+  const sub = order.items.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+getEffectivePrice(custObj,p)*i.qty;}, 0);
   const taxAmt = parseFloat((order.items.reduce((a,i)=>{
     const p=products.find(x=>x.id===i.pid);
-    return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;
+    return isTaxableProd(p)?a+getEffectivePrice(custObj,p)*i.qty:a;
   },0)*stateRate/100).toFixed(2));
   const total = sub+taxAmt;
   return (
@@ -271,7 +275,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
           <div key={p.id} className="card" style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
             <div style={{flex:1}}>
               <div style={{fontWeight:600,fontSize:13}}>{p.name}</div>
-              <div style={{fontSize:11,color:"#9ca3af"}}>In warehouse: <span style={{color:"#059669",fontWeight:700}}>{p.shelf}</span> · ${p.price}</div>
+              <div style={{fontSize:11,color:"#9ca3af"}}>In warehouse: <span style={{color:"#059669",fontWeight:700}}>{p.shelf}</span> · ${p.price.toFixed(2)} std</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:6}}>
               <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))} style={{width:28,height:28,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>-</button>
@@ -391,11 +395,11 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const custStateId = freshCustState || selCustObj?.state || driverData.truck?.state || "";
   const custStateTax = driverData.stateTaxes?.find(s=>s.id===custStateId);
   const driverTaxRate = custStateTax?.exempt ? 0 : parseFloat(custStateTax?.rate||0);
-  const sub = availableProducts.reduce((a,p)=>a+(p.price||0)*(items[p.id]||0),0);
+  const sub = availableProducts.reduce((a,p)=>a+getEffectivePrice(selCustObj,p)*(items[p.id]||0),0);
   const hasTaxableItems = availableProducts.some(p=>isTaxableProd(p)&&(items[p.id]||0)>0);
-  const tax = parseFloat((availableProducts.reduce((a,p)=>isTaxableProd(p)?(a+(p.price||0)*(items[p.id]||0)):a,0)*driverTaxRate/100).toFixed(2));
+  const tax = parseFloat((availableProducts.reduce((a,p)=>isTaxableProd(p)?(a+getEffectivePrice(selCustObj,p)*(items[p.id]||0)):a,0)*driverTaxRate/100).toFixed(2));
   const gt = sub+tax;
-  const profit = availableProducts.reduce((a,p)=>a+((p.price||0)-(p.cost||0))*(items[p.id]||0),0);
+  const profit = availableProducts.reduce((a,p)=>a+(getEffectivePrice(selCustObj,p)-(p.cost||0))*(items[p.id]||0),0);
 
   const handleScan = (code) => {
     const match = availableProducts.find(p=>p.sku?.toLowerCase()===code.toLowerCase()||p.id?.toLowerCase()===code.toLowerCase());
@@ -779,7 +783,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
             <div style={{display:"flex",alignItems:"center",gap:10}}>
               <div style={{flex:1}}>
                 <div style={{fontWeight:600,fontSize:13}}>{p.name}</div>
-                <div style={{fontSize:11,color:"#9ca3af"}}>{fmt(p.price)} · {isTaxableProd(p)?<span style={{color:"#7c3aed"}}>taxable</span>:"no tax"}</div>
+                <div style={{fontSize:11,color:"#9ca3af"}}>{(()=>{const ep=getEffectivePrice(selCustObj,p);const isC=ep!==p.price;return<>{isC?<span style={{color:"#7c3aed",fontWeight:700}}>{fmt(ep)} <span style={{fontSize:9,background:"#ede9fe",borderRadius:3,padding:"1px 4px"}}>CUSTOM</span> <span style={{textDecoration:"line-through",color:"#9ca3af",fontWeight:400}}>{fmt(p.price)}</span></span>:<span>{fmt(p.price)}</span>} · {isTaxableProd(p)?<span style={{color:"#7c3aed"}}>taxable</span>:"no tax"}</>;})()}</div>
                 <div style={{fontSize:11,marginTop:3,display:"flex",gap:8}}>
                   <span style={{color:"#059669",fontWeight:600}}>📦 {remaining} left</span>
                   <span style={{color:"#9ca3af"}}>{loaded} loaded · {sold} sold</span>
@@ -797,7 +801,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
                   style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:isOut?"not-allowed":"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
               </div>
             </div>
-            {(items[p.id]||0)>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right"}}>{fmt(items[p.id]*p.price)}{isTaxableProd(p)?<span style={{color:"#059669"}}> +tax</span>:""}</div>}
+            {(items[p.id]||0)>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right"}}>{fmt(items[p.id]*getEffectivePrice(selCustObj,p))}{isTaxableProd(p)?<span style={{color:"#059669"}}> +tax</span>:""}</div>}
             {isOut&&<div style={{fontSize:10,color:"#dc2626",marginTop:3,textAlign:"center",fontWeight:700}}>OUT OF STOCK ON TRUCK</div>}
           </div>
           );
@@ -1061,8 +1065,8 @@ export default function OrderPortal() {
     Object.entries(quantities).filter(([,q])=>q>0).map(([pid,qty])=>({pid,qty:parseInt(qty),name:products.find(p=>p.id===pid)?.name||""}))
   ,[quantities,products]);
 
-  const subtotal = useMemo(()=>orderItems.reduce((a,i)=>a+(products.find(p=>p.id===i.pid)?.price||0)*i.qty,0),[orderItems,products]);
-  const tax = parseFloat((orderItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0)*taxRate/100).toFixed(2));
+  const subtotal = useMemo(()=>orderItems.reduce((a,i)=>a+getEffectivePrice(selCust,products.find(p=>p.id===i.pid))*i.qty,0),[orderItems,products,selCust]);
+  const tax = parseFloat((orderItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+getEffectivePrice(selCust,p)*i.qty:a;},0)*taxRate/100).toFixed(2));
   const total = subtotal+tax;
   const cardSurcharge = payMethod==="card" ? parseFloat((total*CARD_FEE/100).toFixed(2)) : 0;
   const grandTotal = parseFloat((total+cardSurcharge).toFixed(2));
@@ -1133,6 +1137,7 @@ export default function OrderPortal() {
         customer_name: selCust.name,
         customer_address: selCust.address||"",
         customer_phone: selCust.phone||"",
+        custNotes: selCust.notes||"",
         date: nowStr(),
         items: orderItems,
         subtotal,
@@ -1940,11 +1945,11 @@ export default function OrderPortal() {
                   <div style={{fontSize:10,fontFamily:"monospace",fontWeight:600,color:"#374151"}} className="hide-sm">{p.sku}</div>
                   <div>
                     <div style={{fontWeight:600,fontSize:13,color:"#111"}}>{p.name}</div>
-                    {sel&&<div style={{fontSize:11,color:"#f59e0b",marginTop:2}}>✓ {qty} × {fmt(p.price)} = <strong>{fmt(qty*p.price)}</strong></div>}
+                    {sel&&<div style={{fontSize:11,color:"#f59e0b",marginTop:2}}>✓ {qty} × {fmt(getEffectivePrice(selCust,p))} = <strong>{fmt(qty*getEffectivePrice(selCust,p))}</strong></div>}
                   </div>
                   <div className="hide-sm"><span className="cat-tag" style={{background:catC(p.cat)+"18",color:catC(p.cat)}}>{p.cat}</span></div>
                   <div style={{fontSize:11,color:"#6b7280"}} className="hide-sm">{p.unit}</div>
-                  <div style={{textAlign:"center",fontWeight:700,fontSize:14,color:"#0a1628"}}>{fmt(p.price)}</div>
+                  <div style={{textAlign:"center",fontWeight:700,fontSize:14,color:"#0a1628"}}>{(()=>{const ep=getEffectivePrice(selCust,p);return ep!==p.price?<><span style={{color:"#7c3aed"}}>{fmt(ep)}</span><div style={{fontSize:9,textDecoration:"line-through",color:"#9ca3af",fontWeight:400}}>{fmt(p.price)}</div></>:<span>{fmt(p.price)}</span>;})()}</div>
                   <div style={{textAlign:"center"}}>
                     <span style={{fontWeight:700,fontSize:13,color:p.totalStock<10?"#ef4444":p.totalStock<20?"#f59e0b":"#10b981"}}>{p.totalStock}</span>
                     {p.onTruck>0&&<div style={{fontSize:9,color:"#6b7280"}}>🏭{p.shelf}+🚚{p.onTruck}</div>}

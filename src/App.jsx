@@ -703,7 +703,7 @@ function DriverTruckAssignment({supabase, trucks, showToast}){
 }
 
 // ── WALK-IN SALE COMPONENT ────────────────────────────────────────────────────
-function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTaxableProd,calcSaleTax,calcSaleGrandTotal,fmt,uid,getP,pmtFor,onSaleCreated}){
+function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTaxableProd,calcSaleTax,calcSaleGrandTotal,fmt,uid,getP,pmtFor,getEffectivePrice,onSaleCreated}){
   const [wiCust,setWiCust]=useState("");
   const [wiSearch,setWiSearch]=useState("");
   const [wiItems,setWiItems]=useState({});
@@ -733,7 +733,7 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
     return acc;
   },{});
 
-  const sub=products.reduce((a,p)=>a+(p.price||0)*(wiItems[p.id]||0),0);
+  const sub=products.reduce((a,p)=>a+(getEffectivePrice(wiCust,p.id)||0)*(wiItems[p.id]||0),0);
   const taxRate2=wiCustObj?(()=>{
     const custState=(wiCustObj.state||"").trim();
     // Match by code (IN) or name (Indiana) - case insensitive
@@ -743,7 +743,7 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
     );
     return st?.exempt?0:parseFloat(st?.rate||0);
   })():0;
-  const taxable=products.reduce((a,p)=>isTaxableProd(p)?(a+(p.price||0)*(wiItems[p.id]||0)):a,0);
+  const taxable=products.reduce((a,p)=>isTaxableProd(p)?(a+(getEffectivePrice(wiCust,p.id)||0)*(wiItems[p.id]||0)):a,0);
   const tax=parseFloat((taxable*taxRate2/100).toFixed(2));
   const gt=sub+tax;
   const cardFee=3;
@@ -777,7 +777,7 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
     try{
       const {data:seq}=await supabase.rpc("next_invoice_number");
       const invId="INV-"+String(seq||1).padStart(4,"0");
-      const profit=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+((p?.price||0)-(p?.cost||0))*i.qty;},0);
+      const profit=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffectivePrice(wiCust,i.pid)-(p?.cost||0))*i.qty;},0);
       const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       for(const i of saleItems){const p=products.find(x=>x.id===i.pid);if(p)await supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id);}
@@ -903,7 +903,7 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
                       <div style={{fontWeight:600,fontSize:13,color:"#212121",marginBottom:2,paddingRight:24}}>{p.name}</div>
                       <div style={{fontSize:10,color:"#9ca3af",marginBottom:6}}>{p.sku&&`SKU: ${p.sku} · `}{p.unit}</div>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#059669"}}>{fmt(p.price)}</span>
+                        {(()=>{const ep=getEffectivePrice(wiCust,p.id);const isCustom=wiCust&&ep!==p.price;return<div><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:isCustom?"#7c3aed":"#059669"}}>{fmt(ep)}</span>{isCustom&&<span style={{fontSize:9,background:"#ede9fe",color:"#7c3aed",borderRadius:3,padding:"1px 5px",marginLeft:4,fontWeight:700}}>CUSTOM</span>}{isCustom&&<div style={{fontSize:9,color:"#9ca3af",textDecoration:"line-through"}}>{fmt(p.price)}</div>}</div>;})()}
                         <span style={{fontSize:11,color:p.shelf<5?"#dc2626":"#9ca3af",fontWeight:p.shelf<5?700:400}}>{p.shelf} left{p.shelf<5?" ⚠️":""}</span>
                       </div>
                       {isTaxableProd(p)&&<div style={{fontSize:9,background:"#fef3c7",color:"#92400e",padding:"2px 6px",borderRadius:4,display:"inline-block",marginBottom:6,fontWeight:700}}>TOBACCO TAX</div>}
@@ -915,7 +915,7 @@ function WalkInSale({products,customers,sales,payments,stateTaxes,supabase,isTax
                         <button onClick={()=>setWiItems(prev=>({...prev,[p.id]:Math.min(p.shelf,(prev[p.id]||0)+1)}))} disabled={qty>=p.shelf}
                           style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#f9fafb",cursor:qty>=p.shelf?"not-allowed":"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"#212121"}}>+</button>
                       </div>
-                      {isSelected&&<div style={{fontSize:11,color:"#7c3aed",marginTop:5,textAlign:"right",fontWeight:600}}>{fmt(qty*p.price)}{isTaxableProd(p)?" +tax":""}</div>}
+                      {isSelected&&<div style={{fontSize:11,color:"#7c3aed",marginTop:5,textAlign:"right",fontWeight:600}}>{fmt(qty*getEffectivePrice(wiCust,p.id))}{isTaxableProd(p)?" +tax":""}</div>}
                     </div>
                   );
                 })}
@@ -1916,6 +1916,21 @@ export default function App(){
   const activeLoad=tid=>loads.find(l=>l.truck_id===tid&&l.status==="out");
   const pmtFor=sid=>payments.find(p=>p.sale_id===sid);
 
+  // ── CUSTOM PRICING ─────────────────────────────────────────────────────────────────────────────
+  const parseCustomPrices=cust=>{try{const m=(cust?.notes||"").match(/CUSTOM_PRICES:({.*?})/);return m?JSON.parse(m[1]):{};}catch{return{};}};
+  const getEffectivePrice=(custId,pid)=>{const cust=getC(custId);const cp=parseCustomPrices(cust);const custom=cp[pid];return(custom&&parseFloat(custom)>0)?parseFloat(custom):(getP(pid)?.price||0);};
+  const saveCustomPrices=async(custId,newPrices)=>{
+    const cust=getC(custId);if(!cust)return;
+    const baseNotes=(cust.notes||"").replace(/CUSTOM_PRICES:{.*?}/g,"").trim();
+    const hasAny=Object.values(newPrices).some(v=>v&&parseFloat(v)>0);
+    const filtered=Object.fromEntries(Object.entries(newPrices).filter(([,v])=>v&&parseFloat(v)>0).map(([k,v])=>[k,parseFloat(v)]));
+    const newNotes=hasAny?(baseNotes+(baseNotes?"
+":"")+"CUSTOM_PRICES:"+JSON.stringify(filtered)):baseNotes;
+    const{error}=await supabase.from("customers").update({notes:newNotes}).eq("id",custId);
+    if(error)throw error;
+    setCustomers(prev=>prev.map(c=>c.id===custId?{...c,notes:newNotes}:c));
+  };
+
   // ── STATE TAX HELPERS ──────────────────────────────────────────────────────
   // isTaxableProd defined at module level — used consistently everywhere
 
@@ -1963,8 +1978,8 @@ export default function App(){
 
   const totalRevenue=useMemo(()=>visSales.reduce((a,s)=>a+s.total,0),[visSales]);
   const totalProfit=useMemo(()=>visSales.reduce((a,s)=>a+s.profit,0),[visSales]);
-  const totalTax=useMemo(()=>visSales.reduce((a,s)=>a+calcSaleTax(s),0),[visSales,stateTaxes,products]);
-  const totalAR=useMemo(()=>visSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),[visSales,payments,stateTaxes,products]);
+  const totalTax=useMemo(()=>visSales.reduce((a,s)=>a+calcSaleTax(s),0),[visSales,stateTaxes,products,customers]);
+  const totalAR=useMemo(()=>visSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),[visSales,payments,stateTaxes,products,customers]);
   // Collected (paid only)
   const paidSales=useMemo(()=>visSales.filter(s=>pmtFor(s.id)?.status==="paid"),[visSales,payments]);
   const collectedRevenue=useMemo(()=>paidSales.reduce((a,s)=>a+s.total,0),[paidSales]);
@@ -2234,8 +2249,8 @@ export default function App(){
     const items=formItems.filter(i=>i.qty>0);if(!items.length)return;
     setSaving(true);
     try{
-      const total=items.reduce((a,i)=>a+(getP(i.pid).price*i.qty),0);
-      const profit=items.reduce((a,i)=>{const p=getP(i.pid);return a+(p.price-p.cost)*i.qty;},0);
+      const total=items.reduce((a,i)=>a+(getEffectivePrice(selCust,i.pid)*i.qty),0);
+      const profit=items.reduce((a,i)=>{const p=getP(i.pid);return a+(getEffectivePrice(selCust,i.pid)-p.cost)*i.qty;},0);
       // Get next invoice number from Supabase sequence
       const {data:seqData} = await supabase.rpc("next_invoice_number");
       const invId = "INV-" + String(seqData||1).padStart(4,"0");
@@ -2400,7 +2415,7 @@ export default function App(){
       }
     };
     if(orders.length&&customers.length&&trucks.length) autoProcess();
-  },[orders]);
+  },[orders,sales,customers,trucks]);
 
   // ── SETTINGS ───────────────────────────────────────────────────────────────
   const saveSettings=async()=>{
@@ -2713,7 +2728,7 @@ export default function App(){
             payments={payments} stateTaxes={stateTaxes} supabase={supabase}
             isTaxableProd={isTaxableProd} calcSaleTax={calcSaleTax}
             calcSaleGrandTotal={calcSaleGrandTotal} fmt={fmt} uid={uid}
-            getP={getP} pmtFor={pmtFor}
+            getP={getP} pmtFor={pmtFor} getEffectivePrice={getEffectivePrice}
             onSaleCreated={(ns)=>{setSales(prev=>[ns,...prev]);setProducts(prev=>prev.map(p=>{const fi=ns.items.find(i=>i.pid===p.id);return fi?{...p,shelf:Math.max(0,p.shelf-fi.qty)}:p;}));}}
           />}
 
@@ -3529,7 +3544,81 @@ export default function App(){
                   </select>
                 </div>
                 <div><label>Assigned Driver</label><select value={editCust.truck_id||""} onChange={e=>setEditCust(x=>({...x,truck_id:e.target.value}))}><option value="">— Unassigned —</option>{trucks.map(t=><option key={t.id} value={t.id}>{t.driver} ({t.route||t.plate})</option>)}</select></div>
-                <div><label>Notes</label><input value={editCust.notes||""} onChange={e=>setEditCust(x=>({...x,notes:e.target.value}))}/></div>
+                <div><label>Notes</label><input 
+                  value={(editCust.notes||"").replace(/CUSTOM_PRICES:{.*?}/g,"").trim()}
+                  onChange={e=>{
+                    const cleanNote=e.target.value;
+                    const cp=parseCustomPrices(editCust);
+                    const hasCP=Object.keys(cp).length>0;
+                    const newNotes=hasCP?(cleanNote+(cleanNote?"
+":"")+"CUSTOM_PRICES:"+JSON.stringify(cp)):cleanNote;
+                    setEditCust(x=>({...x,notes:newNotes}));
+                  }}
+                /></div>
+              </div>
+              {/* Custom pricing section */}
+              <div style={{gridColumn:"1/-1",marginTop:8}}>
+                <div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:10,padding:"14px 16px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,color:"#7c3aed"}}>
+                      💲 CUSTOM PRODUCT PRICES
+                    </div>
+                    <span style={{fontSize:11,color:"#9ca3af"}}>Leave blank = use standard price</span>
+                  </div>
+                  {/* Show only customized items summary at top */}
+                  {(()=>{const cp=parseCustomPrices(editCust);const customCount=Object.keys(cp).length;return customCount>0?(
+                    <div style={{background:"#ede9fe",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:11,color:"#5b21b6"}}>
+                      ✅ {customCount} product{customCount!==1?"s":""} with custom pricing active
+                    </div>
+                  ):null;})()}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:8}}>
+                    {products.map(p=>{
+                      const cp=parseCustomPrices(editCust);
+                      const customVal=cp[p.id]?""+cp[p.id]:"";
+                      const hasCustom=!!customVal;
+                      return(
+                        <div key={p.id} style={{background:hasCustom?"#fff":"#f9fafb",border:`1.5px solid ${hasCustom?"#a78bfa":"#e5e7eb"}`,borderRadius:9,padding:"10px 12px",transition:"border-color .15s"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                            <div style={{fontSize:12,fontWeight:700,color:"#212121",flex:1,paddingRight:6}}>{p.name}</div>
+                            {hasCustom&&<span style={{fontSize:9,background:"#7c3aed",color:"#fff",padding:"2px 6px",borderRadius:4,fontWeight:700,flexShrink:0,whiteSpace:"nowrap"}}>CUSTOM</span>}
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:9,color:"#9ca3af",marginBottom:3,textTransform:"uppercase",letterSpacing:".06em"}}>Standard price</div>
+                              <div style={{fontSize:12,color:"#9ca3af",fontWeight:hasCustom?400:600,textDecoration:hasCustom?"line-through":"none"}}>{fmt(p.price)}</div>
+                            </div>
+                            <div style={{color:"#d1d5db",fontSize:14}}>→</div>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:9,color:hasCustom?"#7c3aed":"#9ca3af",marginBottom:3,textTransform:"uppercase",letterSpacing:".06em",fontWeight:hasCustom?700:400}}>Custom price</div>
+                              <input
+                                type="number" min="0" step="0.01"
+                                placeholder={p.price.toFixed(2)}
+                                value={customVal}
+                                onChange={e=>{
+                                  const val=e.target.value;
+                                  const newCp={...parseCustomPrices(editCust)};
+                                  if(val&&parseFloat(val)>0)newCp[p.id]=parseFloat(val);
+                                  else delete newCp[p.id];
+                                  const baseNotes=(editCust.notes||"").replace(/CUSTOM_PRICES:{.*?}/g,"").trim();
+                                  const hasAny=Object.keys(newCp).length>0;
+                                  const newNotes=hasAny?(baseNotes+(baseNotes?"
+":"")+"CUSTOM_PRICES:"+JSON.stringify(newCp)):baseNotes;
+                                  setEditCust(x=>({...x,notes:newNotes}));
+                                }}
+                                style={{width:"100%",border:`1.5px solid ${hasCustom?"#7c3aed":"#d1d5db"}`,borderRadius:6,padding:"5px 8px",fontSize:13,fontWeight:hasCustom?800:400,color:hasCustom?"#7c3aed":"#6b7280",background:hasCustom?"#f5f3ff":"#fff"}}
+                              />
+                            </div>
+                          </div>
+                          {hasCustom&&(()=>{const diff=parseFloat(customVal)-p.price;const pct=((diff/p.price)*100).toFixed(1);return(
+                            <div style={{marginTop:6,fontSize:10,color:diff<0?"#059669":"#dc2626",fontWeight:600}}>
+                              {diff<0?"▼":"▲"} {Math.abs(pct)}% {diff<0?"below":"above"} standard ({diff<0?"-":"+"}${Math.abs(diff).toFixed(2)})
+                            </div>
+                          );})()}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
               <div style={{display:"flex",gap:8,marginTop:14}}>
                 <button className="btn bg" onClick={saveEditCustomer} disabled={saving}>{ic.save} Save Changes</button>
@@ -3553,11 +3642,12 @@ export default function App(){
                           {c.address&&<div style={{fontSize:10,color:"#6b7280",marginTop:2,lineHeight:1.5}}>{c.address}</div>}
                           {c.phone&&<div style={{fontSize:10,color:"#6b7280",display:"flex",alignItems:"center",gap:4}}>📞 {c.phone}</div>}
                           {c.email&&<div style={{fontSize:10,color:"#6b7280",display:"flex",alignItems:"center",gap:4}}>✉️ {c.email}</div>}
-                          {c.notes&&<div style={{fontSize:10,color:"#6b7280",fontStyle:"italic",marginTop:2}}>📝 {c.notes}</div>}
+                          {(()=>{const visNotes=(c.notes||"").replace(/CUSTOM_PRICES:{.*?}/g,"").trim();return visNotes?<div style={{fontSize:10,color:"#6b7280",fontStyle:"italic",marginTop:2}}>📝 {visNotes}</div>:null;})()}
                         </div>
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}}>
                         {truck&&<span className="bdg bb2">{truck.route||truck.plate}</span>}
+                        {Object.keys(parseCustomPrices(c)).length>0&&<span className="bdg bb2" style={{background:"#ede9fe",color:"#7c3aed",border:"1px solid #ddd6fe"}}>💲 Custom Prices</span>}
                         <button className="btn bgh" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>isEditingThis?cancelEditCustomer():startEditCustomer(c)}>{isEditingThis?<>{ic.X} Cancel</>:<>{ic.edit} Edit</>}</button>
                         {isAdmin&&!isEditingThis&&<button className="btn br" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>deleteCustomer(c.id,c.name)}>{ic.X}</button>}
                       </div>
@@ -3984,7 +4074,8 @@ export default function App(){
                   <div style={{flex:1}}>
                     <div style={{fontSize:12,color:"#212121",fontWeight:600}}>{p.name}</div>
                     <div style={{fontSize:10,color:"#9ca3af"}}>
-                      SKU: <span style={{fontFamily:"monospace"}}>{p.sku}</span> · On truck: <span style={{color:"#7c3aed"}}>{fi.max}</span> · <span style={{color:"#059669"}}>{fmt(p.price)}</span>
+                      SKU: <span style={{fontFamily:"monospace"}}>{p.sku}</span> · On truck: <span style={{color:"#7c3aed"}}>{fi.max}</span>
+                      {(()=>{const ep=getEffectivePrice(selCust,p.id);const isCustom=ep!==p.price;return <span> · <span style={{color:isCustom?"#7c3aed":"#059669",fontWeight:isCustom?700:400}}>{fmt(ep)}{isCustom&&<span style={{fontSize:9,marginLeft:3,background:"#ede9fe",color:"#7c3aed",borderRadius:3,padding:"1px 4px"}}>CUSTOM</span>}</span></span>;})()}
                     </div>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:5}}>
@@ -3993,12 +4084,12 @@ export default function App(){
                     <button onClick={()=>setFormItems(prev=>prev.map((x,i)=>i===idx?{...x,qty:Math.min(x.max,x.qty+1)}:x))} style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
                   </div>
                 </div>
-                {fi.qty>0&&<div style={{fontSize:10,color:"#059669",marginTop:3,textAlign:"right"}}>{fmt(fi.qty*p.price)}{isTaxableProd(p)?" + tax":""}</div>}
+                {fi.qty>0&&<div style={{fontSize:10,color:"#059669",marginTop:3,textAlign:"right"}}>{fmt(fi.qty*getEffectivePrice(selCust,p.id))}{isTaxableProd(p)?" + tax":""}</div>}
               </div>
             );})}
           </div>
           <Divider/>
-          {(()=>{const sub=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+(p?.price||0)*fi.qty;},0);const tax=calcSaleTax({items:formItems.map(fi=>({pid:fi.pid,qty:fi.qty})),cust_id:selCust,state:customers.find(c=>c.id===selCust)?.state||""}),gt=sub+tax,prof=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+((p?.price||0)-(p?.cost||0))*fi.qty;},0);return<div style={{background:"#f9fafb",borderRadius:7,padding:"11px 13px",marginBottom:12}}>{[{l:"Subtotal",v:fmt(sub),c:"#6b7280"},{l:"Tax (Tobacco only)",v:fmt(tax),c:"#7c3aed"},{l:"Grand Total",v:fmt(gt),c:"#7c3aed"},{l:"Your Profit",v:fmt(prof),c:"#059669"}].map(k=><div key={k.l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:k.l==="Grand Total"?16:13,color:k.c}}>{k.v}</span></div>)}</div>;})()}
+          {(()=>{const sub=formItems.reduce((a,fi)=>{return a+getEffectivePrice(selCust,fi.pid)*fi.qty;},0);const tax=calcSaleTax({items:formItems.map(fi=>({pid:fi.pid,qty:fi.qty})),cust_id:selCust,state:customers.find(c=>c.id===selCust)?.state||""}),gt=sub+tax,prof=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+(getEffectivePrice(selCust,fi.pid)-(p?.cost||0))*fi.qty;},0);return<div style={{background:"#f9fafb",borderRadius:7,padding:"11px 13px",marginBottom:12}}>{[{l:"Subtotal",v:fmt(sub),c:"#6b7280"},{l:"Tax (Tobacco only)",v:fmt(tax),c:"#7c3aed"},{l:"Grand Total",v:fmt(gt),c:"#7c3aed"},{l:"Your Profit",v:fmt(prof),c:"#059669"}].map(k=><div key={k.l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:k.l==="Grand Total"?16:13,color:k.c}}>{k.v}</span></div>)}</div>;})()}
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <button className="btn bgh" onClick={()=>{setModal(null);setScanning(false);setScanInput("");}}>Cancel</button>
             <button className="btn bg" onClick={confirmSale} disabled={saving}>{ic.inv} Confirm & Invoice</button>
