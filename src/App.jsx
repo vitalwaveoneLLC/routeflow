@@ -2087,14 +2087,19 @@ export default function App(){
   };
   const confirmLoad=async()=>{
     const items=formItems.filter(i=>i.qty>0);if(!items.length)return;
-    for(const i of items){const p=getP(i.pid);if(i.qty>p.shelf)return showToast(`Not enough: ${p.name}`,"error");}
+    // Hard validation — ensure no qty exceeds actual shelf stock
+    const overLimit=items.find(i=>{const p=getP(i.pid);return !p||i.qty>p.shelf;});
+    if(overLimit){
+      const p=getP(overLimit.pid);
+      return showToast(`⚠️ Not enough shelf stock for "${p?.name}" — only ${p?.shelf} available`,"error");
+    }
     setSaving(true);
     try{
       const load={id:"LD-"+uid(),truck_id:selTruck,date:nowStr(),items,status:"out"};
       await supabase.from("loads").insert(load);
-      await Promise.all(items.map(i=>supabase.from("products").update({shelf:getP(i.pid).shelf-i.qty}).eq("id",i.pid)));
+      await Promise.all(items.map(i=>supabase.from("products").update({shelf:Math.max(0,getP(i.pid).shelf-i.qty)}).eq("id",i.pid)));
       setLoads(prev=>[load,...prev]);
-      setProducts(prev=>prev.map(p=>{const fi=items.find(i=>i.pid===p.id);return fi?{...p,shelf:p.shelf-fi.qty}:p;}));
+      setProducts(prev=>prev.map(p=>{const fi=items.find(i=>i.pid===p.id);return fi?{...p,shelf:Math.max(0,p.shelf-fi.qty)}:p;}));
       showToast("Truck loaded");setModal(null);
     }catch(e){showToast(e.message,"error");}
     setSaving(false);
@@ -2213,12 +2218,26 @@ export default function App(){
         .map(([pid,qty])=>({pid,qty:parseInt(qty)}));
       if(!newItems.length){showToast("Must keep at least one product","error");setAmendSaving(false);return;}
 
+      // Validate: if increasing qty, check shelf has enough stock to cover the increase
+      const oldMap={};(amendSale.items||[]).forEach(i=>{oldMap[i.pid]=i.qty;});
+      const stockErr=newItems.find(i=>{
+        const increase=i.qty-(oldMap[i.pid]||0);
+        if(increase<=0)return false; // reducing qty — always ok
+        const prod=getP(i.pid);
+        return !prod||increase>prod.shelf; // need more than what's on shelf
+      });
+      if(stockErr){
+        const prod=getP(stockErr.pid);
+        const increase=stockErr.qty-(oldMap[stockErr.pid]||0);
+        showToast(`⚠️ Not enough shelf stock for "${prod?.name}" — need ${increase} more but only ${prod?.shelf} on shelf`,"error");
+        setAmendSaving(false);return;
+      }
+
       const newSub=newItems.reduce((a,i)=>a+(getEffectivePrice(amendSale.cust_id,i.pid)||0)*i.qty,0);
       const newTaxable=newItems.reduce((a,i)=>{const p=getP(i.pid);return isTaxableProd(p)?a+(getEffectivePrice(amendSale.cust_id,i.pid)||0)*i.qty:a;},0);
       const newProfit=newItems.reduce((a,i)=>{const p=getP(i.pid);return a+(getEffectivePrice(amendSale.cust_id,i.pid)-(p?.cost||0))*i.qty;},0);
 
       // Adjust shelf: return old qty, deduct new qty — batched
-      const oldMap={};(amendSale.items||[]).forEach(i=>{oldMap[i.pid]=i.qty;});
       const allPids=[...new Set([...Object.keys(oldMap),...newItems.map(i=>i.pid)])];
       const shelfUpdates=allPids.map(pid=>{
         const diff=(oldMap[pid]||0)-parseInt(amendItems[pid]||0);
@@ -4153,13 +4172,25 @@ export default function App(){
         <div>
           {isAdmin&&<div style={{marginBottom:12}}><label>Select Truck</label><select value={selTruck} onChange={e=>{setSelTruck(e.target.value);setFormItems(products.map(p=>({pid:p.id,qty:0})));}}>{trucks.map(t=><option key={t.id} value={t.id}>{t.driver} — {t.plate}</option>)}</select></div>}
           <div style={{fontSize:10,color:"#6b7280",letterSpacing:".07em",fontWeight:700,marginBottom:8}}>QUANTITIES TO LOAD</div>
-          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:300,overflowY:"auto",paddingRight:3}}>
-            {products.map((p,idx)=>(
-              <div key={p.id} style={{display:"flex",alignItems:"center",gap:9,background:"#f9fafb",borderRadius:7,padding:"8px 11px"}}>
-                <div style={{flex:1}}><div style={{fontSize:12,color:"#212121",fontWeight:600}}>{p.name}</div><div style={{fontSize:10,color:"#9ca3af"}}>Available: <span style={{color:"#7c3aed"}}>{p.shelf}</span> · {p.unit}</div></div>
-                <input type="number" min="0" max={p.shelf} value={formItems[idx]?.qty||0} onChange={e=>{const v=Math.min(p.shelf,Math.max(0,parseInt(e.target.value)||0));setFormItems(prev=>prev.map((fi,i)=>i===idx?{...fi,qty:v}:fi));}} style={{width:70,textAlign:"center"}}/>
-              </div>
-            ))}
+          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:340,overflowY:"auto",paddingRight:3}}>
+            {products.map((p,idx)=>{
+              const inStock=p.shelf>0;
+              return(
+                <div key={p.id} style={{display:"flex",alignItems:"center",gap:9,background:inStock?"#f9fafb":"#fff5f5",borderRadius:7,padding:"8px 11px",border:inStock?"none":"1px solid #fecaca",opacity:inStock?1:0.7}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,color:inStock?"#212121":"#9ca3af",fontWeight:600}}>{p.name}</div>
+                    <div style={{fontSize:10,color:"#9ca3af"}}>
+                      Available: <span style={{color:inStock?"#7c3aed":"#dc2626",fontWeight:700}}>{p.shelf}</span> · {p.unit}
+                      {!inStock&&<span style={{marginLeft:6,color:"#dc2626",fontWeight:700}}>— OUT OF STOCK</span>}
+                    </div>
+                  </div>
+                  <input type="number" min="0" max={p.shelf} value={formItems[idx]?.qty||0}
+                    disabled={!inStock}
+                    onChange={e=>{const v=Math.min(p.shelf,Math.max(0,parseInt(e.target.value)||0));setFormItems(prev=>prev.map((fi,i)=>i===idx?{...fi,qty:v}:fi));}}
+                    style={{width:70,textAlign:"center",opacity:inStock?1:0.4,cursor:inStock?"text":"not-allowed"}}/>
+                </div>
+              );
+            })}
           </div>
           <Divider/>
           <div style={{background:"#f9fafb",borderRadius:7,padding:"9px 12px",marginBottom:12,display:"flex",justifyContent:"space-between"}}>
@@ -4375,18 +4406,23 @@ export default function App(){
                 const ep=getEffectivePrice(amendSale.cust_id,item.pid);
                 const diff=qty-origQty;
                 const changed=qty!==origQty;
+                // How many more can be added: original qty returns to shelf, so available = shelf + origQty
+                const maxQty = origQty + (p?.shelf||0);
+                const atLimit = qty >= maxQty;
+                const overShelf = diff > (p?.shelf||0); // trying to add more than what's on shelf
                 return(
-                  <div key={item.pid} style={{border:`1.5px solid ${changed?"#7c3aed":"#e5e7eb"}`,borderRadius:10,padding:"12px 14px",marginBottom:8,background:changed?"#faf5ff":"#fff",transition:"all .15s"}}>
+                  <div key={item.pid} style={{border:`1.5px solid ${overShelf?"#dc2626":changed?"#7c3aed":"#e5e7eb"}`,borderRadius:10,padding:"12px 14px",marginBottom:8,background:overShelf?"#fff5f5":changed?"#faf5ff":"#fff",transition:"all .15s"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
                       <div>
                         <div style={{fontWeight:700,fontSize:13,color:"#212121"}}>{p?.name||item.pid}</div>
                         <div style={{fontSize:10,color:"#9ca3af",marginTop:2}}>
                           {p?.sku&&`${p.sku} · `}{fmt(ep)} each{isTaxableProd(p)&&<span style={{marginLeft:4,color:"#7c3aed",fontWeight:700,fontSize:9}}>TOBACCO TAX</span>}
-                          {" · "}<span style={{color:p?.shelf<5?"#dc2626":"#9ca3af"}}>{p?.shelf} on shelf</span>
+                          {" · "}<span style={{color:(p?.shelf||0)===0?"#dc2626":(p?.shelf||0)<5?"#f59e0b":"#059669",fontWeight:700}}>{p?.shelf||0} on shelf</span>
+                          {" · "}<span style={{color:"#6b7280"}}>max {maxQty} with original</span>
                         </div>
                       </div>
                       <div style={{textAlign:"right",flexShrink:0}}>
-                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:changed?"#7c3aed":"#212121"}}>{fmt(qty*ep)}</div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:overShelf?"#dc2626":changed?"#7c3aed":"#212121"}}>{fmt(qty*ep)}</div>
                         {changed&&<div style={{fontSize:10,fontWeight:700,color:diff>0?"#dc2626":"#059669",marginTop:1}}>
                           {diff>0?`▲ +${diff}`:`▼ ${diff}`} from original ({origQty})
                         </div>}
@@ -4395,13 +4431,16 @@ export default function App(){
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       <button className="btn br" style={{width:30,height:30,padding:0,justifyContent:"center",borderRadius:"50%",fontSize:16}}
                         onClick={()=>setAmendItems(prev=>({...prev,[item.pid]:Math.max(0,(parseInt(prev[item.pid]||0))-1)}))}>−</button>
-                      <input type="number" min="0" value={qty||""} placeholder="0"
-                        onChange={e=>setAmendItems(prev=>({...prev,[item.pid]:Math.max(0,parseInt(e.target.value)||0)}))}
-                        style={{flex:1,textAlign:"center",border:`2px solid ${changed?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"8px 6px",fontSize:18,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",color:changed?"#7c3aed":"#212121"}}/>
-                      <button className="btn ba" style={{width:30,height:30,padding:0,justifyContent:"center",borderRadius:"50%",fontSize:16}}
-                        onClick={()=>setAmendItems(prev=>({...prev,[item.pid]:(parseInt(prev[item.pid]||0))+1}))}>+</button>
+                      <input type="number" min="0" max={maxQty} value={qty||""} placeholder="0"
+                        onChange={e=>setAmendItems(prev=>({...prev,[item.pid]:Math.min(maxQty,Math.max(0,parseInt(e.target.value)||0))}))}
+                        style={{flex:1,textAlign:"center",border:`2px solid ${overShelf?"#dc2626":changed?"#7c3aed":"#e5e7eb"}`,borderRadius:8,padding:"8px 6px",fontSize:18,fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",color:overShelf?"#dc2626":changed?"#7c3aed":"#212121"}}/>
+                      <button className="btn ba" style={{width:30,height:30,padding:0,justifyContent:"center",borderRadius:"50%",fontSize:16,opacity:atLimit?0.4:1,cursor:atLimit?"not-allowed":"pointer"}}
+                        disabled={atLimit}
+                        onClick={()=>!atLimit&&setAmendItems(prev=>({...prev,[item.pid]:Math.min(maxQty,(parseInt(prev[item.pid]||0))+1)}))}>+</button>
                       <span style={{minWidth:64,fontSize:11,color:"#9ca3af",textAlign:"center",flexShrink:0}}>was {origQty}</span>
                     </div>
+                    {overShelf&&<div style={{marginTop:6,fontSize:10,color:"#dc2626",fontWeight:700}}>⚠️ Only {p?.shelf||0} units on shelf — can't increase by {diff}</div>}
+                    {atLimit&&!overShelf&&<div style={{marginTop:6,fontSize:10,color:"#f59e0b",fontWeight:700}}>⚠️ Maximum reached ({maxQty} = {origQty} original + {p?.shelf||0} on shelf)</div>}
                   </div>
                 );
               })}

@@ -241,6 +241,17 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
     if(isLocked) return setMsg({t:"error",m:"Your truck is locked by admin. Contact your manager."});
     const loadItems = products.filter(p=>items[p.id]>0).map(p=>({pid:p.id,qty:parseInt(items[p.id])}));
     if(!loadItems.length) return setMsg({t:"error",m:"Add at least one product"});
+
+    // Hard validation — ensure no item exceeds shelf stock
+    const overLimit = loadItems.find(i=>{
+      const p=products.find(x=>x.id===i.pid);
+      return !p || i.qty > p.shelf;
+    });
+    if(overLimit){
+      const p=products.find(x=>x.id===overLimit.pid);
+      return setMsg({t:"error",m:`⚠️ Only ${p?.shelf} of "${p?.name}" available on shelf — can't load ${overLimit.qty}`});
+    }
+
     setSaving(true);
     try{
       const nl = {id:"LD-"+uid(),truck_id:driverData.truck?.id,date:new Date().toLocaleDateString(),items:loadItems,status:"out",created_at:new Date().toISOString()};
@@ -386,73 +397,58 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       return acc;
     },{});
 
-  // Remaining = total loaded qty - total sold qty
+  // Remaining on truck — never negative
   const getRemainingQty = (pid) => {
     const loaded = loadedItems.find(i=>i.pid===pid)?.qty||0;
-    const sold = soldMap[pid]||0;
-    return Math.max(0, loaded-sold);
+    const sold   = soldMap[pid]||0;
+    return Math.max(0, loaded - sold);
   };
+
+  // Split into available (remaining > 0) and out-of-stock on truck
+  const inStockProducts  = availableProducts.filter(p=>getRemainingQty(p.id)>0);
+  const outStockProducts = availableProducts.filter(p=>getRemainingQty(p.id)===0);
   // Use freshly fetched customer state for accurate tax
   const selCustObj = driverData.customers.find(c=>c.id===selCust);
   const custStateId = freshCustState || selCustObj?.state || driverData.truck?.state || "";
   const custStateTax = driverData.stateTaxes?.find(s=>s.id===custStateId);
   const driverTaxRate = custStateTax?.exempt ? 0 : parseFloat(custStateTax?.rate||0);
-  const sub = availableProducts.reduce((a,p)=>a+getEffectivePrice(selCustObj,p)*(items[p.id]||0),0);
-  const hasTaxableItems = availableProducts.some(p=>isTaxableProd(p)&&(items[p.id]||0)>0);
-  const tax = parseFloat((availableProducts.reduce((a,p)=>isTaxableProd(p)?(a+getEffectivePrice(selCustObj,p)*(items[p.id]||0)):a,0)*driverTaxRate/100).toFixed(2));
+  const sub = inStockProducts.reduce((a,p)=>a+getEffectivePrice(selCustObj,p)*(items[p.id]||0),0);
+  const hasTaxableItems = inStockProducts.some(p=>isTaxableProd(p)&&(items[p.id]||0)>0);
+  const tax = parseFloat((inStockProducts.reduce((a,p)=>isTaxableProd(p)?(a+getEffectivePrice(selCustObj,p)*(items[p.id]||0)):a,0)*driverTaxRate/100).toFixed(2));
   const gt = sub+tax;
-  const profit = availableProducts.reduce((a,p)=>a+(getEffectivePrice(selCustObj,p)-(p.cost||0))*(items[p.id]||0),0);
+  const profit = inStockProducts.reduce((a,p)=>a+(getEffectivePrice(selCustObj,p)-(p.cost||0))*(items[p.id]||0),0);
 
   const handleScan = (code) => {
-    const match = availableProducts.find(p=>p.sku?.toLowerCase()===code.toLowerCase()||p.id?.toLowerCase()===code.toLowerCase());
-    if(match){setItems(prev=>({...prev,[match.id]:(prev[match.id]||0)+1}));setMsg({t:"success",m:`✓ ${match.name} added`});}
-    else setMsg({t:"error",m:`No product found: ${code}`});
-    setScanInput("");
-    setTimeout(()=>setMsg(null),2000);
-  };
-
-  const generateStripeQR_unused = async (sale) => {
-    setQrLoading(true);
-    setStripeQR(null);
-    try{
-      const saleTax = (() => {
-        const st = driverData.stateTaxes?.find(s=>s.id===(sale.state||""));
-        const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
-        if(!rate) return 0;
-        const taxable = (sale.items||[]).reduce((a,i)=>{
-          const p = products.find(x=>x.id===i.pid);
-          return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
-        }, 0);
-        return parseFloat((taxable*rate/100).toFixed(2));
-      })();
-      const gt = sale.total + saleTax;
-      const total = parseFloat((gt*(1+CARD_FEE/100)).toFixed(2));
-      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-      const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment-intent`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json","apikey":SUPABASE_ANON_KEY,"Authorization":`Bearer ${SUPABASE_ANON_KEY}`},
-        body:JSON.stringify({amount:total,currency:"usd",metadata:{invoice_id:sale.id,customer:selCustObj?.name||"",driver:driverData.truck?.driver||""}})
-      });
-      if(!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
-      if(data.error) throw new Error(data.error);
-      if(data.client_secret){
-        const payUrl = `${window.location.origin}/order?pay=${sale.id}&cs=${data.client_secret}&amt=${total}`;
-        setStripeQR({url:payUrl, amount:total, invoiceId:sale.id});
-      } else {
-        throw new Error("No payment intent returned");
-      }
-    }catch(e){
-      setMsg({t:"error",m:"QR Error: "+e.message});
+    // Check in-stock truck products first
+    const match = inStockProducts.find(p=>p.sku?.toLowerCase()===code.toLowerCase()||p.id?.toLowerCase()===code.toLowerCase());
+    if(match){
+      const remaining = getRemainingQty(match.id);
+      const current = items[match.id]||0;
+      if(current >= remaining) return setMsg({t:"error",m:`⚠️ Only ${remaining} of "${match.name}" left on truck`});
+      setItems(prev=>({...prev,[match.id]:current+1}));
+      setMsg({t:"success",m:`✓ ${match.name} added`});
+    } else {
+      // Check if it's out-of-stock on truck but available on shelf
+      const outMatch = outStockProducts.find(p=>p.sku?.toLowerCase()===code.toLowerCase()||p.id?.toLowerCase()===code.toLowerCase());
+      if(outMatch) setMsg({t:"error",m:`🚫 "${outMatch.name}" is sold out on your truck. ${outMatch.shelf>0?`${outMatch.shelf} units available on warehouse shelf.`:"None on shelf either."}`});
+      else setMsg({t:"error",m:`No product found: ${code}`});
     }
-    setQrLoading(false);
+    setScanInput("");
+    setTimeout(()=>setMsg(null),4000);
   };
 
   const confirmSale = async () => {
     if(!selCust) return setMsg({t:"error",m:"Select a customer"});
-    const saleItems = availableProducts.filter(p=>items[p.id]>0).map(p=>({pid:p.id,qty:items[p.id]}));
+    const saleItems = inStockProducts.filter(p=>(items[p.id]||0)>0).map(p=>({pid:p.id,qty:items[p.id]}));
     if(!saleItems.length) return setMsg({t:"error",m:"Add at least one product"});
+
+    // Hard server-side guard — ensure no qty exceeds what's actually on the truck
+    const overLimit = saleItems.find(i=>i.qty > getRemainingQty(i.pid));
+    if(overLimit){
+      const p = products.find(x=>x.id===overLimit.pid);
+      return setMsg({t:"error",m:`⚠️ Only ${getRemainingQty(overLimit.pid)} of "${p?.name}" remaining on truck. Adjust quantity.`});
+    }
+
     setSaving(true);
     try{
       const {data:seqData} = await supabase.rpc("next_invoice_number");
@@ -785,39 +781,68 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         </div>
       </div>}
       <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
-        {availableProducts.map(p=>{
+        {/* ── IN-STOCK PRODUCTS ── */}
+        {inStockProducts.map(p=>{
           const remaining = getRemainingQty(p.id);
           const loaded = loadedItems.find(i=>i.pid===p.id)?.qty||0;
           const sold = soldMap[p.id]||0;
-          const isOut = remaining===0;
+          const qty = items[p.id]||0;
+          const nearLimit = qty >= remaining && remaining > 0;
           return(
-          <div key={p.id} className="card" style={{padding:"10px 14px",border:`1.5px solid ${isOut?"#fecaca":items[p.id]>0?"#0ea5e9":"#e5e7eb"}`,opacity:isOut?0.6:1}}>
-            <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <div style={{flex:1}}>
-                <div style={{fontWeight:600,fontSize:13}}>{p.name}</div>
-                <div style={{fontSize:11,color:"#9ca3af"}}>{(()=>{const ep=getEffectivePrice(selCustObj,p);const isC=ep!==p.price;return<>{isC?<span style={{color:"#7c3aed",fontWeight:700}}>{fmt(ep)} <span style={{fontSize:9,background:"#ede9fe",borderRadius:3,padding:"1px 4px"}}>CUSTOM</span> <span style={{textDecoration:"line-through",color:"#9ca3af",fontWeight:400}}>{fmt(p.price)}</span></span>:<span>{fmt(p.price)}</span>} · {isTaxableProd(p)?<span style={{color:"#7c3aed"}}>taxable</span>:"no tax"}</>;})()}</div>
-                <div style={{fontSize:11,marginTop:3,display:"flex",gap:8}}>
-                  <span style={{color:"#059669",fontWeight:600}}>📦 {remaining} left</span>
-                  <span style={{color:"#9ca3af"}}>{loaded} loaded · {sold} sold</span>
+            <div key={p.id} className="card" style={{padding:"10px 14px",border:`1.5px solid ${qty>0?"#0ea5e9":"#e5e7eb"}`}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:600,fontSize:13}}>{p.name}</div>
+                  <div style={{fontSize:11,color:"#9ca3af"}}>{(()=>{const ep=getEffectivePrice(selCustObj,p);const isC=ep!==p.price;return<>{isC?<span style={{color:"#7c3aed",fontWeight:700}}>{fmt(ep)} <span style={{fontSize:9,background:"#ede9fe",borderRadius:3,padding:"1px 4px"}}>CUSTOM</span> <span style={{textDecoration:"line-through",color:"#9ca3af",fontWeight:400}}>{fmt(p.price)}</span></span>:<span>{fmt(p.price)}</span>} · {isTaxableProd(p)?<span style={{color:"#7c3aed"}}>taxable</span>:"no tax"}</>;})()}</div>
+                  <div style={{fontSize:11,marginTop:3,display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <span style={{color:remaining<=3?"#f59e0b":"#059669",fontWeight:700}}>🚚 {remaining} on truck{remaining<=3?" ⚠️":""}</span>
+                    <span style={{color:"#9ca3af"}}>{loaded} loaded · {sold} sold</span>
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))}
+                    style={{width:28,height:28,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                  <input type="number" min="0" max={remaining} value={qty||""} placeholder="0"
+                    onChange={e=>setItems(prev=>({...prev,[p.id]:Math.min(remaining,Math.max(0,parseInt(e.target.value)||0))}))}
+                    style={{width:48,textAlign:"center",border:`1.5px solid ${qty>0?"#0ea5e9":"#e5e7eb"}`,borderRadius:6,padding:"5px",fontSize:13,fontWeight:700}}/>
+                  <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.min(remaining,(prev[p.id]||0)+1)}))}
+                    disabled={qty>=remaining}
+                    style={{width:28,height:28,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:qty>=remaining?"#f9fafb":"#fff",cursor:qty>=remaining?"not-allowed":"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:qty>=remaining?"#d1d5db":"#212121"}}>+</button>
                 </div>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:5}}>
-                <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))}
-                  style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
-                <input type="number" min="0" max={remaining} value={items[p.id]||""} placeholder="0"
-                  onChange={e=>setItems(prev=>({...prev,[p.id]:Math.min(remaining,Math.max(0,parseInt(e.target.value)||0))}))}
-                  style={{width:48,textAlign:"center",border:`1.5px solid ${items[p.id]>0?"#0ea5e9":"#e5e7eb"}`,borderRadius:6,padding:"5px",fontSize:13,fontWeight:700}}
-                  disabled={isOut}/>
-                <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.min(remaining,(prev[p.id]||0)+1)}))}
-                  disabled={isOut}
-                  style={{width:26,height:26,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:isOut?"not-allowed":"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
-              </div>
+              {qty>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right",fontWeight:600}}>{fmt(qty*getEffectivePrice(selCustObj,p))}{isTaxableProd(p)?<span style={{color:"#059669"}}> +tax</span>:""}</div>}
+              {nearLimit&&qty>0&&<div style={{fontSize:10,color:"#f59e0b",marginTop:2,textAlign:"right",fontWeight:700}}>⚠️ At truck limit — {remaining} max</div>}
             </div>
-            {(items[p.id]||0)>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right"}}>{fmt(items[p.id]*getEffectivePrice(selCustObj,p))}{isTaxableProd(p)?<span style={{color:"#059669"}}> +tax</span>:""}</div>}
-            {isOut&&<div style={{fontSize:10,color:"#dc2626",marginTop:3,textAlign:"center",fontWeight:700}}>OUT OF STOCK ON TRUCK</div>}
-          </div>
           );
         })}
+
+        {/* ── OUT-OF-STOCK ON TRUCK ── */}
+        {outStockProducts.length>0&&(
+          <div style={{marginTop:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <div style={{height:1,flex:1,background:"#fecaca"}}/>
+              <span style={{fontSize:10,fontWeight:700,color:"#dc2626",letterSpacing:".08em",whiteSpace:"nowrap"}}>🚫 SOLD OUT ON TRUCK</span>
+              <div style={{height:1,flex:1,background:"#fecaca"}}/>
+            </div>
+            {outStockProducts.map(p=>(
+              <div key={p.id} className="card" style={{padding:"10px 14px",border:"1.5px solid #fecaca",background:"#fff5f5",marginBottom:6,opacity:0.85}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:13,color:"#374151"}}>{p.name}</div>
+                    <div style={{fontSize:11,marginTop:3,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{color:"#dc2626",fontWeight:700}}>🚚 0 on truck</span>
+                      {p.shelf>0
+                        ?<span style={{background:"#f0fdf4",border:"1px solid #a7f3d0",color:"#065f46",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>📦 {p.shelf} on warehouse shelf</span>
+                        :<span style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>📦 None on shelf either</span>
+                      }
+                    </div>
+                  </div>
+                  <span style={{fontSize:10,color:"#dc2626",fontWeight:700,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"3px 8px",whiteSpace:"nowrap"}}>OUT ON TRUCK</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       {gt>0&&<div style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
         {[["Subtotal",fmt(sub),""],hasTaxableItems&&tax>0?[`Tobacco/Vape Tax · ${custStateId} (${driverTaxRate}%)`,fmt(tax),"#059669"]:null,custUnpaidBalance>0?["⚠️ Previous Balance",fmt(custUnpaidBalance),"#dc2626"]:null,["Grand Total",fmt(gt+custUnpaidBalance),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].filter(Boolean).map(([l,v,c])=>(
@@ -951,6 +976,17 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     if(!wiCust) return setWiMsg({t:"error",m:"Select a customer"});
     const saleItems=shelfProds.filter(p=>wiItems[p.id]>0).map(p=>({pid:p.id,qty:wiItems[p.id]}));
     if(!saleItems.length) return setWiMsg({t:"error",m:"Add at least one product"});
+
+    // Hard validation — ensure qty never exceeds shelf stock
+    const overLimit=saleItems.find(i=>{
+      const p=products.find(x=>x.id===i.pid);
+      return !p||i.qty>p.shelf;
+    });
+    if(overLimit){
+      const p=products.find(x=>x.id===overLimit.pid);
+      return setWiMsg({t:"error",m:`⚠️ Only ${p?.shelf} of "${p?.name}" available on shelf — adjust quantity`});
+    }
+
     setWiSaving(true);
     try{
       const {data:seq}=await supabase.rpc("next_invoice_number");
@@ -997,6 +1033,21 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
         .filter(([,q])=>parseInt(q)>0)
         .map(([pid,qty])=>({pid,qty:parseInt(qty)}));
       if(!newItems.length) throw new Error("Must keep at least one product");
+
+      // Validate: increases must not exceed available shelf stock
+      const oldMap = {};
+      (amendSale.items||[]).forEach(i=>{ oldMap[i.pid]=i.qty; });
+      const stockErr = newItems.find(i=>{
+        const increase = i.qty - (oldMap[i.pid]||0);
+        if(increase<=0) return false;
+        const prod = products.find(x=>x.id===i.pid);
+        return !prod || increase > prod.shelf;
+      });
+      if(stockErr){
+        const prod = products.find(x=>x.id===stockErr.pid);
+        const increase = stockErr.qty - (oldMap[stockErr.pid]||0);
+        throw new Error(`⚠️ Only ${prod?.shelf||0} of "${prod?.name}" on shelf — can't add ${increase} more`);
+      }
 
       // Recalculate totals
       const newSub = newItems.reduce((a,i)=>a+(getEffP(amendSale.cust_id,i.pid)||0)*i.qty, 0);
@@ -1639,6 +1690,24 @@ export default function OrderPortal() {
   // ── SUBMIT ORDER ───────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if(!orderItems.length) return;
+
+    // Validate every item against current totalStock (shelf + on trucks)
+    const outOfStock = orderItems.filter(i=>{
+      const p = products.find(x=>x.id===i.pid);
+      return !p || i.qty > (p.totalStock||0);
+    });
+    if(outOfStock.length){
+      const msgs = outOfStock.map(i=>{
+        const p = products.find(x=>x.id===i.pid);
+        const avail = p?.totalStock||0;
+        return avail===0
+          ? `"${p?.name||i.pid}" is out of stock`
+          : `"${p?.name||i.pid}" — only ${avail} available, you ordered ${i.qty}`;
+      });
+      alert("⚠️ Stock issue:\n\n" + msgs.join("\n") + "\n\nPlease adjust your quantities.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const id = "ORD-"+uid();
@@ -2706,6 +2775,8 @@ export default function OrderPortal() {
             ?<div style={{padding:40,textAlign:"center",color:"#9ca3af"}}><div style={{fontSize:28,marginBottom:8}}>📦</div><div style={{fontSize:13}}>No products match</div></div>
             :filtered.map((p,i)=>{
               const qty=parseInt(quantities[p.id])||0, sel=qty>0;
+              const atMax = qty>=p.totalStock;
+              const isLow = p.totalStock>0 && p.totalStock<10;
               return (
                 <div key={p.id} className="prod-row" style={{display:"grid",gridTemplateColumns:"70px 90px 1fr 90px 110px 80px 90px 130px",padding:"13px 18px",gap:8,background:sel?"#fffbeb":"transparent",alignItems:"center"}}>
                   <div style={{fontSize:10,color:"#9ca3af",fontFamily:"monospace"}} className="hide-sm">{p.id}</div>
@@ -2718,16 +2789,20 @@ export default function OrderPortal() {
                   <div style={{fontSize:11,color:"#6b7280"}} className="hide-sm">{p.unit}</div>
                   <div style={{textAlign:"center",fontWeight:700,fontSize:14,color:"#0a1628"}}>{(()=>{const ep=getEffectivePrice(selCust,p);return ep!==p.price?<><span style={{color:"#7c3aed"}}>{fmt(ep)}</span><div style={{fontSize:9,textDecoration:"line-through",color:"#9ca3af",fontWeight:400}}>{fmt(p.price)}</div></>:<span>{fmt(p.price)}</span>;})()}</div>
                   <div style={{textAlign:"center"}}>
-                    <span style={{fontWeight:700,fontSize:13,color:p.totalStock<10?"#ef4444":p.totalStock<20?"#f59e0b":"#10b981"}}>{p.totalStock}</span>
+                    <span style={{fontWeight:700,fontSize:13,color:isLow?"#ef4444":p.totalStock<20?"#f59e0b":"#10b981"}}>{p.totalStock}</span>
                     {p.onTruck>0&&<div style={{fontSize:9,color:"#6b7280"}}>🏭{p.shelf}+🚚{p.onTruck}</div>}
-                    {p.totalStock<10&&<div style={{fontSize:9,color:"#ef4444",fontWeight:700}}>LOW</div>}
+                    {isLow&&<div style={{fontSize:9,color:"#ef4444",fontWeight:700}}>LOW STOCK</div>}
+                    {atMax&&qty>0&&<div style={{fontSize:9,color:"#f59e0b",fontWeight:700}}>MAX</div>}
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"center"}}>
                     <button className="qty-btn" onClick={()=>setQty(p.id,qty-1,p.totalStock)}>−</button>
                     <input type="number" min="0" max={p.totalStock} value={quantities[p.id]||""} placeholder="0"
                       onChange={e=>setQty(p.id,e.target.value,p.totalStock)}
                       style={{width:44,textAlign:"center",border:"1.5px solid",borderColor:sel?"#f59e0b":"#e5e7eb",borderRadius:7,padding:"5px 4px",fontSize:14,fontWeight:700,color:"#111",background:sel?"#fffbeb":"#fff"}}/>
-                    <button className="qty-btn" style={{background:qty>0?"#0a1628":"#fff",color:qty>0?"#fff":"#374151",borderColor:qty>0?"#0a1628":"#e5e7eb"}} onClick={()=>setQty(p.id,qty+1,p.totalStock)}>+</button>
+                    <button className="qty-btn"
+                      disabled={atMax}
+                      style={{background:qty>0&&!atMax?"#0a1628":"#fff",color:qty>0&&!atMax?"#fff":"#374151",borderColor:qty>0&&!atMax?"#0a1628":"#e5e7eb",cursor:atMax?"not-allowed":"pointer",opacity:atMax?0.4:1}}
+                      onClick={()=>!atMax&&setQty(p.id,qty+1,p.totalStock)}>+</button>
                   </div>
                 </div>
               );
