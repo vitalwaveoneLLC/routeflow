@@ -1,16 +1,16 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// VitalWaveOne LLC — Customer Order Portal
-// • New customers: register (business name, owner, email, phone, address)
-// • Existing customers: find store → order instantly
-// • Live inventory from Supabase
-// • Proforma invoice PDF on submission
-// • Admin sees & approves in RouteFlow
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// VitalWaveOne LLC - Customer Order Portal
+// * New customers: register (business name, owner, email, phone, address)
+// * Existing customers: find store -> order instantly
+// * Live inventory from Supabase
+// * Proforma invoice PDF on submission
+// * Admin sees & approves in RouteFlow
+// -----------------------------------------------------------------------------
 
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabase";
 
-// ── STYLES ────────────────────────────────────────────────────────────────────
+// -- STYLES --------------------------------------------------------------------
 const GS = () => (
   <>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
@@ -61,14 +61,14 @@ const GS = () => (
   </>
 );
 
-// ── HELPERS ───────────────────────────────────────────────────────────────────
+// -- HELPERS -------------------------------------------------------------------
 const fmt = n => `$${Number(n||0).toFixed(2)}`;
 const uid = () => Math.random().toString(36).slice(2,9).toUpperCase();
 const nowStr = () => new Date().toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"});
 const CAT_COLORS = {Beverage:"#0ea5e9",Tobacco:"#8b5cf6",Snack:"#f59e0b",Health:"#10b981",Misc:"#6b7280",Other:"#64748b"};
 const catC = c => CAT_COLORS[c]||"#64748b";
 
-// ── TAX HELPER (tobacco/nicotine/vape only) ──────────────────────────────────
+// -- TAX HELPER (tobacco/nicotine/vape only) ----------------------------------
 const CARD_FEE = 3; // Card surcharge percentage
 const TAXABLE_CATS_GLOBAL = ["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
 const isTaxableProd=p=>{const c=(p?.cat||"").toLowerCase().trim(),n=(p?.name||"").toLowerCase().trim();return["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff","smoke","eliquid","e-liquid","pod","disposable"].some(t=>c.includes(t)||n.includes(t));};
@@ -83,7 +83,7 @@ const getEffectivePrice=(cust,p)=>{if(!cust||!p)return p?.price||0;const cp=pars
 
 
 
-// ── PROFORMA INVOICE ──────────────────────────────────────────────────────────
+// -- PROFORMA INVOICE ----------------------------------------------------------
 const Invoice = ({order, products, co, stateTaxes, custState}) => {
 
   const stData = stateTaxes?.find(s=>s.id===(custState||"TX"));
@@ -186,8 +186,8 @@ const Invoice = ({order, products, co, stateTaxes, custState}) => {
   );
 };
 
-// ── MAIN PORTAL ───────────────────────────────────────────────────────────────
-// ── DRIVER INVOICE VIEW ───────────────────────────────────────────────────────
+// -- MAIN PORTAL ---------------------------------------------------------------
+// -- DRIVER INVOICE VIEW -------------------------------------------------------
 function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
   const cust = customers.find(c=>c.id===sale.cust_id);
 
@@ -229,7 +229,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
   );
 }
 
-// ── DRIVER LOAD TAB ───────────────────────────────────────────────────────────
+// -- DRIVER LOAD TAB -----------------------------------------------------------
 function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
   const [items, setItems] = useState({});
   const [saving, setSaving] = useState(false);
@@ -242,7 +242,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
     const loadItems = products.filter(p=>items[p.id]>0).map(p=>({pid:p.id,qty:parseInt(items[p.id])}));
     if(!loadItems.length) return setMsg({t:"error",m:"Add at least one product"});
 
-    // Hard validation — ensure no item exceeds shelf stock
+    // Hard validation - ensure no item exceeds shelf stock
     const overLimit = loadItems.find(i=>{
       const p=products.find(x=>x.id===i.pid);
       return !p || i.qty > p.shelf;
@@ -310,7 +310,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
 }
 
 
-// ── DRIVER SELL TAB ───────────────────────────────────────────────────────────
+// -- DRIVER SELL TAB -----------------------------------------------------------
 function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust, payForm, setPayForm, paymentSaving, setPaymentSaving, collectPayment, createdSale, setCreatedSale, showPayment, setShowPayment}){
   const [selCust, setSelCust] = useState(initCust||"");
   const [items, setItems] = useState({});
@@ -397,7 +397,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       return acc;
     },{});
 
-  // Remaining on truck — never negative
+  // Remaining on truck - never negative
   const getRemainingQty = (pid) => {
     const loaded = loadedItems.find(i=>i.pid===pid)?.qty||0;
     const sold   = soldMap[pid]||0;
@@ -442,7 +442,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     const saleItems = inStockProducts.filter(p=>(items[p.id]||0)>0).map(p=>({pid:p.id,qty:items[p.id]}));
     if(!saleItems.length) return setMsg({t:"error",m:"Add at least one product"});
 
-    // Hard server-side guard — ensure no qty exceeds what's actually on the truck
+    // Hard server-side guard - ensure no qty exceeds what's actually on the truck
     const overLimit = saleItems.find(i=>i.qty > getRemainingQty(i.pid));
     if(overLimit){
       const p = products.find(x=>x.id===overLimit.pid);
@@ -860,7 +860,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   );
 }
 
-// ── DRIVER WALK-IN TAB ────────────────────────────────────────────────────────
+// -- DRIVER WALK-IN TAB --------------------------------------------------------
 function DriverWalkInTab({driverData, setDriverData, products, supabase, initCust}){
   const uid2 = ()=>Math.random().toString(36).slice(2,9).toUpperCase();
   const fmt2 = n=>`$${Number(n||0).toFixed(2)}`;
@@ -977,7 +977,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     const saleItems=shelfProds.filter(p=>wiItems[p.id]>0).map(p=>({pid:p.id,qty:wiItems[p.id]}));
     if(!saleItems.length) return setWiMsg({t:"error",m:"Add at least one product"});
 
-    // Hard validation — ensure qty never exceeds shelf stock
+    // Hard validation - ensure qty never exceeds shelf stock
     const overLimit=saleItems.find(i=>{
       const p=products.find(x=>x.id===i.pid);
       return !p||i.qty>p.shelf;
@@ -1011,7 +1011,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     setWiSaving(false);
   };
 
-  // ── OPEN AMENDMENT ─────────────────────────────────────────────────────────
+  // -- OPEN AMENDMENT ---------------------------------------------------------
   const openAmend = (sale)=>{
     const init={};
     (sale.items||[]).forEach(i=>{ init[i.pid]=i.qty; });
@@ -1020,7 +1020,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     setAmendMsg(null);
   };
 
-  // ── SAVE AMENDMENT ─────────────────────────────────────────────────────────
+  // -- SAVE AMENDMENT ---------------------------------------------------------
   const saveAmend = async()=>{
     if(!amendSale) return;
     setAmendSaving(true); setAmendMsg(null);
@@ -1028,7 +1028,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const custObj = customers.find(c=>c.id===amendSale.cust_id);
       const tRate = getTaxRate(custObj);
 
-      // Build new items — remove any with qty=0
+      // Build new items - remove any with qty=0
       const newItems = Object.entries(amendItems)
         .filter(([,q])=>parseInt(q)>0)
         .map(([pid,qty])=>({pid,qty:parseInt(qty)}));
@@ -1082,7 +1082,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     setAmendSaving(false);
   };
 
-  // ── SALE TAB UI ───────────────────────────────────────────────────────────
+  // -- SALE TAB UI -----------------------------------------------------------
   const SaleTab = ()=>(
     <div>
       <div style={{fontSize:11,color:"#9ca3af",marginBottom:14}}>Sell directly from warehouse shelf — deducts shelf stock</div>
@@ -1224,7 +1224,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     </div>
   );
 
-  // ── HISTORY TAB UI ────────────────────────────────────────────────────────
+  // -- HISTORY TAB UI --------------------------------------------------------
   const HistoryTab = ()=>{
     if(wiHistLoading) return <div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>Loading history…</div>;
     if(!wiCust&&!initCust) return <div className="card" style={{padding:28,textAlign:"center",color:"#9ca3af"}}>Select a customer first to see their invoice history.</div>;
@@ -1274,7 +1274,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     );
   };
 
-  // ── AMENDMENT MODAL ───────────────────────────────────────────────────────
+  // -- AMENDMENT MODAL -------------------------------------------------------
   const AmendModal = ()=>{
     if(!amendSale) return null;
     const allPids = new Set([...(amendSale.items||[]).map(i=>i.pid), ...Object.keys(amendItems).filter(pid=>amendItems[pid]>0)]);
@@ -1381,7 +1381,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
   );
 }
 
-// ── DRIVER EXPENSES TAB ───────────────────────────────────────────────────────
+// -- DRIVER EXPENSES TAB -------------------------------------------------------
 function DriverExpensesTab({driverData, supabase}){
   const [form, setForm] = useState({category:"gas",amount:"",description:"",receipt_url:""});
   const [expenses, setExpenses] = useState([]);
@@ -1625,7 +1625,7 @@ export default function OrderPortal() {
   },[]);
 
   const cats = useMemo(()=>["All",...new Set(products.map(p=>p.cat))],[products]);
-  // Tax rate from customer's state — uses the same state_taxes table as all other platforms
+  // Tax rate from customer's state - uses the same state_taxes table as all other platforms
   const taxRate = useMemo(()=>{
     if(!selCust?.state) return 0;
     const st = portalStateTaxes.find(s=>s.id===selCust.state);
@@ -1650,7 +1650,7 @@ export default function OrderPortal() {
 
   const setQty=(pid,val,max)=>setQuantities(prev=>({...prev,[pid]:Math.min(max,Math.max(0,parseInt(val)||0))}));
 
-  // ── VALIDATE REGISTRATION ──────────────────────────────────────────────────
+  // -- VALIDATE REGISTRATION --------------------------------------------------
   const validateReg = () => {
     const errs = {};
     if(!reg.businessName.trim()) errs.businessName = "Required";
@@ -1663,7 +1663,7 @@ export default function OrderPortal() {
     return Object.keys(errs).length===0;
   };
 
-  // ── REGISTER NEW CUSTOMER ──────────────────────────────────────────────────
+  // -- REGISTER NEW CUSTOMER --------------------------------------------------
   const handleRegister = async () => {
     if(!validateReg()) return;
     setSubmitting(true);
@@ -1689,7 +1689,7 @@ export default function OrderPortal() {
     setSubmitting(false);
   };
 
-  // ── SUBMIT ORDER ───────────────────────────────────────────────────────────
+  // -- SUBMIT ORDER -----------------------------------------------------------
   const handleSubmit = async () => {
     if(!orderItems.length) return;
 
@@ -1713,7 +1713,7 @@ export default function OrderPortal() {
     setSubmitting(true);
     try {
       const id = "ORD-"+uid();
-      // If paying by card — confirm Stripe payment first
+      // If paying by card - confirm Stripe payment first
       if(payMethod==="card" && stripeInst && clientSecret){
         const elements = document.querySelector("#stripe-card-element");
         // Confirm card payment via Stripe
@@ -1843,7 +1843,7 @@ export default function OrderPortal() {
     setDriverLoading(false);
   };
 
-  // ── DRIVER LOCATION HEARTBEAT ──────────────────────────────────────────────
+  // -- DRIVER LOCATION HEARTBEAT ----------------------------------------------
   // Sends GPS coordinates to Supabase every 60s while driver is logged in
   useEffect(()=>{
     if(!driverData?.userId) return;
@@ -1856,7 +1856,7 @@ export default function OrderPortal() {
           last_seen: new Date().toISOString(),
         }).eq("id", driverData.userId).then(()=>{});
       }, ()=>{
-        // Permission denied or unavailable — just update last_seen
+        // Permission denied or unavailable - just update last_seen
         supabase.from("profiles").update({last_seen:new Date().toISOString()}).eq("id",driverData.userId).then(()=>{});
       });
     };
@@ -1915,7 +1915,7 @@ export default function OrderPortal() {
     setStep("order");
   };
 
-  // Walk-in auth — customers by name+phone, drivers/admin/staff by email+password
+  // Walk-in auth - customers by name+phone, drivers/admin/staff by email+password
   const verifyWalkIn = async () => {
     setWalkInError(""); setWalkInLoading(true);
     try {
@@ -1933,19 +1933,19 @@ export default function OrderPortal() {
         if(!match) throw new Error("No registered customer found. Check your business name and phone number.");
         setWalkInCust(match); setWalkInVerified(true);
       } else {
-        // Staff / Driver / Admin — email + password via Supabase auth
+        // Staff / Driver / Admin - email + password via Supabase auth
         if(!walkInEmail.trim()) throw new Error("Please enter your email");
         if(!walkInPw.trim())    throw new Error("Please enter your password");
         const {data, error} = await supabase.auth.signInWithPassword({email:walkInEmail, password:walkInPw});
         if(error) throw new Error("Invalid email or password");
-        // Check profile — must be approved (admin, driver, or approved staff)
+        // Check profile - must be approved (admin, driver, or approved staff)
         const {data:prof} = await supabase.from("profiles").select("*").eq("id",data.user.id).single();
         if(!prof) throw new Error("No profile found. Contact admin.");
         if(prof.role==="pending") throw new Error("Your account is pending admin approval.");
         // All roles allowed: admin, driver, staff
         setWalkInUser({...data.user, role:prof.role, displayName:prof.name||walkInEmail});
         setWalkInCust(null); setWalkInVerified(true);
-        // Sign out of supabase session — we only needed to verify identity
+        // Sign out of supabase session - we only needed to verify identity
         await supabase.auth.signOut();
       }
     } catch(e){ setWalkInError(e.message); }
@@ -2043,7 +2043,7 @@ export default function OrderPortal() {
     }
   };
 
-  // ── LOADING ────────────────────────────────────────────────────────────────
+  // -- LOADING ----------------------------------------------------------------
   if(loading) return (
     <div className="portal" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
       <GS/>

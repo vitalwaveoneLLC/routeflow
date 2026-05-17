@@ -1,4 +1,4 @@
-// RouteFlow WMS — Complete Edition with Edit Everywhere
+// RouteFlow WMS - Complete Edition with Edit Everywhere
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
 
@@ -87,7 +87,7 @@ const GS = () => (
   </>
 );
 
-// ── ICONS ─────────────────────────────────────────────────────────────────────
+// -- ICONS ---------------------------------------------------------------------
 const ic={
   dash:<svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>,
   box:<svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>,
@@ -122,8 +122,8 @@ const Empty=({icon,msg})=>(<div style={{textAlign:"center",padding:"32px 16px",c
 const Spinner=({msg=""})=>(<div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,padding:60,color:"#9ca3af",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:".08em",fontSize:14}}><svg className="spin" width="18" height="18" fill="none" stroke="#7c3aed" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>{msg||"LOADING…"}</div>);
 const Modal=({title,onClose,children,wide,xwide})=>(<div className="mo" onClick={e=>e.target===e.currentTarget&&onClose()}><div className={`mb fu${wide?" w":""}${xwide?" xw":""}`}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>{title?<div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:19,textTransform:"uppercase",letterSpacing:".04em",color:"#212121"}}>{title}</div>:<div/>}<button className="btn bgh" onClick={onClose}>{ic.X} Close</button></div>{children}</div></div>);
 
-// ── LOGIN ─────────────────────────────────────────────────────────────────────
-// ── MFA GATE — verify 2FA even for cached sessions ────────────────────────────
+// -- LOGIN ---------------------------------------------------------------------
+// -- MFA GATE - verify 2FA even for cached sessions ----------------------------
 const MFAGate=({onVerified})=>{
   const[otp,setOtp]=useState("");
   const[loading,setLoading]=useState(false);
@@ -292,7 +292,7 @@ const MFAGate=({onVerified})=>{
   );
 };
 
-// ── LOGIN ─────────────────────────────────────────────────────────────────────
+// -- LOGIN ---------------------------------------------------------------------
 const Login=({})=>{
   const[email,setEmail]=useState("");
   const[pw,setPw]=useState("");
@@ -481,8 +481,8 @@ const Login=({})=>{
   );
 };
 
-// ── INVOICE DOC ───────────────────────────────────────────────────────────────
-// ── GLOBAL TAX HELPERS (module level - available to all components) ──────────
+// -- INVOICE DOC ---------------------------------------------------------------
+// -- GLOBAL TAX HELPERS (module level - available to all components) ----------
 const TAXABLE_CATS=["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff"];
 const isTaxableProd=p=>{const c=(p?.cat||"").toLowerCase().trim(),n=(p?.name||"").toLowerCase().trim();return["tobacco","nicotine","cigarette","cigar","vape","hookah","chew","dip","snuff","smoke","eliquid","e-liquid","pod","disposable"].some(t=>c.includes(t)||n.includes(t));};
 
@@ -586,7 +586,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
   );
 };
 
-// ── SETTLEMENT DOC ────────────────────────────────────────────────────────────
+// -- SETTLEMENT DOC ------------------------------------------------------------
 const calcSettleTax=(sale,products,stateTaxes)=>{
   const st=stateTaxes?.find(s=>s.id===(sale.state||""));
   const rate=st?.exempt?0:parseFloat(st?.rate||0);
@@ -623,10 +623,10 @@ const SettleDoc=({truck,d,co,customers,payments,products,stateTaxes})=>{
   );
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 // MAIN APP
-// ══════════════════════════════════════════════════════════════════════════════
-// ── DRIVER TRUCK ASSIGNMENT ───────────────────────────────────────────────────
+// ==============================================================================
+// -- DRIVER TRUCK ASSIGNMENT ---------------------------------------------------
 function DriverTruckAssignment({supabase, trucks, showToast}){
   const[profiles,setProfiles]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -702,8 +702,8 @@ function DriverTruckAssignment({supabase, trucks, showToast}){
   );
 }
 
-// ── WALK-IN SALE COMPONENT ────────────────────────────────────────────────────
-// ── IRS ALL STATES COMPONENT ─────────────────────────────────────────────────
+// -- WALK-IN SALE COMPONENT ----------------------------------------------------
+// -- IRS ALL STATES COMPONENT -------------------------------------------------
 function IRSAllStates({stateTaxes, activeStateIds, stateSearch, setStateSearch}){
   const [irsStateTab,setIrsStateTab]=useState("otp");
 
@@ -801,7 +801,7 @@ function IRSAllStates({stateTaxes, activeStateIds, stateSearch, setStateSearch})
   </>);
 }
 
-// ── IRS REPORTS COMPONENT ─────────────────────────────────────────────────────
+// -- IRS REPORTS COMPONENT -----------------------------------------------------
 // All 50 states + DC OTP (Other Tobacco Products) tax rates
 // Source: State revenue departments, Tax Foundation 2025
 // OTP rates = % of wholesale price (how wholesalers are taxed)
@@ -1366,7 +1366,7 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
   );
 }
 
-// ── STATE ACTIVATION COMPONENT ───────────────────────────────────────────────
+// -- STATE ACTIVATION COMPONENT -----------------------------------------------
 // Simple: activate/deactivate states only. Rate config is in IRS Reports > All States
 function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
   const [search,setSearch]=useState("");
@@ -1559,16 +1559,16 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
 }
 
 
-// ── IRS ALL STATES COMPONENT ─────────────────────────────────────────────────
+// -- IRS ALL STATES COMPONENT -------------------------------------------------
 
 
-// ── IRS REPORTS COMPONENT ─────────────────────────────────────────────────────
+// -- IRS REPORTS COMPONENT -----------------------------------------------------
 // All 50 states + DC OTP (Other Tobacco Products) tax rates
 // Source: State revenue departments, Tax Foundation 2025
 // OTP rates = % of wholesale price (how wholesalers are taxed)
 
 
-// ── STATE CONFIG COMPONENT ────────────────────────────────────────────────────
+// -- STATE CONFIG COMPONENT ----------------------------------------------------
 // Simple: activate states, set OTP rate + cigarette tax per state
 
 
@@ -1631,15 +1631,15 @@ export default function App(){
   const[scanInput,setScanInput]=useState("");
   const[scanMsg,setScanMsg]=useState(null);
 
-  // Edit states — product
+  // Edit states - product
   const[editingPid,setEditingPid]=useState(null);
   const[editProd,setEditProd]=useState({});
 
-  // Edit states — customer
+  // Edit states - customer
   const[editingCid,setEditingCid]=useState(null);
   const[editCust,setEditCust]=useState({});
 
-  // Edit states — truck
+  // Edit states - truck
   const[editingTid,setEditingTid]=useState(null);
   const[editTruck,setEditTruck]=useState({});
 
@@ -1673,7 +1673,7 @@ export default function App(){
   useEffect(()=>{if(authReady&&session&&profile)loadAll();},[authReady,session,profile]);
   useEffect(()=>{if(co?.check_penalty!=null)setPenaltyEdit(String(co.check_penalty));},[co?.check_penalty]);
 
-  // ── LEAFLET MAP ──────────────────────────────────────────────────────────────
+  // -- LEAFLET MAP --------------------------------------------------------------
   useEffect(()=>{
     if(tab!=="truckmanagement"||tmTab!=="map") return;
 
@@ -1703,7 +1703,7 @@ export default function App(){
         }).addTo(map);
         mapInst.current=map;
 
-        // ── CUSTOMER PINS — geocoded via Nominatim, rate-limited 1/sec ──────
+        // -- CUSTOMER PINS - geocoded via Nominatim, rate-limited 1/sec ------
         const custWithAddr=customers.filter(c=>c.address&&c.address.trim());
         custWithAddr.forEach((c,i)=>{
           const truck=trucks.find(t=>t.id===c.truck_id);
@@ -1716,7 +1716,7 @@ export default function App(){
 
           const popup=`<b style="font-size:13px">${c.name}</b><br/><span style="color:#6b7280;font-size:11px">📍 ${c.address}</span><br/><span style="font-size:11px">🚚 ${truck?.driver||"Unassigned"}</span>${c.phone?`<br/><span style="font-size:11px">📞 ${c.phone}</span>`:""}<br/><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" style="color:#0ea5e9;font-size:11px;font-weight:700">🗺 Open in Maps →</a>`;
 
-          // Stagger 1100ms per Nominatim TOS — pass local `map` ref directly
+          // Stagger 1100ms per Nominatim TOS - pass local `map` ref directly
           setTimeout(()=>{
             if(cancelled) return;
             const currentMap = mapInst.current;
@@ -1730,7 +1730,7 @@ export default function App(){
 
             const tryQuery=(qIdx)=>{
               if(qIdx>=queries.length){
-                // All queries failed — show red numbered pin at map center with note
+                // All queries failed - show red numbered pin at map center with note
                 console.warn(`[Map] Could not geocode: "${c.address}"`);
                 return;
               }
@@ -1760,7 +1760,7 @@ export default function App(){
         });
         });
 
-        // ── DRIVER LOCATION PINS ──────────────────────────────────────────────
+        // -- DRIVER LOCATION PINS ----------------------------------------------
         driverProfiles.filter(p=>p.lat&&p.lng).forEach(p=>{
           if(cancelled||!mapInst.current) return;
           const truck=trucks.find(t=>t.id===p.truck_id);
@@ -1794,7 +1794,7 @@ export default function App(){
         script.onload=initMap;
         document.head.appendChild(script);
       } else {
-        // Script already loading — wait for it
+        // Script already loading - wait for it
         existing.addEventListener("load",initMap,{once:true});
         if(window.L) initMap(); // already loaded between checks
       }
@@ -1835,12 +1835,12 @@ export default function App(){
       if(stR.data)setStateTaxes(stR.data);
       if(exR.data)setExpenses(exR.data);
       if(wiR.data)setWalkinRegs(wiR.data);
-      // Load driver profiles — graceful fallback if lat/lng/last_seen don't exist yet
+      // Load driver profiles - graceful fallback if lat/lng/last_seen don't exist yet
       try{
         const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id,lat,lng,last_seen").eq("role","driver");
         if(dpData)setDriverProfiles(dpData);
       }catch{
-        // Columns may not exist yet — load without location fields
+        // Columns may not exist yet - load without location fields
         const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id").eq("role","driver");
         if(dpData)setDriverProfiles(dpData.map(p=>({...p,lat:null,lng:null,last_seen:null})));
       }
@@ -1858,7 +1858,7 @@ export default function App(){
   const activeLoad=tid=>loads.find(l=>l.truck_id===tid&&l.status==="out");
   const pmtFor=sid=>payments.find(p=>p.sale_id===sid);
 
-  // ── CUSTOM PRICING ─────────────────────────────────────────────────────────────────────────────
+  // -- CUSTOM PRICING -----------------------------------------------------------------------------
   const parseCustomPrices=cust=>{try{const m=(cust?.notes||"").match(/CUSTOM_PRICES:({.*?})/);return m?JSON.parse(m[1]):{};}catch{return{};}};
   const hasReturnedCheck=cust=>!!(cust?.notes||"").includes("RETURNED_CHECK:1");
   const RETURNED_CHECK_FEE=parseFloat(co?.check_penalty||50);
@@ -1896,7 +1896,7 @@ export default function App(){
       }
       setPayments(prev=>prev.map(p=>p.sale_id===saleId?{...p,status:"returned_check",returned_check_url:rcUrl}:p));
 
-      // ── ADD PENALTY TO LATEST UNPAID INVOICE ──────────────────────────────
+      // -- ADD PENALTY TO LATEST UNPAID INVOICE ------------------------------
       const penalty=parseFloat(co?.check_penalty||50);
       // Find all unpaid invoices for this customer (excluding the returned check one)
       const custSales=sales.filter(s=>s.cust_id===custId);
@@ -1904,7 +1904,7 @@ export default function App(){
         const p=pmtFor(s.id);
         return !p||(p.status!=="paid"&&s.id!==saleId);
       });
-      // Sort by date descending — add penalty to the most recent unpaid invoice
+      // Sort by date descending - add penalty to the most recent unpaid invoice
       unpaidSales.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
       const targetSale=unpaidSales[0];
       if(targetSale){
@@ -1917,7 +1917,7 @@ export default function App(){
         setSales(prev=>prev.map(s=>s.id===targetSale.id?{...s,previous_balance:newPrevBal,check_penalty_applied:penalty,check_penalty_invoice:saleId}:s));
         showToast(`🔴 $${penalty} penalty added to invoice ${targetSale.id}`);
       } else {
-        // No unpaid invoice — create a standalone penalty record on the returned check invoice
+        // No unpaid invoice - create a standalone penalty record on the returned check invoice
         const newPrevBal=parseFloat(sales.find(s=>s.id===saleId)?.previous_balance||0)+penalty;
         await supabase.from("sales").update({
           previous_balance:newPrevBal,
@@ -1926,7 +1926,7 @@ export default function App(){
         setSales(prev=>prev.map(s=>s.id===saleId?{...s,previous_balance:newPrevBal,check_penalty_applied:penalty}:s));
         showToast(`🔴 $${penalty} penalty added to invoice ${saleId} (no other unpaid invoice found)`);
       }
-      // ──────────────────────────────────────────────────────────────────────
+      // ----------------------------------------------------------------------
 
       // Auto-flag the customer
       await markCheckReturned(custId);
@@ -1947,8 +1947,8 @@ export default function App(){
     setCustomers(prev=>prev.map(c=>c.id===custId?{...c,notes:newNotes}:c));
   };
 
-  // ── STATE TAX HELPERS ──────────────────────────────────────────────────────
-  // isTaxableProd defined at module level — used consistently everywhere
+  // -- STATE TAX HELPERS ------------------------------------------------------
+  // isTaxableProd defined at module level - used consistently everywhere
 
   const getStateTaxRate = stateId => {
     if(!stateId) return parseFloat(co?.tax_rate||0);
@@ -1957,9 +1957,9 @@ export default function App(){
     return st.exempt ? 0 : parseFloat(st.rate||0);
   };
 
-  // Calculate tax for a sale — only on taxable products
+  // Calculate tax for a sale - only on taxable products
   const calcSaleTax = (sale) => {
-    // Global tax toggle — if disabled return 0
+    // Global tax toggle - if disabled return 0
     if(!co?.tax_enabled) return 0;
     const cust = getC(sale.cust_id);
     const stateId = sale.state || cust?.state || "";
@@ -2007,7 +2007,7 @@ export default function App(){
     return{truckSales:ts,loadedUnits:al.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+i.qty,0),0),soldUnits:ts.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>b+i.qty,0),0),retUnits:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0),rev,prof,cogs:rev-prof,tax:ts.reduce((a,s)=>a+calcSaleTax(s),0),collected:ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),outstanding:ts.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0)};
   };
 
-  // ── CSV IMPORT ─────────────────────────────────────────────────────────────
+  // -- CSV IMPORT -------------------------------------------------------------
   const[csvPreview,setCsvPreview]=useState([]);
   const[csvErrors,setCsvErrors]=useState([]);
   const[csvImporting,setCsvImporting]=useState(false);
@@ -2096,7 +2096,7 @@ export default function App(){
     setCsvImporting(false);
   };
 
-  // ── PRODUCT ACTIONS ────────────────────────────────────────────────────────
+  // -- PRODUCT ACTIONS --------------------------------------------------------
   const addProduct=async()=>{
     if(!np.name||!np.sku||!np.cost||!np.price)return showToast("Name, SKU, cost & price required","error");
     setSaving(true);
@@ -2129,7 +2129,7 @@ export default function App(){
     setSaving(false);
   };
 
-  // ── TRUCK ACTIONS ──────────────────────────────────────────────────────────
+  // -- TRUCK ACTIONS ----------------------------------------------------------
   const addTruck=async()=>{
     if(!nt.driver||!nt.plate)return showToast("Driver name & plate required","error");
     setSaving(true);
@@ -2150,7 +2150,7 @@ export default function App(){
     setSaving(false);
   };
 
-  // ── CUSTOMER ACTIONS ───────────────────────────────────────────────────────
+  // -- CUSTOMER ACTIONS -------------------------------------------------------
   const addCustomer=async()=>{
     if(!nc.name)return showToast("Business name required","error");
     setSaving(true);
@@ -2223,7 +2223,7 @@ export default function App(){
 
   // State tax is now managed in StateTaxManager component (State Activation tab)
 
-  // ── LOAD / SALE / RETURN ───────────────────────────────────────────────────
+  // -- LOAD / SALE / RETURN ---------------------------------------------------
   const lockTruck=async(tid)=>{
     await supabase.from("trucks").update({locked:true}).eq("id",tid);
     setTrucks(prev=>prev.map(t=>t.id===tid?{...t,locked:true}:t));
@@ -2245,7 +2245,7 @@ export default function App(){
   };
   const confirmLoad=async()=>{
     const items=formItems.filter(i=>i.qty>0);if(!items.length)return;
-    // Hard validation — ensure no qty exceeds actual shelf stock
+    // Hard validation - ensure no qty exceeds actual shelf stock
     const overLimit=items.find(i=>{const p=getP(i.pid);return !p||i.qty>p.shelf;});
     if(overLimit){
       const p=getP(overLimit.pid);
@@ -2308,8 +2308,8 @@ export default function App(){
     setSaving(false);
   };
 
-  // ── PAYMENTS ───────────────────────────────────────────────────────────────
-  // ── PAYMENT STATE ──────────────────────────────────────────────────────────
+  // -- PAYMENTS ---------------------------------------------------------------
+  // -- PAYMENT STATE ----------------------------------------------------------
   const[pmModal,setPmModal]=useState(false);
   const[pmForm,setPmForm]=useState({method:"cash",amount:"",check_number:"",bank_name:"",note:"",cust_id:"",truck_id:"",invoice_ids:[],receipt_url:""});
   const[pmTab,setPmTab]=useState("log"); // "log" | "collect"
@@ -2396,7 +2396,7 @@ export default function App(){
       const newTaxable=newItems.reduce((a,i)=>{const p=getP(i.pid);return isTaxableProd(p)?a+(getEffectivePrice(amendSale.cust_id,i.pid)||0)*i.qty:a;},0);
       const newProfit=newItems.reduce((a,i)=>{const p=getP(i.pid);return a+(getEffectivePrice(amendSale.cust_id,i.pid)-(p?.cost||0))*i.qty;},0);
 
-      // Adjust shelf: return old qty, deduct new qty — batched
+      // Adjust shelf: return old qty, deduct new qty - batched
       const allPids=[...new Set([...Object.keys(oldMap),...newItems.map(i=>i.pid)])];
       const shelfUpdates=allPids.map(pid=>{
         const diff=(oldMap[pid]||0)-parseInt(amendItems[pid]||0);
@@ -2422,7 +2422,7 @@ export default function App(){
     setAmendSaving(false);
   };
 
-  // ── CARD SURCHARGE ─────────────────────────────────────────────────────────
+  // -- CARD SURCHARGE ---------------------------------------------------------
   const CARD_FEE_PCT = 3; // 3% surcharge on credit & debit cards only
   const cardMethods = ["credit_card","debit_card"];
   const hasSurcharge = m => cardMethods.includes(m);
@@ -2484,8 +2484,8 @@ export default function App(){
     downloadCSV(rows,"payments.csv");
   };
 
-  // ── ORDERS ─────────────────────────────────────────────────────────────────
-  // Auto-process new approved orders into invoices — runs once per new order
+  // -- ORDERS -----------------------------------------------------------------
+  // Auto-process new approved orders into invoices - runs once per new order
   const processedOrderIds=useRef(new Set());
   useEffect(()=>{
     const autoProcess = async () => {
@@ -2520,7 +2520,7 @@ export default function App(){
     if(orders.length&&customers.length&&trucks.length) autoProcess();
   },[orders,sales,customers,trucks]);
 
-  // ── SETTINGS ───────────────────────────────────────────────────────────────
+  // -- SETTINGS ---------------------------------------------------------------
   const saveSettings=async()=>{
     setSaving(true);
     const{error}=await supabase.from("company").update(coEdit).eq("id",co.id);
@@ -2529,7 +2529,7 @@ export default function App(){
     setSaving(false);
   };
 
-  // ── CAMERA BARCODE SCANNER ─────────────────────────────────────────────────
+  // -- CAMERA BARCODE SCANNER -------------------------------------------------
   useEffect(()=>{
     if(!scanning) return;
     let scanner = null;
@@ -2625,14 +2625,14 @@ export default function App(){
   if(!session)return<div className="app"><GS/><Login/></div>;
   if(loading)return<div className="app"><GS/><Spinner msg="LOADING YOUR DATA…"/></div>;
 
-  // ── 2FA GATE ───────────────────────────────────────────────────────────────
+  // -- 2FA GATE ---------------------------------------------------------------
   // Force 2FA verification even for cached sessions
   if(!mfaVerified&&profile?.role==="admin"){
     return<div className="app"><GS/><MFAGate onVerified={()=>setMfaVerified(true)}/></div>;
   }
 
-  // ── ACCESS CONTROL ─────────────────────────────────────────────────────────
-  // Only admins can access this dashboard — drivers & others go to order portal
+  // -- ACCESS CONTROL ---------------------------------------------------------
+  // Only admins can access this dashboard - drivers & others go to order portal
   if(profile&&profile.role!=="admin"){
     return(
       <div className="app" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f5f5f5",padding:20}}>
@@ -2657,7 +2657,7 @@ export default function App(){
     );
   }
 
-  // ── INLINE EDIT HELPERS ────────────────────────────────────────────────────
+  // -- INLINE EDIT HELPERS ----------------------------------------------------
   const EI=({val,onChange,type="text",style={}})=><input className="ei" type={type} value={val} onChange={e=>onChange(e.target.value)} style={style}/>;
   const ES=({val,onChange,options})=><select className="ei" value={val} onChange={e=>onChange(e.target.value)}>{options.map(o=><option key={o}>{o}</option>)}</select>;
 
@@ -3808,7 +3808,7 @@ export default function App(){
           {/* ══ TRUCK MANAGEMENT ══ */}
           {tab==="truckmanagement"&&isAdmin&&<div className="fu">{(()=>{
 
-            // ── helpers ──────────────────────────────────────────────────────
+            // -- helpers ------------------------------------------------------
             const navToAddress = addr => {
               if(!addr) return;
               const enc = encodeURIComponent(addr);
@@ -3819,7 +3819,7 @@ export default function App(){
                 "_blank");
             };
 
-            // ── sub-tab ───────────────────────────────────────────────────────
+            // -- sub-tab -------------------------------------------------------
 
             const addDriver = async () => {
               if(!driverForm.driver.trim()||!driverForm.plate.trim()) return showToast("Driver name and plate required","error");
@@ -3859,7 +3859,7 @@ export default function App(){
               showToast("Customer unassigned");
             };
 
-            // ── map init (Leaflet via CDN) ────────────────────────────────────
+            // -- map init (Leaflet via CDN) ------------------------------------
             const subTabs=[["overview","📊 Overview"],["drivers","🚚 Drivers"],["assign","👤 Assign Customers"],["map","🗺 Live Map"]];
 
             return(<>
