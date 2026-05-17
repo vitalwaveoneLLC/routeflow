@@ -1703,7 +1703,7 @@ export default function App(){
         }).addTo(map);
         mapInst.current=map;
 
-        // -- CUSTOMER PINS - geocoded via Nominatim, rate-limited 1/sec ------
+        // -- CUSTOMER PINS - structured geocoding via Nominatim ---------------
         const custWithAddr=customers.filter(c=>c.address&&c.address.trim());
         custWithAddr.forEach((c,i)=>{
           const truck=trucks.find(t=>t.id===c.truck_id);
@@ -1714,49 +1714,106 @@ export default function App(){
             iconSize:[28,28],iconAnchor:[14,14],
           });
 
-          const popup=`<b style="font-size:13px">${c.name}</b><br/><span style="color:#6b7280;font-size:11px">📍 ${c.address}</span><br/><span style="font-size:11px">🚚 ${truck?.driver||"Unassigned"}</span>${c.phone?`<br/><span style="font-size:11px">📞 ${c.phone}</span>`:""}<br/><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" style="color:#0ea5e9;font-size:11px;font-weight:700">🗺 Open in Maps →</a>`;
+          const popup=`<b style="font-size:13px">${c.name}</b><br/><span style="color:#6b7280;font-size:11px">📍 ${c.address}</span><br/><span style="font-size:11px">🚚 ${truck?.driver||"Unassigned"}</span>${c.phone?`<br/><span style="font-size:11px">📞 ${c.phone}</span>`:""}<br/><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" style="color:#0ea5e9;font-size:11px;font-weight:700">Open in Maps</a>`;
 
-          // Stagger 1100ms per Nominatim TOS - pass local `map` ref directly
+          // Parse address into parts for structured geocoding
+          // Expected format: "123 Main St, City, ST 12345" or "123 Main St, City, ST"
+          const parseAddress=(addr)=>{
+            const parts=addr.split(',').map(s=>s.trim());
+            if(parts.length>=3){
+              // "123 Main St" | "City" | "ST 12345" or "ST"
+              const streetPart=parts[0];
+              const cityPart=parts[1];
+              const stateZip=parts[2]||'';
+              const stateMatch=stateZip.match(/^([A-Z]{2})\s*(\d{5})?/);
+              return{
+                street:streetPart,
+                city:cityPart,
+                state:stateMatch?stateMatch[1]:'',
+                postalcode:stateMatch&&stateMatch[2]?stateMatch[2]:'',
+              };
+            } else if(parts.length===2){
+              return{street:parts[0],city:parts[1],state:'',postalcode:''};
+            }
+            return null;
+          };
+
+          // Pick best result: prefer house/building over city/admin
+          const pickBest=(data)=>{
+            if(!data||!data.length) return null;
+            const preferred=['house','building','shop','amenity','commercial','retail'];
+            const best=data.find(d=>preferred.includes(d.type)||preferred.includes(d.class));
+            return best||data[0];
+          };
+
           setTimeout(()=>{
             if(cancelled) return;
-            const currentMap = mapInst.current;
+            const currentMap=mapInst.current;
             if(!currentMap) return;
 
-            // Try full address first, then fallback to city+state only
-            const queries = [
-              c.address.trim(),                              // full address
-              c.address.split(',').slice(-2).join(',').trim(), // city, state
-            ];
+            const parsed=parseAddress(c.address);
 
-            const tryQuery=(qIdx)=>{
-              if(qIdx>=queries.length){
-                // All queries failed - show red numbered pin at map center with note
-                console.warn(`[Map] Could not geocode: "${c.address}"`);
+            // Build query strategies from most to least specific
+            const strategies=[];
+
+            if(parsed&&parsed.street&&parsed.city&&parsed.state){
+              // 1. Fully structured - most accurate
+              const p=new URLSearchParams({format:'json',limit:'5',countrycodes:'us',
+                street:parsed.street,city:parsed.city,state:parsed.state,
+                ...(parsed.postalcode?{postalcode:parsed.postalcode}:{})
+              });
+              strategies.push(`https://nominatim.openstreetmap.org/search?${p}`);
+            }
+
+            if(parsed&&parsed.street&&parsed.postalcode){
+              // 2. Street + ZIP - very accurate even without city
+              const p=new URLSearchParams({format:'json',limit:'5',countrycodes:'us',
+                street:parsed.street,postalcode:parsed.postalcode
+              });
+              strategies.push(`https://nominatim.openstreetmap.org/search?${p}`);
+            }
+
+            // 3. Full freeform with addressdetails
+            strategies.push(
+              `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(c.address)}&limit=5&countrycodes=us&addressdetails=1`
+            );
+
+            // 4. Freeform without state suffix (in case format is odd)
+            if(parsed&&parsed.street&&parsed.city){
+              strategies.push(
+                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(parsed.street+', '+parsed.city)}&limit=5&countrycodes=us`
+              );
+            }
+
+            const tryStrategy=(idx)=>{
+              if(idx>=strategies.length){
+                console.warn(`[Map] Failed to geocode: "${c.address}"`);
                 return;
               }
-              const q=queries[qIdx];
-              if(!q) return tryQuery(qIdx+1);
-
-              fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&countrycodes=us`,{
-                headers:{"Accept-Language":"en","User-Agent":"VitalWaveOne/1.0"}
-              })
+              fetch(strategies[idx],{headers:{"Accept-Language":"en","User-Agent":"VitalWaveOne/1.0"}})
               .then(r=>r.ok?r.json():Promise.reject(r.status))
               .then(data=>{
                 if(cancelled) return;
-                const currentM=mapInst.current; if(!currentM) return;
-                if(data&&data[0]){
-                  const lat=parseFloat(data[0].lat), lon=parseFloat(data[0].lon);
+                const m=mapInst.current; if(!m) return;
+                const result=pickBest(data);
+                if(result){
+                  const lat=parseFloat(result.lat),lon=parseFloat(result.lon);
+                  // Sanity check: reject city-level results (very low importance score)
+                  const imp=parseFloat(result.importance||0);
+                  if(idx<strategies.length-1&&imp<0.3&&result.type==='city'){
+                    tryStrategy(idx+1); return; // try more specific
+                  }
                   L.marker([lat,lon],{icon:makeIcon(true)})
-                    .addTo(currentM)
-                    .bindPopup(popup);
+                    .addTo(m).bindPopup(popup);
+                  console.log(`[Map] "${c.name}" -> ${result.display_name} (importance:${imp.toFixed(2)}, type:${result.type})`);
                 } else {
-                  tryQuery(qIdx+1); // try next fallback
+                  tryStrategy(idx+1);
                 }
               })
-              .catch(()=>tryQuery(qIdx+1));
+              .catch(()=>tryStrategy(idx+1));
             };
-            tryQuery(0);
-          }, i * 1200); // 1200ms between each
+            tryStrategy(0);
+          }, i*1200); // rate-limit: 1 req/sec per Nominatim TOS
         });
 
         // -- DRIVER LOCATION PINS ----------------------------------------------
