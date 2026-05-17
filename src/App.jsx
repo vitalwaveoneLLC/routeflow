@@ -1592,6 +1592,7 @@ export default function App(){
   const[expenses,setExpenses]=useState([]);
   const[paymentsLog,setPaymentsLog]=useState([]);
   const[walkinRegs,setWalkinRegs]=useState([]);
+  const[driverProfiles,setDriverProfiles]=useState([]); // drivers with lat/lng/last_seen
   const[loading,setLoading]=useState(true);
 
   // UI
@@ -1693,6 +1694,9 @@ export default function App(){
       if(stR.data)setStateTaxes(stR.data);
       if(exR.data)setExpenses(exR.data);
       if(wiR.data)setWalkinRegs(wiR.data);
+      // Load driver profiles with location data
+      const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id,lat,lng,last_seen,email").eq("role","driver");
+      if(dpData)setDriverProfiles(dpData);
       // Also reload paymentsLog
       const pmLR = await supabase.from("payments_log").select("*").order("created_at",{ascending:false});
       if(pmLR.data)setPaymentsLog(pmLR.data);
@@ -2460,6 +2464,7 @@ export default function App(){
     {id:"ar",label:"Accounts Receivable",icon:ic.ar},
     {id:"payments",label:"Payments",icon:ic.settle,badge:visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length||0},
     {id:"settlement",label:"Daily Settlement",icon:ic.settle},
+    ...(isAdmin?[{id:"truckmanagement",label:"Truck Management",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🚚</span>}]:[]),
     ...(isAdmin?[{id:"returnedchecks",label:"Returned Checks",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🔴</span>,badge:payments.filter(p=>p.status==="returned_check").length||0}]:[]),
     ...(isAdmin?[{id:"pl",label:"P&L Report",icon:ic.pl}]:[]),
     ...(isAdmin?[{id:"irs",label:"IRS Reports",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13,marginRight:0}}>🏛</span>}]:[]),
@@ -3652,6 +3657,398 @@ export default function App(){
               })}
             </div>
           </div>}
+
+          {/* ══ TRUCK MANAGEMENT ══ */}
+          {tab==="truckmanagement"&&isAdmin&&<div className="fu">{(()=>{
+
+            // ── helpers ──────────────────────────────────────────────────────
+            const navToAddress = addr => {
+              if(!addr) return;
+              const enc = encodeURIComponent(addr);
+              const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+              window.open(isIOS
+                ? `maps://maps.apple.com/?q=${enc}`
+                : `https://www.google.com/maps/search/?api=1&query=${enc}`,
+                "_blank");
+            };
+
+            // ── sub-tab ───────────────────────────────────────────────────────
+            const [tmTab, setTmTab] = React.useState("overview");
+            // New driver form
+            const [driverForm, setDriverForm] = React.useState({driver:"",plate:"",route:"",email:""});
+            const [driverSaving, setDriverSaving] = React.useState(false);
+            // Edit truck
+            const [editTruck, setEditTruck] = React.useState(null);
+            // Assign customer
+            const [assignCid, setAssignCid] = React.useState("");
+            const [assignTid, setAssignTid] = React.useState("");
+
+            const addDriver = async () => {
+              if(!driverForm.driver.trim()||!driverForm.plate.trim()) return showToast("Driver name and plate required","error");
+              setDriverSaving(true);
+              try {
+                const rec = {id:"T"+uid(), driver:driverForm.driver.trim(), plate:driverForm.plate.trim(), route:driverForm.route.trim()};
+                const {error} = await supabase.from("trucks").insert(rec);
+                if(error) throw error;
+                setTrucks(prev=>[...prev,rec]);
+                setDriverForm({driver:"",plate:"",route:"",email:""});
+                showToast(`🚚 ${rec.driver} added`);
+              } catch(e){showToast(e.message,"error");}
+              setDriverSaving(false);
+            };
+
+            const saveTruckEdit = async () => {
+              if(!editTruck) return;
+              const {error} = await supabase.from("trucks").update({driver:editTruck.driver,plate:editTruck.plate,route:editTruck.route}).eq("id",editTruck.id);
+              if(error) return showToast(error.message,"error");
+              setTrucks(prev=>prev.map(t=>t.id===editTruck.id?{...t,...editTruck}:t));
+              setEditTruck(null);
+              showToast("Truck updated");
+            };
+
+            const assignCustomer = async () => {
+              if(!assignCid||!assignTid) return showToast("Select customer and truck","error");
+              const {error} = await supabase.from("customers").update({truck_id:assignTid}).eq("id",assignCid);
+              if(error) return showToast(error.message,"error");
+              setCustomers(prev=>prev.map(c=>c.id===assignCid?{...c,truck_id:assignTid}:c));
+              setAssignCid(""); setAssignTid("");
+              showToast("Customer assigned");
+            };
+
+            const unassignCustomer = async (cid) => {
+              await supabase.from("customers").update({truck_id:null}).eq("id",cid);
+              setCustomers(prev=>prev.map(c=>c.id===cid?{...c,truck_id:null}:c));
+              showToast("Customer unassigned");
+            };
+
+            // ── map init (Leaflet via CDN) ────────────────────────────────────
+            const mapRef = React.useRef(null);
+            const mapInst = React.useRef(null);
+            React.useEffect(()=>{
+              if(tmTab!=="map") return;
+              // Load Leaflet CSS + JS from CDN
+              if(!document.getElementById("leaflet-css")){
+                const link=document.createElement("link");
+                link.id="leaflet-css"; link.rel="stylesheet";
+                link.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+                document.head.appendChild(link);
+              }
+              const initMap=()=>{
+                if(!mapRef.current||mapInst.current) return;
+                const L=window.L;
+                const map=L.map(mapRef.current,{zoomControl:true}).setView([32.7,-97.3],9);
+                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+                  attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                  maxZoom:19,
+                }).addTo(map);
+                mapInst.current=map;
+
+                // Customer pins
+                customers.forEach((c,i)=>{
+                  if(!c.address) return;
+                  // Use nominatim geocode lazily for demo — or just show a list
+                  // For now: show numbered markers using geocoding
+                  const icon=L.divIcon({
+                    className:"",
+                    html:`<div style="background:#0a1628;color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;border:2px solid #fff;box-shadow:0 2px 6px #0003">${i+1}</div>`,
+                    iconSize:[24,24],iconAnchor:[12,12]
+                  });
+                  const truck=trucks.find(t=>t.id===c.truck_id);
+                  L.marker([0,0],{icon}).bindPopup(`
+                    <b>${c.name}</b><br/>
+                    📍 ${c.address||"No address"}<br/>
+                    🚚 ${truck?.driver||"Unassigned"}<br/>
+                    📞 ${c.phone||"—"}<br/>
+                    <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" style="color:#0ea5e9">Open in Maps →</a>
+                  `);
+                  // Geocode address via Nominatim (free, no key)
+                  fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(c.address)}&limit=1`,{headers:{"Accept-Language":"en"}})
+                    .then(r=>r.json()).then(data=>{
+                      if(data[0]) {
+                        const {lat,lon}=data[0];
+                        L.marker([parseFloat(lat),parseFloat(lon)],{icon})
+                          .addTo(map)
+                          .bindPopup(`<b>${c.name}</b><br/>📍 ${c.address}<br/>🚚 ${truck?.driver||"Unassigned"}<br/>📞 ${c.phone||"—"}<br/><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" style="color:#0ea5e9">Open in Maps →</a>`);
+                      }
+                    }).catch(()=>{});
+                });
+
+                // Driver location pins from profiles last_seen lat/lng
+                driverProfiles.filter(p=>p.lat&&p.lng).forEach(p=>{
+                  const truck=trucks.find(t=>t.id===p.truck_id);
+                  const driverIcon=L.divIcon({
+                    className:"",
+                    html:`<div style="background:#0ea5e9;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid #fff;box-shadow:0 2px 8px #0003">🚚</div>`,
+                    iconSize:[28,28],iconAnchor:[14,14]
+                  });
+                  const lastSeen=p.last_seen?new Date(p.last_seen).toLocaleTimeString():"Unknown";
+                  L.marker([p.lat,p.lng],{icon:driverIcon})
+                    .addTo(map)
+                    .bindPopup(`<b>🚚 ${truck?.driver||p.email||"Driver"}</b><br/>Last seen: ${lastSeen}<br/>Route: ${truck?.route||"—"}`);
+                });
+              };
+
+              if(window.L) { initMap(); }
+              else {
+                const script=document.createElement("script");
+                script.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+                script.onload=initMap;
+                document.head.appendChild(script);
+              }
+              return()=>{ if(mapInst.current){mapInst.current.remove();mapInst.current=null;} };
+            },[tmTab]);
+
+            const subTabs=[["overview","📊 Overview"],["drivers","🚚 Drivers"],["assign","👤 Assign Customers"],["map","🗺 Live Map"]];
+
+            return(<>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+                <div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#212121"}}>🚚 Truck Management</div>
+                  <div style={{fontSize:12,color:"#9ca3af"}}>Drivers, routes, customer assignments, and live map</div>
+                </div>
+              </div>
+
+              {/* Sub-tabs */}
+              <div style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
+                {subTabs.map(([k,l])=>(
+                  <button key={k} onClick={()=>setTmTab(k)}
+                    style={{padding:"8px 16px",borderRadius:20,border:`1.5px solid ${tmTab===k?"#0a1628":"#e5e7eb"}`,background:tmTab===k?"#0a1628":"#fff",color:tmTab===k?"#fff":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── OVERVIEW ── */}
+              {tmTab==="overview"&&<>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12,marginBottom:20}}>
+                  {trucks.map(t=>{
+                    const tCusts=customers.filter(c=>c.truck_id===t.id);
+                    const al=activeLoad(t.id);
+                    const inv=al?truckInv(t.id):[];
+                    const todaySales=sales.filter(s=>s.truck_id===t.id&&s.date===new Date().toLocaleDateString());
+                    const todayRev=todaySales.reduce((a,s)=>a+s.total,0);
+                    const driverProfile=driverProfiles.find(p=>p.truck_id===t.id);
+                    const isOnline=driverProfile?.last_seen&&(Date.now()-new Date(driverProfile.last_seen).getTime())<5*60*1000;
+                    return(
+                      <div key={t.id} className="card" style={{padding:16,borderLeft:`4px solid ${isOnline?"#059669":"#e5e7eb"}`}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                          <div style={{fontWeight:800,fontSize:14,color:"#0a1628"}}>{t.driver}</div>
+                          <span style={{fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:10,background:isOnline?"#dcfce7":"#f3f4f6",color:isOnline?"#065f46":"#9ca3af"}}>{isOnline?"🟢 ONLINE":"⚫ OFFLINE"}</span>
+                        </div>
+                        <div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>{t.plate}{t.route&&` · ${t.route}`}</div>
+                        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                          {[["Customers",tCusts.length,"#7c3aed"],["On Truck",inv.reduce((a,i)=>a+i.remaining,0),"#0ea5e9"],["Today Rev",`$${todayRev.toFixed(0)}`,todayRev>0?"#059669":"#9ca3af"]].map(([l,v,c])=>(
+                            <div key={l}><div style={{fontSize:9,color:"#9ca3af",fontWeight:700}}>{l}</div><div style={{fontWeight:800,fontSize:14,color:c}}>{v}</div></div>
+                          ))}
+                        </div>
+                        <div style={{display:"flex",gap:6,marginTop:10}}>
+                          <button className="btn bb" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>setEditTruck({...t})}>✏️ Edit</button>
+                          <button className="btn br" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>deleteTruck(t.id,t.driver)}>Delete</button>
+                          {t.locked
+                            ?<button className="btn bg" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>unlockTruck(t.id)}>🔓 Unlock</button>
+                            :<button className="btn ba" style={{fontSize:10,padding:"4px 10px"}} onClick={()=>lockTruck(t.id)}>🔒 Lock</button>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Edit modal */}
+                {editTruck&&<div style={{position:"fixed",inset:0,background:"#00000060",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,backdropFilter:"blur(3px)"}}>
+                  <div style={{background:"#fff",borderRadius:14,padding:24,maxWidth:400,width:"90%",boxShadow:"0 8px 40px #00000030"}}>
+                    <div style={{fontWeight:700,fontSize:15,color:"#0a1628",marginBottom:14}}>✏️ Edit Truck — {editTruck.driver}</div>
+                    {[["Driver Name","driver"],["Plate","plate"],["Route","route"]].map(([l,k])=>(
+                      <div key={k} className="field" style={{marginBottom:10}}>
+                        <label>{l}</label>
+                        <input value={editTruck[k]||""} onChange={e=>setEditTruck(prev=>({...prev,[k]:e.target.value}))}/>
+                      </div>
+                    ))}
+                    <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}>
+                      <button className="btn bgh" onClick={()=>setEditTruck(null)}>Cancel</button>
+                      <button className="btn ba" onClick={saveTruckEdit}>Save</button>
+                    </div>
+                  </div>
+                </div>}
+              </>}
+
+              {/* ── DRIVERS ── */}
+              {tmTab==="drivers"&&<>
+                <div className="card" style={{padding:20,marginBottom:16,borderTop:"3px solid #0a1628"}}>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:12}}>➕ Add New Driver / Truck</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                    {[["Driver Name *","driver","e.g. John Smith"],["License Plate *","plate","e.g. TX-1234"],["Route / Area","route","e.g. North Dallas"]].map(([l,k,p])=>(
+                      <div key={k} className="field" style={{gridColumn:k==="route"?"1/-1":"auto"}}>
+                        <label>{l}</label>
+                        <input placeholder={p} value={driverForm[k]||""} onChange={e=>setDriverForm(prev=>({...prev,[k]:e.target.value}))}/>
+                      </div>
+                    ))}
+                  </div>
+                  <button className="btn ba" onClick={addDriver} disabled={driverSaving}>
+                    {driverSaving?<><span className="sp">⟳</span> Adding…</>:"🚚 Add Truck"}
+                  </button>
+                </div>
+
+                <div className="card" style={{overflow:"hidden"}}>
+                  <table>
+                    <thead><tr>{["Driver","Plate","Route","Customers","Status","Auth Profile","Actions"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {trucks.map(t=>{
+                        const tCusts=customers.filter(c=>c.truck_id===t.id);
+                        const dProfile=driverProfiles.find(p=>p.truck_id===t.id);
+                        const isOnline=dProfile?.last_seen&&(Date.now()-new Date(dProfile.last_seen).getTime())<5*60*1000;
+                        return(
+                          <tr key={t.id}>
+                            <td><div style={{fontWeight:700}}>{t.driver}</div><div style={{fontSize:10,color:"#9ca3af"}}>{t.id}</div></td>
+                            <td style={{fontFamily:"monospace",fontWeight:600}}>{t.plate}</td>
+                            <td style={{color:"#6b7280"}}>{t.route||"—"}</td>
+                            <td><span style={{fontWeight:700,color:"#7c3aed"}}>{tCusts.length}</span></td>
+                            <td>
+                              <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,background:t.locked?"#fef2f2":isOnline?"#dcfce7":"#f3f4f6",color:t.locked?"#dc2626":isOnline?"#065f46":"#9ca3af"}}>
+                                {t.locked?"🔒 LOCKED":isOnline?"🟢 ONLINE":"⚫ OFFLINE"}
+                              </span>
+                            </td>
+                            <td style={{fontSize:11,color:"#6b7280"}}>{dProfile?.email||<span style={{color:"#f59e0b",fontSize:10}}>No profile linked</span>}</td>
+                            <td>
+                              <div style={{display:"flex",gap:4}}>
+                                <button className="btn bb" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>setEditTruck({...t})}>✏️</button>
+                                {t.locked
+                                  ?<button className="btn bg" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>unlockTruck(t.id)}>🔓</button>
+                                  :<button className="btn ba" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>lockTruck(t.id)}>🔒</button>}
+                                <button className="btn br" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>deleteTruck(t.id,t.driver)}>{ic.X}</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Auth assignment */}
+                <div className="card" style={{padding:20,marginTop:16}}>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,marginBottom:10}}>🔑 LINK DRIVER ACCOUNT TO TRUCK</div>
+                  <DriverTruckAssignment supabase={supabase} trucks={trucks} showToast={showToast}/>
+                </div>
+              </>}
+
+              {/* ── ASSIGN CUSTOMERS ── */}
+              {tmTab==="assign"&&<>
+                <div className="card" style={{padding:20,marginBottom:16,borderTop:"3px solid #7c3aed"}}>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:12}}>➕ Assign Customer to Truck</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                    <div className="field">
+                      <label>Customer</label>
+                      <select value={assignCid} onChange={e=>setAssignCid(e.target.value)}>
+                        <option value="">— Select customer —</option>
+                        {[...customers].sort((a,b)=>a.name.localeCompare(b.name)).map(c=>(
+                          <option key={c.id} value={c.id}>{c.name}{c.truck_id?" ✓":""}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>Assign to Truck</label>
+                      <select value={assignTid} onChange={e=>setAssignTid(e.target.value)}>
+                        <option value="">— Select truck —</option>
+                        {trucks.map(t=><option key={t.id} value={t.id}>{t.driver} · {t.plate}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <button className="btn ba" onClick={assignCustomer}>Assign Customer</button>
+                </div>
+
+                {trucks.map(t=>{
+                  const tCusts=customers.filter(c=>c.truck_id===t.id);
+                  return(
+                    <div key={t.id} className="card" style={{marginBottom:12,overflow:"hidden",borderTop:`3px solid #0ea5e9`}}>
+                      <div style={{padding:"12px 16px",background:"#f0f9ff",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div style={{fontWeight:800,fontSize:13,color:"#0a1628"}}>🚚 {t.driver} <span style={{color:"#6b7280",fontWeight:400}}>· {t.plate}{t.route&&` · ${t.route}`}</span></div>
+                        <span style={{fontWeight:700,fontSize:12,color:"#0ea5e9"}}>{tCusts.length} customers</span>
+                      </div>
+                      {tCusts.length===0
+                        ?<div style={{padding:"14px 16px",fontSize:12,color:"#9ca3af"}}>No customers assigned</div>
+                        :<table>
+                          <thead><tr>{["Customer","Phone","Address","Navigate","Remove"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {tCusts.map(c=>(
+                              <tr key={c.id}>
+                                <td><div style={{fontWeight:700}}>{c.name}</div><div style={{fontSize:10,color:"#9ca3af"}}>{c.id}</div></td>
+                                <td style={{color:"#6b7280"}}>{c.phone||"—"}</td>
+                                <td style={{fontSize:11,color:"#6b7280",maxWidth:200}}>{c.address||"—"}</td>
+                                <td>
+                                  {c.address&&<button onClick={()=>navToAddress(c.address)}
+                                    style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:7,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                                    🗺 Navigate
+                                  </button>}
+                                </td>
+                                <td>
+                                  <button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>unassignCustomer(c.id)}>Remove</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>}
+                    </div>
+                  );
+                })}
+
+                {/* Unassigned customers */}
+                {(()=>{
+                  const unassigned=customers.filter(c=>!c.truck_id);
+                  if(!unassigned.length) return null;
+                  return(
+                    <div className="card" style={{overflow:"hidden",borderTop:"3px solid #e5e7eb"}}>
+                      <div style={{padding:"12px 16px",background:"#f9fafb",fontWeight:800,fontSize:13,color:"#9ca3af"}}>⚠️ UNASSIGNED ({unassigned.length})</div>
+                      <table>
+                        <thead><tr>{["Customer","Phone","Address","Assign"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+                        <tbody>
+                          {unassigned.map(c=>(
+                            <tr key={c.id}>
+                              <td style={{fontWeight:700}}>{c.name}</td>
+                              <td style={{color:"#6b7280"}}>{c.phone||"—"}</td>
+                              <td style={{fontSize:11,color:"#6b7280"}}>{c.address||"—"}</td>
+                              <td>
+                                <select defaultValue="" onChange={e=>{if(e.target.value){setAssignCid(c.id);setAssignTid(e.target.value);}}}
+                                  style={{fontSize:11,border:"1.5px solid #e5e7eb",borderRadius:7,padding:"4px 8px",background:"#fff"}}>
+                                  <option value="">Assign to…</option>
+                                  {trucks.map(t=><option key={t.id} value={t.id}>{t.driver}</option>)}
+                                </select>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </>}
+
+              {/* ── LIVE MAP ── */}
+              {tmTab==="map"&&<>
+                <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"12px 16px",marginBottom:12,fontSize:12,color:"#0369a1"}}>
+                  🗺 <strong>Powered by OpenStreetMap + Leaflet</strong> — 100% free, no API key needed.
+                  Customer pins are geocoded from their address. Driver pins update when they log into the portal.
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+                  {[["🚚 Drivers Online",driverProfiles.filter(p=>p.last_seen&&(Date.now()-new Date(p.last_seen).getTime())<5*60*1000).length,"#059669","#f0fdf4"],
+                    ["📍 Customers Mapped",customers.filter(c=>c.address).length,"#7c3aed","#f5f3ff"],
+                    ["🚚 Total Trucks",trucks.length,"#0ea5e9","#f0f9ff"],
+                    ["⚫ Offline",trucks.length-driverProfiles.filter(p=>p.last_seen&&(Date.now()-new Date(p.last_seen).getTime())<5*60*1000).length,"#9ca3af","#f9fafb"]
+                  ].map(([l,v,c,bg])=>(
+                    <div key={l} className="kpi" style={{background:bg,padding:"10px 14px"}}>
+                      <div className="kv" style={{color:c,fontSize:20}}>{v}</div>
+                      <div className="kl">{l}</div>
+                    </div>
+                  ))}
+                </div>
+                <div ref={mapRef} style={{width:"100%",height:480,borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden"}}/>
+                <div style={{marginTop:8,fontSize:11,color:"#9ca3af",display:"flex",gap:16,flexWrap:"wrap"}}>
+                  <span>🔵 Numbered pins = Customers</span>
+                  <span>🚚 Blue truck = Driver location</span>
+                  <span>Click any pin for details</span>
+                </div>
+              </>}
+            </>);
+          })()}</div>}
 
           {/* ══ RETURNED CHECKS ══ */}
           {tab==="returnedchecks"&&isAdmin&&<div className="fu">{(()=>{

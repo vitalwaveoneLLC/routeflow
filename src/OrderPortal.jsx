@@ -1488,6 +1488,9 @@ export default function OrderPortal() {
   const [driverPw,    setDriverPw]    = useState("");
   const [driverUser,  setDriverUser]  = useState(null);
   const [driverData,  setDriverData]  = useState(null);
+  const [showAddCust, setShowAddCust] = useState(false);
+  const [newCustForm, setNewCustForm] = useState({name:"",address:"",phone:"",email:"",state:""});
+  const [newCustSaving,setNewCustSaving]=useState(false);
   const [driverError, setDriverError] = useState("");
   const [driverLoading, setDriverLoading] = useState(false);
   const [driverTab,   setDriverTab]   = useState("dashboard");
@@ -1823,7 +1826,7 @@ export default function OrderPortal() {
       }
 
       setDriverUser(data.user);
-      setDriverData({
+      const driverDataObj = {
         profile: {...profile, truck_id:truckId},
         truck: truckR.data,
         customers: custsR.data||[],
@@ -1831,12 +1834,36 @@ export default function OrderPortal() {
         sales: salesWithPaid,
         stateTaxes: taxesR.data||[],
         co: coR.data||null,
-      });
+        userId: data.user.id,
+      };
+      setDriverData(driverDataObj);
     } catch(e) {
       setDriverError(e.message);
     }
     setDriverLoading(false);
   };
+
+  // ── DRIVER LOCATION HEARTBEAT ──────────────────────────────────────────────
+  // Sends GPS coordinates to Supabase every 60s while driver is logged in
+  useEffect(()=>{
+    if(!driverData?.userId) return;
+    const sendLocation = ()=>{
+      if(!navigator.geolocation) return;
+      navigator.geolocation.getCurrentPosition(pos=>{
+        supabase.from("profiles").update({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          last_seen: new Date().toISOString(),
+        }).eq("id", driverData.userId).then(()=>{});
+      }, ()=>{
+        // Permission denied or unavailable — just update last_seen
+        supabase.from("profiles").update({last_seen:new Date().toISOString()}).eq("id",driverData.userId).then(()=>{});
+      });
+    };
+    sendLocation(); // immediately on login
+    const interval = setInterval(sendLocation, 60000); // every 60s
+    return ()=>clearInterval(interval);
+  },[driverData?.userId]);
 
   // Verify customer by shop name + phone
   const [custPrevBalance, setCustPrevBalance] = useState(0);
@@ -2292,20 +2319,83 @@ export default function OrderPortal() {
                   ))}
                 </div>
                 <div className="card" style={{marginBottom:14}}>
-                  <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",fontWeight:700,fontSize:13,color:"#0a1628"}}>⛽ My Customers</div>
-                  {driverData.customers.map(c=>(
-                    <div key={c.id} style={{padding:"12px 16px",borderBottom:"1px solid #f9fafb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <div>
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"#0a1628"}}>⛽ My Customers</div>
+                    <button onClick={()=>setShowAddCust(v=>!v)}
+                      style={{background:"#0a1628",color:"#fff",border:"none",borderRadius:7,padding:"6px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                      ＋ Add Customer
+                    </button>
+                  </div>
+
+                  {/* Add Customer Form */}
+                  {showAddCust&&(()=>{
+                    const submit=async()=>{
+                      if(!newCustForm.name.trim()) return;
+                      setNewCustSaving(true);
+                      try{
+                        const rec={id:"C"+uid(),name:newCustForm.name.trim(),address:newCustForm.address.trim(),phone:newCustForm.phone.trim(),email:newCustForm.email.trim(),state:newCustForm.state.trim(),notes:"",truck_id:driverData.truck?.id};
+                        const{error}=await supabase.from("customers").insert(rec);
+                        if(error)throw error;
+                        setDriverData(prev=>({...prev,customers:[rec,...prev.customers]}));
+                        setShowAddCust(false);
+                        setNewCustForm({name:"",address:"",phone:"",email:"",state:""});
+                        setMsg({t:"success",m:`✅ ${rec.name} added to your route`});
+                      }catch(e){setMsg({t:"error",m:e.message});}
+                      setNewCustSaving(false);
+                    };
+                    return(
+                      <div style={{padding:"14px 16px",borderBottom:"1px solid #f3f4f6",background:"#f9fafb"}}>
+                        <div style={{fontSize:12,fontWeight:700,color:"#0a1628",marginBottom:10}}>New Customer — auto-assigned to your truck</div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                          {[["Business Name *","name","e.g. Corner Gas Mart"],["Phone","phone","(555) 000-0000"],["Address","address","123 Main St, Dallas TX"],["State","state","TX"]].map(([l,k,p])=>(
+                            <div key={k} className="field" style={{gridColumn:k==="address"?"1/-1":"auto"}}>
+                              <label style={{fontSize:10}}>{l}</label>
+                              <input placeholder={p} value={newCustForm[k]} onChange={e=>setNewCustForm(prev=>({...prev,[k]:e.target.value}))}
+                                style={{fontSize:13,padding:"8px 10px"}}/>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{display:"flex",gap:8}}>
+                          <button onClick={submit} disabled={newCustSaving||!newCustForm.name.trim()}
+                            style={{background:"#0a1628",color:"#fff",border:"none",borderRadius:8,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",opacity:!newCustForm.name.trim()?0.5:1}}>
+                            {newCustSaving?"Adding…":"✅ Add Customer"}
+                          </button>
+                          <button onClick={()=>{setShowAddCust(false);setNewCustForm({name:"",address:"",phone:"",email:"",state:"",});}}
+                            style={{background:"#f3f4f6",color:"#6b7280",border:"none",borderRadius:8,padding:"9px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {driverData.customers.map(c=>{
+                    const navToAddr=addr=>{
+                      if(!addr) return;
+                      const enc=encodeURIComponent(addr);
+                      const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
+                      window.open(isIOS?`maps://maps.apple.com/?q=${enc}`:`https://www.google.com/maps/search/?api=1&query=${enc}`,"_blank");
+                    };
+                    return(
+                    <div key={c.id} style={{padding:"12px 16px",borderBottom:"1px solid #f9fafb",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <div style={{flex:1,minWidth:0}}>
                         <div style={{fontWeight:600,fontSize:13}}>{c.name}</div>
-                        {c.address&&<div style={{fontSize:11,color:"#9ca3af"}}>📍 {c.address}</div>}
+                        {c.address&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📍 {c.address}</div>}
                         {c.phone&&<div style={{fontSize:11,color:"#9ca3af"}}>📞 {c.phone}</div>}
                       </div>
-                      <button onClick={()=>{setDriverSaleCust(c.id);setDriverTab("sell");}}
-                        style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:7,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-                        Sell →
-                      </button>
+                      <div style={{display:"flex",gap:6,flexShrink:0}}>
+                        {c.address&&<button onClick={()=>navToAddr(c.address)}
+                          style={{background:"#f0f9ff",color:"#0ea5e9",border:"1.5px solid #bae6fd",borderRadius:7,padding:"6px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
+                          🗺 Navigate
+                        </button>}
+                        <button onClick={()=>{setDriverSaleCust(c.id);setDriverTab("sell");}}
+                          style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:7,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                          Sell →
+                        </button>
+                      </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>}
 
