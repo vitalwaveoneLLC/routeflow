@@ -836,13 +836,13 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
 }
 
 // ── DRIVER WALK-IN TAB ────────────────────────────────────────────────────────
-function DriverWalkInTab({driverData, setDriverData, products, supabase}){
+function DriverWalkInTab({driverData, setDriverData, products, supabase, initCust}){
   const uid2 = ()=>Math.random().toString(36).slice(2,9).toUpperCase();
   const fmt2 = n=>`$${Number(n||0).toFixed(2)}`;
   const stateTaxes = driverData.stateTaxes||[];
   const customers  = driverData.customers||[];
 
-  const [wiCust,    setWiCust]    = useState("");
+  const [wiCust,    setWiCust]    = useState(initCust||"");
   const [wiSearch,  setWiSearch]  = useState("");
   const [wiItems,   setWiItems]   = useState({});
   const [wiSaving,  setWiSaving]  = useState(false);
@@ -859,6 +859,9 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase}){
   const wiCustObj = customers.find(c=>c.id===wiCust);
   const wiHasReturnedCheck = wiCustObj&&(wiCustObj.notes||"").includes("RETURNED_CHECK:1");
   const RETURNED_CHECK_FEE = 50;
+
+  // Auto-load balance when customer is pre-set (walk-in portal flow)
+  useEffect(()=>{ if(initCust) handleWiCust(initCust); },[initCust]);
 
   // Shelf products only
   const shelfProds = products.filter(p=>p.shelf>0);
@@ -953,12 +956,14 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase}){
 
       {/* Customer + summary card */}
       <div className="card" style={{padding:"14px 16px",marginBottom:12}}>
-        <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:6}}>CUSTOMER</label>
-        <select value={wiCust} onChange={e=>handleWiCust(e.target.value)}
-          style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:9,padding:"10px 12px",fontSize:13,background:"#fff",color:"#111",marginBottom:8}}>
-          <option value="">— Select customer —</option>
-          {[...customers].sort((a,b)=>a.name.localeCompare(b.name)).map(c=><option key={c.id} value={c.id}>{c.name}{c.state?` · ${c.state}`:""}</option>)}
-        </select>
+        {!initCust&&<>
+          <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:6}}>CUSTOMER</label>
+          <select value={wiCust} onChange={e=>handleWiCust(e.target.value)}
+            style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:9,padding:"10px 12px",fontSize:13,background:"#fff",color:"#111",marginBottom:8}}>
+            <option value="">— Select customer —</option>
+            {[...customers].sort((a,b)=>a.name.localeCompare(b.name)).map(c=><option key={c.id} value={c.id}>{c.name}{c.state?` · ${c.state}`:""}</option>)}
+          </select>
+        </>}
         {wiCustObj&&<div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>
           State: <strong>{wiCustObj.state||"Not set"}</strong> · Tax: <strong style={{color:taxRate2>0?"#7c3aed":"#9ca3af"}}>{taxRate2>0?`${taxRate2}% tobacco`:"exempt/none"}</strong>
         </div>}
@@ -1176,7 +1181,21 @@ export default function OrderPortal() {
   const [isNew,     setIsNew]     = useState(false);
   const [isExisting,setIsExisting]= useState(false);
   const [isDriver,  setIsDriver]  = useState(false);
-  const [isWalkIn,  setIsWalkIn]  = useState(false);
+  const [isWalkIn,       setIsWalkIn]       = useState(false);
+  const [walkInVerified, setWalkInVerified] = useState(false);
+  const [walkInCust,     setWalkInCust]     = useState(null);
+  const [walkInSearch,   setWalkInSearch]   = useState("");
+  const [walkInPhone,    setWalkInPhone]    = useState("");
+  const [walkInError,    setWalkInError]    = useState("");
+  const [walkInLoading,  setWalkInLoading]  = useState(false);
+  const [walkInMode,     setWalkInMode]     = useState("customer"); // "customer" | "staff" | "register"
+  const [walkInEmail,    setWalkInEmail]    = useState("");
+  const [walkInPw,       setWalkInPw]       = useState("");
+  const [walkInUser,     setWalkInUser]     = useState(null); // verified driver/admin/staff user
+  // Staff registration form
+  const [wiReg, setWiReg] = useState({name:"",email:"",phone:"",role:"staff",note:""});
+  const [wiRegSaving, setWiRegSaving] = useState(false);
+  const [wiRegMsg, setWiRegMsg] = useState(null);
   const [driverEmail, setDriverEmail] = useState("");
   const [driverPw,    setDriverPw]    = useState("");
   const [driverUser,  setDriverUser]  = useState(null);
@@ -1439,6 +1458,9 @@ export default function OrderPortal() {
     setCustSearch(""); setCustPhone(""); setVerifyError(""); setQuantities({}); setNotes(""); setOrder(null);
     setPayMethod("delivery"); setClientSecret(null); setStripeError(null); setStripeReady(false);
     setDriverUser(null); setDriverData(null); setDriverEmail(""); setDriverPw(""); setDriverError("");
+    setWalkInVerified(false); setWalkInCust(null); setWalkInSearch(""); setWalkInPhone(""); setWalkInError("");
+    setWalkInMode("customer"); setWalkInEmail(""); setWalkInPw(""); setWalkInUser(null);
+    setWiReg({name:"",email:"",phone:"",role:"staff",note:""}); setWiRegMsg(null);
     setReg({businessName:"",ownerName:"",email:"",phone:"",address:"",city:"",state:"TX",zip:""});
   };
 
@@ -1557,6 +1579,59 @@ export default function OrderPortal() {
 
     setSelCust(match);
     setStep("order");
+  };
+
+  // Walk-in auth — customers by name+phone, drivers/admin/staff by email+password
+  const verifyWalkIn = async () => {
+    setWalkInError(""); setWalkInLoading(true);
+    try {
+      if(walkInMode==="customer"){
+        if(!walkInSearch.trim()) throw new Error("Please enter your business name");
+        if(!walkInPhone.trim())  throw new Error("Please enter your phone number");
+        const normalize = p => p.replace(/[\s\-\(\)\+\.]/g,"");
+        const inputPhone = normalize(walkInPhone);
+        const inputName  = walkInSearch.trim().toLowerCase();
+        const match = customers.find(c => {
+          const nameMatch  = c.name.toLowerCase().includes(inputName)||inputName.includes(c.name.toLowerCase());
+          const phoneMatch = normalize(c.phone||"")===inputPhone||normalize(c.phone||"").endsWith(inputPhone)||inputPhone.endsWith(normalize(c.phone||"").slice(-7));
+          return nameMatch && phoneMatch;
+        });
+        if(!match) throw new Error("No registered customer found. Check your business name and phone number.");
+        setWalkInCust(match); setWalkInVerified(true);
+      } else {
+        // Staff / Driver / Admin — email + password via Supabase auth
+        if(!walkInEmail.trim()) throw new Error("Please enter your email");
+        if(!walkInPw.trim())    throw new Error("Please enter your password");
+        const {data, error} = await supabase.auth.signInWithPassword({email:walkInEmail, password:walkInPw});
+        if(error) throw new Error("Invalid email or password");
+        // Check profile — must be approved (admin, driver, or approved staff)
+        const {data:prof} = await supabase.from("profiles").select("*").eq("id",data.user.id).single();
+        if(!prof) throw new Error("No profile found. Contact admin.");
+        if(prof.role==="pending") throw new Error("Your account is pending admin approval.");
+        // All roles allowed: admin, driver, staff
+        setWalkInUser({...data.user, role:prof.role, displayName:prof.name||walkInEmail});
+        setWalkInCust(null); setWalkInVerified(true);
+        // Sign out of supabase session — we only needed to verify identity
+        await supabase.auth.signOut();
+      }
+    } catch(e){ setWalkInError(e.message); }
+    setWalkInLoading(false);
+  };
+
+  // Staff self-registration for walk-in access (requires admin approval)
+  const submitWiRegistration = async () => {
+    setWiRegSaving(true); setWiRegMsg(null);
+    try {
+      if(!wiReg.name.trim()||!wiReg.email.trim()||!wiReg.phone.trim()) throw new Error("Name, email, and phone are required");
+      const {error} = await supabase.from("walkin_registrations").insert({
+        name: wiReg.name.trim(), email: wiReg.email.trim(), phone: wiReg.phone.trim(),
+        role: wiReg.role, note: wiReg.note.trim(), status:"pending", created_at: new Date().toISOString()
+      });
+      if(error) throw error;
+      setWiRegMsg({t:"success", m:"✅ Request submitted! An admin will review and approve your access."});
+      setWiReg({name:"",email:"",phone:"",role:"staff",note:""});
+    } catch(e){ setWiRegMsg({t:"error", m:e.message}); }
+    setWiRegSaving(false);
   };
 
   // Send invoice email
@@ -2062,19 +2137,183 @@ export default function OrderPortal() {
           )}
         </div>}
         {isWalkIn&&<div className="fu">
-          <div style={{marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          {/* Header */}
+          <div style={{marginBottom:20,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
             <div>
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:2}}>🏪 Walk-in Sale</div>
-              <div style={{fontSize:12,color:"#9ca3af"}}>Sell directly from warehouse shelf</div>
+              <div style={{fontSize:12,color:"#9ca3af"}}>Authorized users only</div>
             </div>
-            <button onClick={()=>setIsWalkIn(false)} style={{background:"#f3f4f6",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,color:"#6b7280",cursor:"pointer",fontFamily:"'Inter',sans-serif",fontWeight:600}}>← Back</button>
+            <button onClick={()=>{setIsWalkIn(false);setWalkInVerified(false);setWalkInCust(null);setWalkInUser(null);setWalkInSearch("");setWalkInPhone("");setWalkInEmail("");setWalkInPw("");setWalkInError("");setWalkInMode("customer");setWiRegMsg(null);}}
+              style={{background:"#f3f4f6",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,color:"#6b7280",cursor:"pointer",fontFamily:"'Inter',sans-serif",fontWeight:600}}>← Back</button>
           </div>
-          <DriverWalkInTab
-            driverData={{customers, stateTaxes:portalStateTaxes, sales:[], co}}
-            setDriverData={()=>{}}
-            products={products.filter(p=>p.shelf>0)}
-            supabase={supabase}
-          />
+
+          {/* ── AUTH GATE ── */}
+          {!walkInVerified&&walkInMode!=="register"&&(
+            <div style={{maxWidth:460,margin:"0 auto"}}>
+              <div className="card" style={{padding:28,borderTop:"4px solid #7c3aed"}}>
+                {/* Mode toggle */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:22}}>
+                  {[["customer","👤 Customer"],["staff","🔑 Staff / Driver"]].map(([m,l])=>(
+                    <button key={m} onClick={()=>{setWalkInMode(m);setWalkInError("");}}
+                      style={{padding:"9px 8px",borderRadius:8,border:`1.5px solid ${walkInMode===m?"#7c3aed":"#e5e7eb"}`,background:walkInMode===m?"#7c3aed":"#fff",color:walkInMode===m?"#fff":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
+                {walkInMode==="customer"?(
+                  <>
+                    <div style={{textAlign:"center",marginBottom:18}}>
+                      <div style={{fontSize:36,marginBottom:6}}>💎</div>
+                      <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,color:"#0a1628",marginBottom:3}}>Customer Access</div>
+                      <div style={{fontSize:12,color:"#6b7280"}}>Enter your registered business name and phone</div>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                      <div className="field">
+                        <label>Business / Shop Name *</label>
+                        <input placeholder="e.g. Speedy Gas & Mart" value={walkInSearch}
+                          onChange={e=>setWalkInSearch(e.target.value)}
+                          onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}
+                          onKeyDown={e=>e.key==="Enter"&&verifyWalkIn()}/>
+                      </div>
+                      <div className="field">
+                        <label>Phone Number *</label>
+                        <input placeholder="e.g. (713) 555-0100" value={walkInPhone}
+                          onChange={e=>setWalkInPhone(e.target.value)}
+                          onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}
+                          onKeyDown={e=>e.key==="Enter"&&verifyWalkIn()}/>
+                      </div>
+                    </div>
+                  </>
+                ):(
+                  <>
+                    <div style={{textAlign:"center",marginBottom:18}}>
+                      <div style={{fontSize:36,marginBottom:6}}>🔑</div>
+                      <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,color:"#0a1628",marginBottom:3}}>Staff / Driver / Admin</div>
+                      <div style={{fontSize:12,color:"#6b7280"}}>Sign in with your VitalWaveOne account</div>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                      <div className="field">
+                        <label>Email *</label>
+                        <input type="email" placeholder="you@vitalwaveone.com" value={walkInEmail}
+                          onChange={e=>setWalkInEmail(e.target.value)}
+                          onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}
+                          onKeyDown={e=>e.key==="Enter"&&verifyWalkIn()}/>
+                      </div>
+                      <div className="field">
+                        <label>Password *</label>
+                        <input type="password" placeholder="••••••••" value={walkInPw}
+                          onChange={e=>setWalkInPw(e.target.value)}
+                          onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}
+                          onKeyDown={e=>e.key==="Enter"&&verifyWalkIn()}/>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {walkInError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626",marginTop:12}}>⚠️ {walkInError}</div>}
+
+                <button onClick={verifyWalkIn} disabled={walkInLoading}
+                  style={{width:"100%",padding:"13px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:walkInLoading?"not-allowed":"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginTop:16,opacity:walkInLoading?0.7:1}}>
+                  {walkInLoading?<><span className="sp">⟳</span> Verifying…</>:"Verify & Continue →"}
+                </button>
+
+                {/* Registration link for staff */}
+                <div style={{marginTop:16,padding:"12px 14px",background:"#f5f3ff",borderRadius:8,border:"1px solid #ddd6fe"}}>
+                  <div style={{fontSize:12,color:"#6b7280",marginBottom:4}}>
+                    <strong style={{color:"#5b21b6"}}>New staff or receptionist?</strong>
+                  </div>
+                  <div style={{fontSize:11,color:"#9ca3af",marginBottom:8}}>Request access — an admin will review and approve your account.</div>
+                  <button onClick={()=>{setWalkInMode("register");setWalkInError("");}}
+                    style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                    Request Walk-in Access →
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── REGISTRATION FORM ── */}
+          {!walkInVerified&&walkInMode==="register"&&(
+            <div style={{maxWidth:460,margin:"0 auto"}}>
+              <div className="card" style={{padding:28,borderTop:"4px solid #7c3aed"}}>
+                <div style={{textAlign:"center",marginBottom:20}}>
+                  <div style={{fontSize:36,marginBottom:6}}>📝</div>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#0a1628",marginBottom:3}}>Request Walk-in Access</div>
+                  <div style={{fontSize:12,color:"#6b7280"}}>Requires admin approval before you can log in</div>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                  <div className="field">
+                    <label>Full Name *</label>
+                    <input placeholder="e.g. Sarah Johnson" value={wiReg.name}
+                      onChange={e=>setWiReg(r=>({...r,name:e.target.value}))}
+                      onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
+                  </div>
+                  <div className="field">
+                    <label>Email Address *</label>
+                    <input type="email" placeholder="you@email.com" value={wiReg.email}
+                      onChange={e=>setWiReg(r=>({...r,email:e.target.value}))}
+                      onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
+                  </div>
+                  <div className="field">
+                    <label>Phone Number *</label>
+                    <input placeholder="(713) 555-0100" value={wiReg.phone}
+                      onChange={e=>setWiReg(r=>({...r,phone:e.target.value}))}
+                      onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
+                  </div>
+                  <div className="field">
+                    <label>Role</label>
+                    <select value={wiReg.role} onChange={e=>setWiReg(r=>({...r,role:e.target.value}))}
+                      style={{background:"#fff",border:"1.5px solid #e5e7eb",borderRadius:9,padding:"11px 14px",fontSize:14,color:"#111",width:"100%"}}>
+                      <option value="staff">Receptionist / In-House Staff</option>
+                      <option value="manager">Manager</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Note (optional)</label>
+                    <input placeholder="e.g. Front desk receptionist" value={wiReg.note}
+                      onChange={e=>setWiReg(r=>({...r,note:e.target.value}))}
+                      onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
+                  </div>
+                  {wiRegMsg&&<div style={{background:wiRegMsg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${wiRegMsg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:13,color:wiRegMsg.t==="success"?"#065f46":"#dc2626"}}>{wiRegMsg.m}</div>}
+                  <button onClick={submitWiRegistration} disabled={wiRegSaving}
+                    style={{width:"100%",padding:"13px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:wiRegSaving?"not-allowed":"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8,opacity:wiRegSaving?0.7:1}}>
+                    {wiRegSaving?<><span className="sp">⟳</span> Submitting…</>:"Submit Access Request"}
+                  </button>
+                  <button onClick={()=>setWalkInMode("customer")}
+                    style={{width:"100%",padding:"10px",background:"none",border:"1.5px solid #e5e7eb",borderRadius:10,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif",color:"#6b7280"}}>
+                    ← Back to Login
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── VERIFIED: show walk-in sale ── */}
+          {walkInVerified&&(
+            <>
+              <div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:10,padding:"10px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>✅</span>
+                <div>
+                  <div style={{fontSize:13,color:"#5b21b6",fontWeight:700}}>
+                    {walkInUser ? walkInUser.displayName : walkInCust?.name} — verified
+                  </div>
+                  <div style={{fontSize:11,color:"#9ca3af",textTransform:"capitalize"}}>
+                    {walkInUser ? `${walkInUser.role} access` : "customer"}
+                  </div>
+                </div>
+                <button onClick={()=>{setWalkInVerified(false);setWalkInCust(null);setWalkInUser(null);setWalkInSearch("");setWalkInPhone("");setWalkInEmail("");setWalkInPw("");}}
+                  style={{marginLeft:"auto",fontSize:11,color:"#7c3aed",background:"none",border:"1px solid #ddd6fe",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Switch</button>
+              </div>
+              <DriverWalkInTab
+                driverData={{customers, stateTaxes:portalStateTaxes, sales:[], co}}
+                setDriverData={()=>{}}
+                products={products.filter(p=>p.shelf>0)}
+                supabase={supabase}
+                initCust={walkInCust?.id||null}
+              />
+            </>
+          )}
         </div>}
 
         {isExisting&&<div className="fu">

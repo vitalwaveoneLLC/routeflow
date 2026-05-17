@@ -1589,6 +1589,7 @@ export default function App(){
   const[orders,setOrders]=useState([]);
   const[expenses,setExpenses]=useState([]);
   const[paymentsLog,setPaymentsLog]=useState([]);
+  const[walkinRegs,setWalkinRegs]=useState([]);
   const[loading,setLoading]=useState(true);
 
   // UI
@@ -1636,6 +1637,7 @@ export default function App(){
   const[coEdit,setCoEdit]=useState(null);
 
   const isAdmin=profile?.role==="admin";
+  const pendingApprovals=walkinRegs.filter(r=>r.status==="pending").length;
   const taxRate=0;// tax handled per-product via calcSaleTax
 
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3200);};
@@ -1654,7 +1656,7 @@ export default function App(){
   const loadAll=useCallback(async()=>{
     setLoading(true);
     try{
-      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR]=await Promise.all([
+      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR,wiR]=await Promise.all([
         supabase.from("company").select("*").single(),
         supabase.from("products").select("*").order("name"),
         supabase.from("trucks").select("*").order("driver"),
@@ -1666,6 +1668,7 @@ export default function App(){
         supabase.from("orders").select("*").order("created_at",{ascending:false}),
         supabase.from("state_taxes").select("*").order("name"),
         supabase.from("expenses").select("*").order("created_at",{ascending:false}),
+        supabase.from("walkin_registrations").select("*").order("created_at",{ascending:false}),
       ]);
       if(coR.data){setCo(coR.data);setCoEdit(coR.data);}
       if(prR.data)setProducts(prR.data);
@@ -1678,6 +1681,7 @@ export default function App(){
       if(orR.data)setOrders(orR.data);
       if(stR.data)setStateTaxes(stR.data);
       if(exR.data)setExpenses(exR.data);
+      if(wiR.data)setWalkinRegs(wiR.data);
       // Also reload paymentsLog
       const pmLR = await supabase.from("payments_log").select("*").order("created_at",{ascending:false});
       if(pmLR.data)setPaymentsLog(pmLR.data);
@@ -2328,6 +2332,7 @@ export default function App(){
     ...(isAdmin?[{id:"pl",label:"P&L Report",icon:ic.pl}]:[]),
     ...(isAdmin?[{id:"irs",label:"IRS Reports",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13,marginRight:0}}>🏛</span>}]:[]),
     {id:"customers",label:"Customers",icon:ic.users},
+    ...(isAdmin?[{id:"userapprovals",label:"New Users Approval",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>👥</span>,badge:pendingApprovals}]:[]),
     ...(isAdmin?[{id:"settings",label:"Settings",icon:ic.gear}]:[]),
   ];
 
@@ -3502,6 +3507,101 @@ export default function App(){
               })}
             </div>
           </div>}
+
+          {/* ══ NEW USERS APPROVAL ══ */}
+          {tab==="userapprovals"&&isAdmin&&(()=>{
+            const pending=walkinRegs.filter(r=>r.status==="pending");
+            const approved=walkinRegs.filter(r=>r.status==="approved");
+            const rejected=walkinRegs.filter(r=>r.status==="rejected");
+
+            const updateReg=async(id,status)=>{
+              await supabase.from("walkin_registrations").update({status,reviewed_at:new Date().toISOString()}).eq("id",id);
+              setWalkinRegs(prev=>prev.map(r=>r.id===id?{...r,status,reviewed_at:new Date().toISOString()}:r));
+              showToast(status==="approved"?"✅ User approved":"❌ Request rejected");
+            };
+
+            const RegCard=({r})=>(
+              <div key={r.id} className="card" style={{padding:"16px 18px",marginBottom:10,borderLeft:`4px solid ${r.status==="approved"?"#059669":r.status==="rejected"?"#dc2626":"#7c3aed"}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:3}}>{r.name}</div>
+                    <div style={{fontSize:12,color:"#6b7280",marginBottom:2}}>📧 {r.email} · 📞 {r.phone}</div>
+                    <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginTop:4}}>
+                      <span className="bdg" style={{background:"#f5f3ff",color:"#5b21b6",border:"1px solid #ddd6fe",textTransform:"capitalize"}}>{r.role}</span>
+                      <span className="bdg" style={{background:r.status==="approved"?"#ecfdf5":r.status==="rejected"?"#fef2f2":"#fef9c3",color:r.status==="approved"?"#065f46":r.status==="rejected"?"#991b1b":"#92400e",border:`1px solid ${r.status==="approved"?"#a7f3d0":r.status==="rejected"?"#fecaca":"#fde68a"}`}}>{r.status}</span>
+                      {r.note&&<span style={{fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>"{r.note}"</span>}
+                    </div>
+                    <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>{new Date(r.created_at).toLocaleString()}</div>
+                  </div>
+                  {r.status==="pending"&&(
+                    <div style={{display:"flex",gap:8,flexShrink:0}}>
+                      <button className="btn bg" onClick={()=>updateReg(r.id,"approved")}>✅ Approve</button>
+                      <button className="btn br" onClick={()=>updateReg(r.id,"rejected")}>❌ Reject</button>
+                    </div>
+                  )}
+                  {r.status!=="pending"&&(
+                    <div style={{display:"flex",gap:8,flexShrink:0}}>
+                      {r.status==="approved"&&<button className="btn br" onClick={()=>updateReg(r.id,"rejected")}>Revoke</button>}
+                      {r.status==="rejected"&&<button className="btn bg" onClick={()=>updateReg(r.id,"approved")}>Approve</button>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+
+            return(
+              <div className="fu">
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:10}}>
+                  <div>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#212121"}}>👥 New Users Approval</div>
+                    <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Walk-in access requests from staff, receptionists, and managers</div>
+                  </div>
+                  <button className="btn bb" onClick={()=>loadAll()}>↻ Refresh</button>
+                </div>
+
+                {/* KPIs */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+                  {[{l:"Pending",v:pending.length,c:"#f59e0b",bg:"#fffbeb"},{l:"Approved",v:approved.length,c:"#059669",bg:"#ecfdf5"},{l:"Rejected",v:rejected.length,c:"#dc2626",bg:"#fef2f2"}].map(k=>(
+                    <div key={k.l} className="kpi" style={{background:k.bg,borderColor:k.c+"40"}}>
+                      <div className="kv" style={{color:k.c}}>{k.v}</div>
+                      <div className="kl">{k.l}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Pending */}
+                {pending.length>0&&<>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:13,color:"#92400e",letterSpacing:".06em",marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
+                    ⏳ PENDING REVIEW <span style={{background:"#f59e0b",color:"#fff",borderRadius:10,fontSize:10,padding:"1px 7px",fontWeight:700}}>{pending.length}</span>
+                  </div>
+                  {pending.map(r=><RegCard key={r.id} r={r}/>)}
+                </>}
+
+                {pending.length===0&&<div className="card" style={{padding:28,textAlign:"center",color:"#9ca3af",marginBottom:16}}>
+                  <div style={{fontSize:28,marginBottom:6}}>✅</div>
+                  <div style={{fontSize:13}}>No pending requests</div>
+                </div>}
+
+                {/* Approved */}
+                {approved.length>0&&<>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:12,color:"#065f46",letterSpacing:".06em",marginBottom:8,marginTop:16}}>✅ APPROVED</div>
+                  {approved.map(r=><RegCard key={r.id} r={r}/>)}
+                </>}
+
+                {/* Rejected */}
+                {rejected.length>0&&<>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:12,color:"#991b1b",letterSpacing:".06em",marginBottom:8,marginTop:16}}>❌ REJECTED</div>
+                  {rejected.map(r=><RegCard key={r.id} r={r}/>)}
+                </>}
+
+                {walkinRegs.length===0&&<div className="card" style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+                  <div style={{fontSize:32,marginBottom:8}}>📋</div>
+                  <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>No access requests yet</div>
+                  <div style={{fontSize:12}}>Walk-in registrations from the portal will appear here</div>
+                </div>}
+              </div>
+            );
+          })()}
 
           {/* ══ SETTINGS ══ */}
           {tab==="settings"&&isAdmin&&<div className="fu">
