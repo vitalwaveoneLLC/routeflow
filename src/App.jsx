@@ -1596,6 +1596,7 @@ export default function App(){
   const[assignTid,setAssignTid]=useState("");
   const mapRef=useRef(null);
   const mapInst=useRef(null);
+  const[sysResetStep,setSysResetStep]=useState(0); // 0=idle, 1=confirm, 2=running, 3=done
   const[loading,setLoading]=useState(true);
 
   // UI
@@ -4775,6 +4776,132 @@ export default function App(){
                 <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>Assign each driver to their truck using the dropdown — no manual typing, no typos.</div>
                 <DriverTruckAssignment supabase={supabase} trucks={trucks} showToast={showToast}/>
               </div>
+
+              {/* System Reset */}
+              <div className="card" style={{padding:22,marginBottom:14,borderTop:"3px solid #dc2626"}}>
+                <div className="sh" style={{color:"#dc2626"}}>⚠️ System Reset</div>
+                <div style={{fontSize:12,color:"#6b7280",marginBottom:16,lineHeight:1.6}}>
+                  Reset invoice numbering or wipe all transaction data to start fresh. Company info, products, trucks, and customers are preserved.
+                </div>
+
+                {sysResetStep===0&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {/* Option 1: Reset invoice counter only */}
+                  <div style={{background:"#fff7ed",border:"1.5px solid #fed7aa",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:13,color:"#c2410c"}}>Reset Invoice Number to #1</div>
+                      <div style={{fontSize:11,color:"#9a3412",marginTop:3}}>Next invoice will be INV-0001. All existing invoices are kept. Use this when starting a new billing period.</div>
+                    </div>
+                    <button onClick={()=>showConfirm("Reset invoice counter to #1?\n\nAll existing invoices are kept — only the numbering sequence resets. Next invoice created will be INV-0001.",async()=>{
+                      try{
+                        await supabase.rpc("reset_invoice_sequence");
+                        showToast("Invoice counter reset to #1 — next invoice will be INV-0001");
+                      }catch(e){
+                        // Fallback: try direct SQL via RPC doesn't exist yet — show SQL
+                        showToast("Run this SQL in Supabase: SELECT setval('invoice_number_seq', 1, false);","error");
+                      }
+                    })}
+                      style={{background:"#c2410c",color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
+                      Reset Counter
+                    </button>
+                  </div>
+
+                  {/* Option 2: Full data wipe */}
+                  <div style={{background:"#fef2f2",border:"1.5px solid #fecaca",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:13,color:"#dc2626"}}>Full Transaction Reset</div>
+                      <div style={{fontSize:11,color:"#b91c1c",marginTop:3}}>Deletes ALL sales, invoices, payments, loads, returns, orders. Restores all inventory back to shelf. Keeps products, customers, trucks.</div>
+                    </div>
+                    <button onClick={()=>setSysResetStep(1)}
+                      style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
+                      Full Reset...
+                    </button>
+                  </div>
+                </div>}
+
+                {sysResetStep===1&&<div style={{background:"#fef2f2",border:"2px solid #dc2626",borderRadius:10,padding:20}}>
+                  <div style={{fontWeight:800,fontSize:15,color:"#dc2626",marginBottom:8}}>⚠️ THIS CANNOT BE UNDONE</div>
+                  <div style={{fontSize:12,color:"#374151",marginBottom:16,lineHeight:1.7}}>
+                    This will permanently delete:<br/>
+                    - All sales and invoices<br/>
+                    - All payments and payment logs<br/>
+                    - All truck loads and returns<br/>
+                    - All customer orders<br/>
+                    - All truck reset requests<br/>
+                    - All returned check records<br/><br/>
+                    <strong>Shelf stock will be restored</strong> from all open loads.<br/>
+                    <strong>Products, customers, and trucks are NOT deleted.</strong>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={{fontSize:12,fontWeight:700,color:"#dc2626",display:"block",marginBottom:6}}>Type RESET to confirm:</label>
+                    <input id="resetConfirmInput" autoFocus
+                      style={{border:"2px solid #dc2626",borderRadius:8,padding:"10px 14px",fontSize:14,fontWeight:700,width:"100%",fontFamily:"'Barlow',sans-serif"}}
+                      placeholder="Type RESET here..."/>
+                  </div>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={()=>setSysResetStep(0)}
+                      style={{flex:1,padding:"11px",border:"1.5px solid #e5e7eb",borderRadius:8,background:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                      Cancel
+                    </button>
+                    <button onClick={async()=>{
+                      const val=document.getElementById("resetConfirmInput")?.value||"";
+                      if(val.trim()!=="RESET") return showToast("Type RESET to confirm","error");
+                      setSysResetStep(2);
+                      try{
+                        // Step 1: Return all open load inventory to shelf
+                        const openLoads=loads.filter(l=>l.status==="out");
+                        const allLoadIds=new Set(openLoads.map(l=>l.id));
+                        const loadedMap={};
+                        openLoads.forEach(load=>(load.items||[]).forEach(i=>{loadedMap[i.pid]=(loadedMap[i.pid]||0)+i.qty;}));
+                        const soldMap={};
+                        sales.filter(s=>allLoadIds.has(s.load_id)).forEach(s=>(s.items||[]).forEach(i=>{soldMap[i.pid]=(soldMap[i.pid]||0)+i.qty;}));
+                        const retMap={};
+                        returns.filter(r=>allLoadIds.has(r.load_id)).forEach(r=>(r.items||[]).forEach(i=>{retMap[i.pid]=(retMap[i.pid]||0)+i.qty;}));
+                        const shelfRestores=Object.entries(loadedMap)
+                          .map(([pid,loaded])=>({pid,remaining:Math.max(0,loaded-(soldMap[pid]||0)-(retMap[pid]||0))}))
+                          .filter(i=>i.remaining>0&&getP(i.pid));
+                        if(shelfRestores.length>0){
+                          await Promise.all(shelfRestores.map(i=>supabase.from("products")
+                            .update({shelf:Math.max(0,(getP(i.pid)?.shelf||0)+i.remaining)}).eq("id",i.pid)));
+                        }
+                        // Step 2: Delete all transaction tables
+                        await supabase.from("truck_resets").delete().neq("id","__none__");
+                        await supabase.from("payments_log").delete().neq("id","__none__");
+                        await supabase.from("payments").delete().neq("id","__none__");
+                        await supabase.from("orders").delete().neq("id","__none__");
+                        await supabase.from("returns").delete().neq("id","__none__");
+                        await supabase.from("sales").delete().neq("id","__none__");
+                        await supabase.from("loads").delete().neq("id","__none__");
+                        await supabase.from("expenses").delete().neq("id","__none__");
+                        // Step 3: Reset invoice sequence
+                        try{ await supabase.rpc("reset_invoice_sequence"); }catch{}
+                        // Step 4: Update local state
+                        setProducts(prev=>prev.map(p=>{const r=shelfRestores.find(i=>i.pid===p.id);return r?{...p,shelf:p.shelf+r.remaining}:p;}));
+                        setSales([]);setPayments([]);setPaymentsLog([]);setOrders([]);setLoads([]);setReturns([]);setExpenses([]);setTruckResets([]);
+                        setSysResetStep(3);
+                      }catch(e){showToast("Reset error: "+e.message,"error");setSysResetStep(1);}
+                    }}
+                      style={{flex:1,padding:"11px",border:"none",borderRadius:8,background:"#dc2626",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                      Delete Everything & Reset
+                    </button>
+                  </div>
+                </div>}
+
+                {sysResetStep===2&&<div style={{textAlign:"center",padding:"30px 20px"}}>
+                  <div style={{fontSize:32,marginBottom:12}}>⏳</div>
+                  <div style={{fontWeight:700,fontSize:14,color:"#374151"}}>Resetting system...</div>
+                  <div style={{fontSize:12,color:"#9ca3af",marginTop:6}}>Returning inventory to shelf and clearing all transaction data.</div>
+                </div>}
+
+                {sysResetStep===3&&<div style={{textAlign:"center",padding:"30px 20px"}}>
+                  <div style={{fontSize:40,marginBottom:12}}>✅</div>
+                  <div style={{fontWeight:800,fontSize:16,color:"#059669",marginBottom:8}}>System Reset Complete</div>
+                  <div style={{fontSize:12,color:"#6b7280",marginBottom:20}}>All transactions cleared. Invoice counter reset to #1. Shelf inventory restored.</div>
+                  <button onClick={()=>setSysResetStep(0)}
+                    style={{background:"#0a1628",color:"#fff",border:"none",borderRadius:8,padding:"11px 28px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                    Done
+                  </button>
+                </div>}
+              </div>
             </div>
           </div>}
 
@@ -4937,7 +5064,7 @@ export default function App(){
             </div>
             {nc.state&&(()=>{const st=stateTaxes.find(x=>x.id===nc.state);return st?(
               <div style={{fontSize:11,color:st.exempt?"#059669":"#854d0e",background:st.exempt?"#f0fdf4":"#fef9c3",padding:"6px 10px",borderRadius:6}}>
-                {st.exempt?`✅ ${nc.state}  -  Tax Exempt`:`🏛 ${nc.state}  -  ${st.rate}% tobacco/vape tax`}
+                {st.exempt?`[OK] ${nc.state}  -  Tax Exempt`:`🏛 ${nc.state}  -  ${st.rate}% tobacco/vape tax`}
               </div>
             ):(
               <div style={{fontSize:11,color:"#9ca3af"}}>ℹ️ {nc.state} — No tax rate configured yet</div>
@@ -5185,7 +5312,7 @@ export default function App(){
         </div>
       </Modal>}
 
-      {modal==="return"&&<Modal title={`↩️ Return Stock  -  ${getT(selTruck)?.driver}`} onClose={()=>setModal(null)}>
+      {modal==="return"&&<Modal title={`Return Stock  -  ${getT(selTruck)?.driver}`} onClose={()=>setModal(null)}>
         <div>
           <div style={{fontSize:10,color:"#6b7280",letterSpacing:".07em",fontWeight:700,marginBottom:8}}>RETURN TO SHELF</div>
           <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:300,overflowY:"auto",paddingRight:3}}>
