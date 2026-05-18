@@ -7,7 +7,7 @@
 // * Admin sees & approves in RouteFlow
 // -----------------------------------------------------------------------------
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "./supabase";
 
 // -- STYLES --------------------------------------------------------------------
@@ -1567,6 +1567,9 @@ export default function OrderPortal() {
   const [submitting, setSubmitting] = useState(false);
   const [portalError, setPortalError] = useState("");
   const [order,      setOrder]      = useState(null);
+  const [sigData,    setSigData]    = useState(null); // base64 signature
+  const [sigDrawing, setSigDrawing] = useState(false);
+  const sigCanvasRef = useRef(null);
 
   // Load data
   useEffect(()=>{
@@ -1743,6 +1746,7 @@ export default function OrderPortal() {
         previous_invoice_ids: custPrevInvs.map(s=>s.id).join(",")||"",
         status: "approved",
         payment_method: payMethod,
+        signature: sigData||null,
         created_at: new Date().toISOString(),
       };
       const {error} = await supabase.from("orders").insert(rec);
@@ -3225,6 +3229,25 @@ export default function OrderPortal() {
               {stripeError&&payMethod==="card"&&<button onClick={loadStripeIntent} style={{width:"100%",background:"transparent",border:"1px solid #4b6080",borderRadius:8,padding:"8px",fontSize:11,color:"#4b6080",cursor:"pointer",marginBottom:10,fontFamily:"'Inter',sans-serif"}}>↻ Retry</button>}
 
               {portalError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:9,padding:"12px 16px",fontSize:13,color:"#dc2626",marginBottom:12,fontWeight:500}}>{portalError}</div>}
+
+              {/* Signature Pad */}
+              <div style={{marginBottom:14,background:"#0d1f3a",border:"1px solid #1e3a5f",borderRadius:10,padding:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"#94a3b8"}}>✍️ Customer Signature {sigData&&<span style={{color:"#10b981"}}>✓ Captured</span>}</div>
+                  {sigData&&<button onClick={()=>{setSigData(null);const c=sigCanvasRef.current;if(c){const ctx=c.getContext("2d");ctx.clearRect(0,0,c.width,c.height);}}} style={{background:"transparent",border:"1px solid #374151",borderRadius:5,padding:"3px 8px",fontSize:10,color:"#6b7280",cursor:"pointer"}}>Clear</button>}
+                </div>
+                <canvas ref={sigCanvasRef} width={340} height={100}
+                  style={{background:"#fff",borderRadius:7,width:"100%",height:90,cursor:"crosshair",display:"block",touchAction:"none"}}
+                  onMouseDown={e=>{setSigDrawing(true);const c=sigCanvasRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");ctx.beginPath();ctx.moveTo((e.clientX-r.left)*(c.width/r.width),(e.clientY-r.top)*(c.height/r.height));}}
+                  onMouseMove={e=>{if(!sigDrawing)return;const c=sigCanvasRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");ctx.strokeStyle="#0a1628";ctx.lineWidth=2;ctx.lineCap="round";ctx.lineTo((e.clientX-r.left)*(c.width/r.width),(e.clientY-r.top)*(c.height/r.height));ctx.stroke();}}
+                  onMouseUp={()=>{setSigDrawing(false);setSigData(sigCanvasRef.current.toDataURL());}}
+                  onTouchStart={e=>{e.preventDefault();setSigDrawing(true);const c=sigCanvasRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");const t=e.touches[0];ctx.beginPath();ctx.moveTo((t.clientX-r.left)*(c.width/r.width),(t.clientY-r.top)*(c.height/r.height));}}
+                  onTouchMove={e=>{e.preventDefault();if(!sigDrawing)return;const c=sigCanvasRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");ctx.strokeStyle="#0a1628";ctx.lineWidth=2;ctx.lineCap="round";const t=e.touches[0];ctx.lineTo((t.clientX-r.left)*(c.width/r.width),(t.clientY-r.top)*(c.height/r.height));ctx.stroke();}}
+                  onTouchEnd={()=>{setSigDrawing(false);setSigData(sigCanvasRef.current.toDataURL());}}
+                />
+                <div style={{fontSize:10,color:"#4b6080",marginTop:6,textAlign:"center"}}>Sign above to confirm receipt of goods</div>
+              </div>
+
               <button className="btn-amber" style={{width:"100%",justifyContent:"center",padding:"13px",opacity:(payMethod==="card"&&!stripeReady)?0.5:1}} onClick={()=>{setPortalError("");handleSubmit();}} disabled={submitting||(payMethod==="card"&&!stripeReady)}>
                 {submitting?<><span className="sp">⟳</span>Processing…</>:payMethod==="card"?`💳 Pay ${fmt(grandTotal)} Now`:`[OK] Submit Order  -  Pay on Delivery`}
               </button>
@@ -3254,6 +3277,12 @@ export default function OrderPortal() {
           </div>
         </div>
         <Invoice order={order} products={products} co={co}/>
+        {order.signature&&(
+          <div style={{marginTop:16,background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:8}}>✍️ Customer Signature — Proof of Delivery</div>
+            <img src={order.signature} alt="signature" style={{maxWidth:300,border:"1px solid #e5e7eb",borderRadius:6,background:"#fff"}}/>
+          </div>
+        )}
       </div>}
 
       </div>

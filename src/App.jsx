@@ -1111,6 +1111,282 @@ function DeliverySchedule({trucks,setTrucks,customers,supabase,showToast}){
   );
 }
 
+function RecurringOrdersTab({recurringOrders,setRecurringOrders,customers,products,trucks,supabase,showToast,showConfirm,fmt}){
+  const uid5=()=>Math.random().toString(36).slice(2,8).toUpperCase();
+  const[form,setForm]=useState({cust_id:"",truck_id:"",frequency:"Weekly",day:"Monday",items:[],notes:"",active:true});
+  const[saving,setSaving]=useState(false);
+  const[showForm,setShowForm]=useState(false);
+  const days=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+  const freqs=["Daily","Weekly","Bi-weekly","Monthly"];
+
+  const addItem=()=>setForm(f=>({...f,items:[...f.items,{pid:products[0]?.id||"",qty:1}]}));
+  const updateItem=(idx,k,v)=>setForm(f=>({...f,items:f.items.map((it,i)=>i===idx?{...it,[k]:v}:it)}));
+  const removeItem=idx=>setForm(f=>({...f,items:f.items.filter((_,i)=>i!==idx)}));
+
+  const saveRec=async()=>{
+    if(!form.cust_id||!form.items.length)return showToast("Customer and at least one item required","error");
+    setSaving(true);
+    const cust=customers.find(c=>c.id===form.cust_id);
+    const rec={id:"REC-"+uid5(),cust_id:form.cust_id,cust_name:cust?.name||"",truck_id:form.truck_id||null,frequency:form.frequency,day:form.day,items:form.items,notes:form.notes,active:true,last_run:null,created_at:new Date().toISOString()};
+    const{error}=await supabase.from("recurring_orders").insert(rec);
+    if(error){showToast(error.message,"error");setSaving(false);return;}
+    setRecurringOrders(prev=>[rec,...prev]);
+    setForm({cust_id:"",truck_id:"",frequency:"Weekly",day:"Monday",items:[],notes:"",active:true});
+    setShowForm(false);
+    showToast("✅ Recurring order created");
+    setSaving(false);
+  };
+
+  const toggleActive=async(id,active)=>{
+    await supabase.from("recurring_orders").update({active:!active}).eq("id",id);
+    setRecurringOrders(prev=>prev.map(r=>r.id===id?{...r,active:!active}:r));
+    showToast(!active?"Recurring order activated":"Recurring order paused");
+  };
+
+  const deleteRec=id=>showConfirm("Delete this recurring order?",async()=>{
+    await supabase.from("recurring_orders").delete().eq("id",id);
+    setRecurringOrders(prev=>prev.filter(r=>r.id!==id));
+    showToast("Recurring order deleted");
+  });
+
+  const orderTotal=items=>items.reduce((a,it)=>{const p=products.find(x=>x.id===it.pid);return a+(p?.price||0)*(it.qty||0);},0);
+
+  return(
+    <div className="fu">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22}}>🔁 Recurring Orders</div>
+          <div style={{fontSize:12,color:"#9ca3af"}}>Scheduled orders that auto-remind you every week, bi-week, or month</div>
+        </div>
+        <button className="btn ba" onClick={()=>setShowForm(s=>!s)}>+ New Recurring Order</button>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+        {[{l:"Total Templates",v:recurringOrders.length,c:"#7c3aed"},{l:"Active",v:recurringOrders.filter(r=>r.active).length,c:"#059669"},{l:"Paused",v:recurringOrders.filter(r=>!r.active).length,c:"#9ca3af"}].map(k=>(
+          <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>
+        ))}
+      </div>
+
+      {showForm&&<div className="card" style={{padding:20,marginBottom:16,borderTop:"3px solid #7c3aed"}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:14}}>🔁 New Recurring Order Template</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:12}}>
+          <div><label>Customer *</label>
+            <select value={form.cust_id} onChange={e=>setForm(f=>({...f,cust_id:e.target.value}))}>
+              <option value="">— Select —</option>
+              {customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div><label>Driver / Truck</label>
+            <select value={form.truck_id} onChange={e=>setForm(f=>({...f,truck_id:e.target.value}))}>
+              <option value="">— Any —</option>
+              {trucks.map(t=><option key={t.id} value={t.id}>{t.driver}</option>)}
+            </select>
+          </div>
+          <div><label>Frequency</label>
+            <select value={form.frequency} onChange={e=>setForm(f=>({...f,frequency:e.target.value}))}>
+              {freqs.map(f=><option key={f}>{f}</option>)}
+            </select>
+          </div>
+          <div><label>Day</label>
+            <select value={form.day} onChange={e=>setForm(f=>({...f,day:e.target.value}))}>
+              {days.map(d=><option key={d}>{d}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#6b7280",marginBottom:6}}>ORDER ITEMS</div>
+        {form.items.map((it,idx)=>(
+          <div key={idx} style={{display:"grid",gridTemplateColumns:"2fr 1fr auto",gap:8,marginBottom:6,alignItems:"center"}}>
+            <select value={it.pid} onChange={e=>updateItem(idx,"pid",e.target.value)}>
+              {products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <input type="number" min="1" placeholder="Qty" value={it.qty} onChange={e=>updateItem(idx,"qty",parseInt(e.target.value)||1)}/>
+            <button onClick={()=>removeItem(idx)} style={{background:"#fef2f2",border:"none",borderRadius:6,padding:"6px 10px",color:"#dc2626",cursor:"pointer",fontWeight:700}}>✕</button>
+          </div>
+        ))}
+        <div style={{display:"flex",gap:8,marginTop:8,marginBottom:12,alignItems:"center"}}>
+          <button className="btn bb" onClick={addItem}>+ Add Item</button>
+          {form.items.length>0&&<span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#7c3aed",marginLeft:"auto"}}>Est. {fmt(orderTotal(form.items))}/order</span>}
+        </div>
+        <div><label>Notes</label><input placeholder="e.g. Ring doorbell, collect cash" value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}/></div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+          <button className="btn bgh" onClick={()=>setShowForm(false)}>Cancel</button>
+          <button className="btn ba" onClick={saveRec} disabled={saving}>{saving?"Saving…":"💾 Save Template"}</button>
+        </div>
+      </div>}
+
+      {recurringOrders.length===0&&!showForm
+        ?<div className="card" style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+            <div style={{fontSize:36,marginBottom:8}}>🔁</div>
+            <div style={{fontWeight:600,fontSize:14}}>No recurring orders yet</div>
+            <div style={{fontSize:12}}>Create a template for customers who order on a regular schedule</div>
+          </div>
+        :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>
+          {recurringOrders.map(r=>(
+            <div key={r.id} className="card" style={{padding:16,borderLeft:`3px solid ${r.active?"#059669":"#e5e7eb"}`,opacity:r.active?1:0.7}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#0a1628"}}>{r.cust_name}</div>
+                  <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>🔁 {r.frequency} · Every {r.day}</div>
+                </div>
+                <span className={`bdg ${r.active?"bg2":"bgr"}`}>{r.active?"ACTIVE":"PAUSED"}</span>
+              </div>
+              <div style={{marginBottom:8}}>
+                {(r.items||[]).map((it,i)=>{const p=products.find(x=>x.id===it.pid);return p?(
+                  <div key={i} style={{fontSize:11,color:"#6b7280",display:"flex",justifyContent:"space-between"}}>
+                    <span>{p.name}</span><span style={{fontWeight:600}}>×{it.qty} — {fmt(p.price*it.qty)}</span>
+                  </div>
+                ):null;})}
+              </div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#7c3aed",marginBottom:8}}>
+                Est. {fmt(orderTotal(r.items||[]))}/order
+              </div>
+              {r.notes&&<div style={{fontSize:10,color:"#9ca3af",marginBottom:8}}>📝 {r.notes}</div>}
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>toggleActive(r.id,r.active)} style={{flex:1,background:r.active?"#fff7ed":"#f0fdf4",border:`1px solid ${r.active?"#fed7aa":"#a7f3d0"}`,borderRadius:6,padding:"5px",fontSize:11,color:r.active?"#c2410c":"#065f46",cursor:"pointer",fontWeight:700}}>
+                  {r.active?"⏸ Pause":"▶ Activate"}
+                </button>
+                <button onClick={()=>deleteRec(r.id)} style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"5px 10px",fontSize:11,color:"#dc2626",cursor:"pointer",fontWeight:700}}>🗑</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      }
+    </div>
+  );
+}
+
+function DriverPerformance({trucks,sales,payments,customers,returns,expenses,loads,fmt,calcSaleGrandTotal,pmtFor}){
+  const[period,setPeriod]=useState("month");
+  const[selTruck,setSelTruck]=useState("all");
+  const now=new Date();
+  const inPeriod=d=>{
+    const dt=new Date(d);if(isNaN(dt))return false;
+    if(period==="week"){const w=new Date(now);w.setDate(now.getDate()-7);return dt>=w;}
+    if(period==="month")return dt.getMonth()===now.getMonth()&&dt.getFullYear()===now.getFullYear();
+    if(period==="quarter"){const q=Math.floor(now.getMonth()/3);return Math.floor(dt.getMonth()/3)===q&&dt.getFullYear()===now.getFullYear();}
+    if(period==="ytd")return dt.getFullYear()===now.getFullYear();
+    return true;
+  };
+  const stats=trucks.map(t=>{
+    const ts=sales.filter(s=>s.truck_id===t.id&&inPeriod(s.created_at||s.date));
+    const revenue=ts.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+    const profit=ts.reduce((a,s)=>a+parseFloat(s.profit||0),0);
+    const collected=ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+    const collectionRate=revenue>0?((collected/revenue)*100).toFixed(0):0;
+    const custCount=new Set(ts.map(s=>s.cust_id)).size;
+    const tLoads=loads.filter(l=>l.truck_id===t.id&&inPeriod(l.created_at));
+    const tExp=expenses.filter(e=>e.truck_id===t.id&&inPeriod(e.created_at)).reduce((a,e)=>a+parseFloat(e.amount||0),0);
+    const netProfit=profit-tExp;
+    const avgOrderVal=ts.length>0?(revenue/ts.length):0;
+    const returnCount=returns.filter(r=>r.truck_id===t.id&&inPeriod(r.created_at)).length;
+    return{t,revenue,profit,collected,collectionRate,custCount,invoices:ts.length,loads:tLoads.length,expenses:tExp,netProfit,avgOrderVal,returnCount};
+  }).sort((a,b)=>b.revenue-a.revenue);
+
+  const vis=selTruck==="all"?stats:stats.filter(s=>s.t.id===selTruck);
+  const totalRev=stats.reduce((a,s)=>a+s.revenue,0);
+
+  return(
+    <div>
+      {/* Controls */}
+      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",gap:6}}>
+          {[["week","This Week"],["month","This Month"],["quarter","This Quarter"],["ytd","This Year"],["all","All Time"]].map(([k,l])=>(
+            <button key={k} onClick={()=>setPeriod(k)}
+              style={{padding:"7px 14px",borderRadius:20,border:`1.5px solid ${period===k?"#0a1628":"#e5e7eb"}`,background:period===k?"#0a1628":"#fff",color:period===k?"#fff":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <select value={selTruck} onChange={e=>setSelTruck(e.target.value)} style={{marginLeft:"auto",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"7px 12px",fontSize:12}}>
+          <option value="all">All Drivers</option>
+          {trucks.map(t=><option key={t.id} value={t.id}>{t.driver}</option>)}
+        </select>
+      </div>
+
+      {/* Leaderboard */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14,marginBottom:20}}>
+        {vis.map((s,i)=>{
+          const share=totalRev>0?((s.revenue/totalRev)*100).toFixed(0):0;
+          const medals=["🥇","🥈","🥉"];
+          return(
+            <div key={s.t.id} className="card" style={{padding:18,borderTop:`3px solid ${i===0?"#f59e0b":i===1?"#9ca3af":i===2?"#b45309":"#e5e7eb"}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                <div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:18,color:"#0a1628"}}>
+                    {medals[i]||`#${i+1}`} {s.t.driver}
+                  </div>
+                  <div style={{fontSize:11,color:"#9ca3af"}}>{s.t.plate} · {s.t.route||"No route"}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#059669"}}>{fmt(s.revenue)}</div>
+                  <div style={{fontSize:10,color:"#9ca3af"}}>revenue</div>
+                </div>
+              </div>
+              {/* Revenue share bar */}
+              <div style={{marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#9ca3af",marginBottom:3}}>
+                  <span>Revenue share</span><span>{share}%</span>
+                </div>
+                <div style={{height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${share}%`,background:i===0?"#f59e0b":"#7c3aed",borderRadius:3}}/>
+                </div>
+              </div>
+              {/* KPI grid */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                {[
+                  {l:"Invoices",v:s.invoices,c:"#7c3aed"},
+                  {l:"Customers",v:s.custCount,c:"#0ea5e9"},
+                  {l:"Avg Order",v:fmt(s.avgOrderVal),c:"#059669"},
+                  {l:"Collection",v:`${s.collectionRate}%`,c:s.collectionRate>=80?"#059669":"#dc2626"},
+                  {l:"Expenses",v:fmt(s.expenses),c:"#f59e0b"},
+                  {l:"Net Profit",v:fmt(s.netProfit),c:s.netProfit>=0?"#059669":"#dc2626"},
+                ].map(k=>(
+                  <div key={k.l} style={{textAlign:"center",padding:"6px 4px",background:"#f9fafb",borderRadius:6}}>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:k.c}}>{k.v}</div>
+                    <div style={{fontSize:9,color:"#9ca3af",marginTop:1}}>{k.l}</div>
+                  </div>
+                ))}
+              </div>
+              {s.returnCount>0&&<div style={{marginTop:8,fontSize:10,color:"#dc2626",fontWeight:600}}>⚠️ {s.returnCount} return{s.returnCount!==1?"s":""} this period</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Comparison table */}
+      <div className="card" style={{overflow:"hidden"}}>
+        <div style={{padding:"10px 16px",background:"#f9fafb",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#6b7280"}}>DETAILED COMPARISON</div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+              {["Rank","Driver","Revenue","Profit","Net Profit","Collection %","Invoices","Customers","Avg Order","Expenses","Returns"].map(h=>(
+                <th key={h} style={{padding:"9px 12px",textAlign:"left",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {vis.map((s,i)=>(
+                <tr key={s.t.id} style={{borderBottom:"1px solid #f3f4f6",background:i%2===0?"#fff":"#fafafa"}}>
+                  <td style={{padding:"9px 12px",fontWeight:800,color:"#9ca3af"}}>#{i+1}</td>
+                  <td style={{padding:"9px 12px",fontWeight:700,color:"#0a1628"}}>{s.t.driver}</td>
+                  <td style={{padding:"9px 12px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,color:"#059669",fontSize:14}}>{fmt(s.revenue)}</td>
+                  <td style={{padding:"9px 12px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:"#7c3aed"}}>{fmt(s.profit)}</td>
+                  <td style={{padding:"9px 12px",fontWeight:700,color:s.netProfit>=0?"#059669":"#dc2626"}}>{fmt(s.netProfit)}</td>
+                  <td style={{padding:"9px 12px"}}><span style={{fontWeight:700,color:s.collectionRate>=80?"#059669":"#dc2626"}}>{s.collectionRate}%</span></td>
+                  <td style={{padding:"9px 12px",color:"#6b7280"}}>{s.invoices}</td>
+                  <td style={{padding:"9px 12px",color:"#6b7280"}}>{s.custCount}</td>
+                  <td style={{padding:"9px 12px",color:"#6b7280"}}>{fmt(s.avgOrderVal)}</td>
+                  <td style={{padding:"9px 12px",color:"#f59e0b",fontWeight:700}}>{fmt(s.expenses)}</td>
+                  <td style={{padding:"9px 12px",color:s.returnCount>0?"#dc2626":"#9ca3af",fontWeight:s.returnCount>0?700:400}}>{s.returnCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PurchaseOrders({products,setProducts,supabase,showToast,showConfirm}){
   const uid3=()=>Math.random().toString(36).slice(2,8).toUpperCase();
   const fmt3=n=>`$${Number(n||0).toFixed(2)}`;
@@ -2530,6 +2806,8 @@ export default function App(){
   const[orders,setOrders]=useState([]);
   const[expenses,setExpenses]=useState([]);
   const[creditMemos,setCreditMemos]=useState([]);
+  const[auditLog,setAuditLog]=useState([]);
+  const[recurringOrders,setRecurringOrders]=useState([]);
   const[paymentsLog,setPaymentsLog]=useState([]);
   const[walkinRegs,setWalkinRegs]=useState([]);
   const[driverProfiles,setDriverProfiles]=useState([]);
@@ -2878,7 +3156,7 @@ export default function App(){
   const loadAll=useCallback(async()=>{
     setLoading(true);
     try{
-      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR,wiR,cmR]=await Promise.all([
+      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR,wiR,cmR,alR,rrR]=await Promise.all([
         supabase.from("company").select("*").single(),
         supabase.from("products").select("*").order("name"),
         supabase.from("trucks").select("*").order("driver"),
@@ -2892,6 +3170,8 @@ export default function App(){
         supabase.from("expenses").select("*").order("created_at",{ascending:false}),
         supabase.from("walkin_registrations").select("*").order("created_at",{ascending:false}),
         supabase.from("credit_memos").select("*").order("created_at",{ascending:false}),
+        supabase.from("audit_log").select("*").order("created_at",{ascending:false}).limit(500),
+        supabase.from("recurring_orders").select("*").order("created_at",{ascending:false}),
       ]);
       if(coR.data){setCo(coR.data);setCoEdit(coR.data);}
       if(prR.data)setProducts(prR.data);
@@ -2906,6 +3186,8 @@ export default function App(){
       if(exR.data)setExpenses(exR.data);
       if(wiR.data)setWalkinRegs(wiR.data);
       if(cmR.data)setCreditMemos(cmR.data);
+      if(alR.data)setAuditLog(alR.data);
+      if(rrR.data)setRecurringOrders(rrR.data);
       // Load truck reset requests (graceful fallback if table doesn't exist yet)
       try{
         const{data:rr}=await supabase.from("truck_resets").select("*").order("created_at",{ascending:false});
@@ -2919,6 +3201,15 @@ export default function App(){
     }catch(e){showToast("Error loading data","error");}
     setLoading(false);
   },[profile]);
+
+  // Audit log helper — call after any significant action
+  const logAudit=async(action,entity,detail="")=>{
+    try{
+      const rec={id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:session?.user?.email||"unknown",action,entity,detail,created_at:new Date().toISOString()};
+      await supabase.from("audit_log").insert(rec);
+      setAuditLog(prev=>[rec,...prev].slice(0,500));
+    }catch{}// silent — audit failures should never break the app
+  };
 
   // Lookups
   const getP=id=>products.find(p=>p.id===id);
@@ -3200,7 +3491,7 @@ export default function App(){
     const rec={id:"P"+uid(),name:np.name,sku:np.sku,cat:np.cat,unit:np.unit,case_qty:parseInt(np.case_qty)||1,cost:parseFloat(np.cost),price:parseFloat(np.price),shelf:parseInt(np.shelf)||0,reorder_point:parseInt(np.reorder_point)||5};
     const{error}=await supabase.from("products").insert(rec);
     if(error)showToast(error.message,"error");
-    else{setProducts(prev=>[...prev,rec]);showToast(`${np.name} added`);setModal(null);setNp({name:"",sku:"",cat:"Beverage",unit:"Case",case_qty:"24",cost:"",price:"",shelf:"",reorder_point:"5"});}
+    else{setProducts(prev=>[...prev,rec]);showToast(`${np.name} added`);setModal(null);setNp({name:"",sku:"",cat:"Beverage",unit:"Case",case_qty:"24",cost:"",price:"",shelf:"",reorder_point:"5"});logAudit("ADD","Product",`Added ${np.name} SKU:${np.sku}`);}
     setSaving(false);
   };
 
@@ -3212,7 +3503,7 @@ export default function App(){
     const update={name:fields.name,sku:fields.sku,cat:fields.cat,unit:fields.unit,case_qty:parseInt(fields.case_qty)||1,cost:parseFloat(fields.cost)||0,price:parseFloat(fields.price)||0,shelf:parseInt(fields.shelf)||0,reorder_point:parseInt(fields.reorder_point)||5};
     const{error}=await supabase.from("products").update(update).eq("id",id);
     if(error)showToast(error.message,"error");
-    else{setProducts(prev=>prev.map(p=>p.id===id?{...p,...update}:p));showToast("Product updated");setEditingPid(null);}
+    else{setProducts(prev=>prev.map(p=>p.id===id?{...p,...update}:p));showToast("Product updated");setEditingPid(null);logAudit("EDIT","Product",`Edited ${fields.name}`);}
     setSaving(false);
   };
 
@@ -3257,7 +3548,7 @@ export default function App(){
     }
     const{error}=await supabase.from("customers").insert(rec);
     if(error)showToast(error.message,"error");
-    else{setCustomers(prev=>[...prev,rec]);showToast(`${nc.name} account opened`);setModal(null);setNc({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:"",custom_pricing:false,custom_prices:{},credit_limit:""});}
+    else{setCustomers(prev=>[...prev,rec]);showToast(`${nc.name} account opened`);setModal(null);setNc({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:"",custom_pricing:false,custom_prices:{},credit_limit:""});logAudit("ADD","Customer",`Added ${nc.name}`);}
     setSaving(false);
   };
 
@@ -3269,7 +3560,7 @@ export default function App(){
     const update={name:fields.name,address:fields.address||"",phone:fields.phone||"",email:fields.email||"",notes:fields.notes||"",truck_id:fields.truck_id||null,credit_limit:parseFloat(fields.credit_limit)||0};
     const{error}=await supabase.from("customers").update(update).eq("id",id);
     if(error)showToast(error.message,"error");
-    else{setCustomers(prev=>prev.map(c=>c.id===id?{...c,...update}:c));showToast("Customer updated");setEditingCid(null);}
+    else{setCustomers(prev=>prev.map(c=>c.id===id?{...c,...update}:c));showToast("Customer updated");setEditingCid(null);logAudit("EDIT","Customer",`Edited ${fields.name}`);}
     setSaving(false);
   };
 
@@ -3492,8 +3783,9 @@ export default function App(){
     else await supabase.from("payments").insert({sale_id:sid,...payRec});
     setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"paid",method,amount:paidAmt,receipt_url:receiptUrl||""}:p));
     showToast("Payment recorded ✓");
+    logAudit("PAY","Invoice",`Marked ${sid} paid via ${method} — ${fmt(paidAmt)}`);
   };
-  const markUnpaid=async sid=>{await supabase.from("payments").update({status:"unpaid",paid_at:null}).eq("sale_id",sid);setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"unpaid"}:p));showToast("Marked unpaid");};
+  const markUnpaid=async sid=>{await supabase.from("payments").update({status:"unpaid",paid_at:null}).eq("sale_id",sid);setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"unpaid"}:p));showToast("Marked unpaid");logAudit("UNPAY","Invoice",`Marked ${sid} unpaid`);};
 
   const deleteInvoice=async sid=>{
     showConfirm(`Delete invoice ${sid} and all linked payments? This cannot be undone.`,async()=>{
@@ -3508,6 +3800,7 @@ export default function App(){
         setPaymentsLog(prev=>prev.filter(p=>!(p.invoice_ids||[]).includes(sid)));
         setOrders(prev=>prev.filter(o=>o.id!==orderId));
         showToast(`Invoice ${sid} deleted`);
+        logAudit("DELETE","Invoice",`Deleted invoice ${sid}`);
       }catch(e){showToast("Error deleting: "+e.message,"error");}
     });
   };
@@ -3774,6 +4067,7 @@ export default function App(){
     {id:"inventory",label:"Inventory",icon:ic.box},
     ...(isAdmin?[{id:"purchaseorders",label:"Purchase Orders",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🛒</span>}]:[]),
     {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
+    ...(isAdmin?[{id:"recurring",label:"Recurring Orders",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>🔁</span>}]:[]),
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
     ...(isAdmin?[{id:"creditmemos",label:"Credit Memos",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>📝</span>}]:[]),
     {id:"taxinvoices",label:"Tax Invoices",icon:ic.inv},
@@ -3788,6 +4082,7 @@ export default function App(){
     ...(isAdmin?[{id:"irs",label:"IRS Reports",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13,marginRight:0}}>🏛</span>}]:[]),
     {id:"customers",label:"Customers",icon:ic.users},
     ...(isAdmin?[{id:"userapprovals",label:"New Users Approval",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>👥</span>,badge:pendingApprovals}]:[]),
+    ...(isAdmin?[{id:"auditlog",label:"Audit Log",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>🔍</span>}]:[]),
     ...(isAdmin?[{id:"settings",label:"Settings",icon:ic.gear}]:[]),
   ];
 
@@ -4207,6 +4502,19 @@ export default function App(){
               })}
             </div>
           </div>}
+
+          {/* ══ RECURRING ORDERS ══ */}
+          {tab==="recurring"&&isAdmin&&<RecurringOrdersTab
+            recurringOrders={recurringOrders}
+            setRecurringOrders={setRecurringOrders}
+            customers={customers}
+            products={products}
+            trucks={trucks}
+            supabase={supabase}
+            showToast={showToast}
+            showConfirm={showConfirm}
+            fmt={fmt}
+          />}
 
           {/* ══ ORDERS ══ */}
           {tab==="orders"&&<div className="fu">
@@ -5175,6 +5483,7 @@ export default function App(){
             const subTabs=[
               ["overview","📊 Overview"],
               ["drivers","🚚 Drivers"],
+              ["performance","🏆 Performance"],
               ["schedule","📅 Delivery Schedule"],
               ["assign","👤 Assign Customers"],
               ["resets",`🔄 Reset Requests${truckResets.filter(r=>r.status==="pending").length?` (${truckResets.filter(r=>r.status==="pending").length})`:""}` ],
@@ -5343,6 +5652,9 @@ export default function App(){
 
               {/* ── DELIVERY SCHEDULE ── */}
               {tmTab==="schedule"&&<DeliverySchedule trucks={trucks} setTrucks={setTrucks} customers={customers} supabase={supabase} showToast={showToast}/>}
+
+              {/* ── DRIVER PERFORMANCE ── */}
+              {tmTab==="performance"&&<DriverPerformance trucks={trucks} sales={sales} payments={payments} customers={customers} returns={returns} expenses={expenses} loads={loads} fmt={fmt} calcSaleGrandTotal={calcSaleGrandTotal} pmtFor={pmtFor}/>}
 
               {/* ── ASSIGN CUSTOMERS ── */}
               {tmTab==="assign"&&<>
@@ -5768,6 +6080,49 @@ export default function App(){
           })()}</div>}
 
           {/* ══ SETTINGS ══ */}
+          {/* ══ AUDIT LOG ══ */}
+          {tab==="auditlog"&&isAdmin&&<div className="fu">
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,marginBottom:4}}>🔍 Audit Log</div>
+            <div style={{fontSize:12,color:"#9ca3af",marginBottom:16}}>Every significant action taken in the system — who did it, what changed, and when.</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
+              {[{l:"Total Events",v:auditLog.length,c:"#7c3aed"},{l:"Today",v:auditLog.filter(e=>new Date(e.created_at).toDateString()===new Date().toDateString()).length,c:"#0ea5e9"},{l:"This Week",v:auditLog.filter(e=>{const d=new Date(e.created_at);const w=new Date();w.setDate(w.getDate()-7);return d>=w;}).length,c:"#059669"},{l:"Users Active",v:[...new Set(auditLog.map(e=>e.user_email))].length,c:"#f59e0b"}].map(k=>(
+                <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>
+              ))}
+            </div>
+            {auditLog.length===0
+              ?<div className="card" style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+                  <div style={{fontSize:32,marginBottom:8}}>🔍</div>
+                  <div style={{fontWeight:600}}>No audit events yet</div>
+                  <div style={{fontSize:12,marginTop:4}}>Events are recorded automatically as you use the system</div>
+                </div>
+              :<div className="card" style={{overflow:"hidden"}}>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                      {["Time","User","Action","Entity","Detail"].map(h=>(
+                        <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {auditLog.map((e,i)=>{
+                        const actionColor={ADD:"#059669",EDIT:"#7c3aed",DELETE:"#dc2626",PAY:"#0ea5e9",UNPAY:"#f59e0b"}[e.action]||"#6b7280";
+                        return(
+                          <tr key={e.id||i} style={{borderBottom:"1px solid #f3f4f6",background:i%2===0?"#fff":"#fafafa"}}>
+                            <td style={{padding:"8px 13px",fontSize:11,color:"#6b7280",whiteSpace:"nowrap"}}>{new Date(e.created_at).toLocaleString()}</td>
+                            <td style={{padding:"8px 13px",fontSize:11,fontWeight:600,color:"#0a1628"}}>{e.user_email}</td>
+                            <td style={{padding:"8px 13px"}}><span style={{background:`${actionColor}18`,color:actionColor,padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:700}}>{e.action}</span></td>
+                            <td style={{padding:"8px 13px",fontSize:11,color:"#6b7280"}}>{e.entity}</td>
+                            <td style={{padding:"8px 13px",fontSize:11,color:"#6b7280",maxWidth:300,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.detail}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            }
+          </div>}
+
           {tab==="settings"&&isAdmin&&<div className="fu">
             <div style={{maxWidth:540}}>
               <div className="card" style={{padding:22,marginBottom:14}}>
