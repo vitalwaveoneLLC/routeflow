@@ -874,6 +874,427 @@ const EXPENSE_CATS=[
   {k:"other",e:"📋",l:"Other",line:"Line 22"},
 ];
 
+// -- PURCHASE ORDERS & SUPPLIER MANAGEMENT ------------------------------------
+function PurchaseOrders({products,setProducts,supabase,showToast,showConfirm}){
+  const uid3=()=>Math.random().toString(36).slice(2,8).toUpperCase();
+  const fmt3=n=>`$${Number(n||0).toFixed(2)}`;
+
+  // State
+  const[suppliers,setSuppliers]=useState([]);
+  const[pos,setPos]=useState([]);
+  const[subTab,setSubTab]=useState("pos"); // "pos" | "suppliers"
+  const[loading,setLoading]=useState(true);
+
+  // Supplier form
+  const[supForm,setSupForm]=useState({name:"",contact:"",phone:"",email:"",address:"",payment_terms:"Net 30",notes:""});
+  const[savingSup,setSavingSup]=useState(false);
+  const[editSupId,setEditSupId]=useState(null);
+
+  // PO form
+  const[poForm,setPoForm]=useState({supplier_id:"",expected_date:"",notes:"",items:[]});
+  const[showPoForm,setShowPoForm]=useState(false);
+  const[savingPo,setSavingPo]=useState(false);
+  const[viewPo,setViewPo]=useState(null);
+  const[receivingPo,setReceivingPo]=useState(null);
+  const[receivedQtys,setReceivedQtys]=useState({});
+
+  // Load data
+  useEffect(()=>{
+    const load=async()=>{
+      setLoading(true);
+      try{
+        const[supR,poR]=await Promise.all([
+          supabase.from("suppliers").select("*").order("name"),
+          supabase.from("purchase_orders").select("*").order("created_at",{ascending:false}),
+        ]);
+        if(supR.data)setSuppliers(supR.data);
+        if(poR.data)setPos(poR.data);
+      }catch(e){showToast("Could not load PO data — tables may need setup","error");}
+      setLoading(false);
+    };
+    load();
+  },[]);
+
+  // Supplier CRUD
+  const saveSup=async()=>{
+    if(!supForm.name.trim())return showToast("Supplier name required","error");
+    setSavingSup(true);
+    try{
+      if(editSupId){
+        const{error}=await supabase.from("suppliers").update(supForm).eq("id",editSupId);
+        if(error)throw error;
+        setSuppliers(prev=>prev.map(s=>s.id===editSupId?{...s,...supForm}:s));
+        showToast("Supplier updated");setEditSupId(null);
+      }else{
+        const rec={id:"SUP-"+uid3(),...supForm,created_at:new Date().toISOString()};
+        const{error}=await supabase.from("suppliers").insert(rec);
+        if(error)throw error;
+        setSuppliers(prev=>[rec,...prev]);
+        showToast("✅ Supplier added");
+      }
+      setSupForm({name:"",contact:"",phone:"",email:"",address:"",payment_terms:"Net 30",notes:""});
+    }catch(e){showToast(e.message,"error");}
+    setSavingSup(false);
+  };
+
+  const deleteSup=async(id,name)=>{
+    showConfirm(`Delete supplier "${name}"?`,async()=>{
+      await supabase.from("suppliers").delete().eq("id",id);
+      setSuppliers(prev=>prev.filter(s=>s.id!==id));
+      showToast("Supplier deleted");
+    });
+  };
+
+  // PO item management
+  const addPoItem=()=>{
+    if(!products.length)return;
+    setPoForm(f=>({...f,items:[...f.items,{pid:products[0].id,qty:"",unit_cost:""}]}));
+  };
+  const updatePoItem=(idx,field,val)=>setPoForm(f=>({...f,items:f.items.map((it,i)=>i===idx?{...it,[field]:val}:it)}));
+  const removePoItem=idx=>setPoForm(f=>({...f,items:f.items.filter((_,i)=>i!==idx)}));
+
+  const poTotal=poForm.items.reduce((a,it)=>a+(parseFloat(it.qty)||0)*(parseFloat(it.unit_cost)||0),0);
+
+  // Save PO
+  const savePo=async()=>{
+    if(!poForm.supplier_id)return showToast("Select a supplier","error");
+    const items=poForm.items.filter(it=>it.pid&&parseInt(it.qty)>0&&parseFloat(it.unit_cost)>0);
+    if(!items.length)return showToast("Add at least one item with qty and cost","error");
+    setSavingPo(true);
+    try{
+      const sup=suppliers.find(s=>s.id===poForm.supplier_id);
+      const rec={
+        id:"PO-"+uid3(),
+        supplier_id:poForm.supplier_id,
+        supplier_name:sup?.name||"",
+        status:"draft",
+        items:items.map(it=>({pid:it.pid,qty:parseInt(it.qty),unit_cost:parseFloat(it.unit_cost),received_qty:0})),
+        total:items.reduce((a,it)=>a+(parseInt(it.qty))*(parseFloat(it.unit_cost)),0),
+        expected_date:poForm.expected_date||null,
+        notes:poForm.notes||"",
+        created_at:new Date().toISOString(),
+      };
+      const{error}=await supabase.from("purchase_orders").insert(rec);
+      if(error)throw error;
+      setPos(prev=>[rec,...prev]);
+      setPoForm({supplier_id:"",expected_date:"",notes:"",items:[]});
+      setShowPoForm(false);
+      showToast("✅ Purchase order created");
+    }catch(e){showToast(e.message,"error");}
+    setSavingPo(false);
+  };
+
+  // Approve PO
+  const approvePo=async(po)=>{
+    const{error}=await supabase.from("purchase_orders").update({status:"ordered"}).eq("id",po.id);
+    if(error)return showToast(error.message,"error");
+    setPos(prev=>prev.map(p=>p.id===po.id?{...p,status:"ordered"}:p));
+    showToast("PO approved & sent to supplier");
+  };
+
+  // Receive PO — adds stock to shelf and updates product cost
+  const receiveAll=async(po)=>{
+    const updates=po.items.map(it=>({...it,received_qty:parseInt(receivedQtys[it.pid]||it.qty)}));
+    const allReceived=updates.every(it=>it.received_qty>=it.qty);
+    try{
+      // Update shelf stock for each item
+      for(const it of updates){
+        if(it.received_qty>0){
+          const prod=products.find(p=>p.id===it.pid);
+          if(prod){
+            const newShelf=prod.shelf+it.received_qty;
+            await supabase.from("products").update({shelf:newShelf,cost:it.unit_cost}).eq("id",it.pid);
+            setProducts(prev=>prev.map(p=>p.id===it.pid?{...p,shelf:newShelf,cost:it.unit_cost}:p));
+          }
+        }
+      }
+      const newStatus=allReceived?"received":"partial";
+      await supabase.from("purchase_orders").update({status:newStatus,items:updates,received_at:new Date().toISOString()}).eq("id",po.id);
+      setPos(prev=>prev.map(p=>p.id===po.id?{...p,status:newStatus,items:updates}:p));
+      setReceivingPo(null);setReceivedQtys({});
+      showToast(allReceived?"✅ PO fully received — stock updated":"⚠️ Partial receipt recorded");
+    }catch(e){showToast(e.message,"error");}
+  };
+
+  const deletePo=async(id)=>{
+    showConfirm("Delete this purchase order?",async()=>{
+      await supabase.from("purchase_orders").delete().eq("id",id);
+      setPos(prev=>prev.filter(p=>p.id!==id));
+      showToast("PO deleted");
+    });
+  };
+
+  const statusBadge=(s)=>({
+    draft:<span className="bdg bgr">DRAFT</span>,
+    ordered:<span className="bdg ba2">ORDERED</span>,
+    partial:<span className="bdg" style={{background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa"}}>PARTIAL</span>,
+    received:<span className="bdg bg2">RECEIVED</span>,
+    cancelled:<span className="bdg br2">CANCELLED</span>,
+  }[s]||<span className="bdg bgr">{s}</span>);
+
+  const totalPending=pos.filter(p=>["draft","ordered"].includes(p.status)).reduce((a,p)=>a+parseFloat(p.total||0),0);
+  const totalReceived=pos.filter(p=>p.status==="received").reduce((a,p)=>a+parseFloat(p.total||0),0);
+
+  if(loading)return<div style={{padding:60,textAlign:"center",color:"#9ca3af"}}>Loading…</div>;
+
+  return(
+    <div className="fu">
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#212121"}}>🛒 Purchase Orders</div>
+          <div style={{fontSize:12,color:"#9ca3af"}}>Supplier management, POs, and receiving — tracks all inbound inventory</div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          {[["pos","📋 Purchase Orders"],["suppliers","🏭 Suppliers"]].map(([k,l])=>(
+            <button key={k} onClick={()=>setSubTab(k)}
+              style={{padding:"8px 16px",borderRadius:20,border:`1.5px solid ${subTab===k?"#0a1628":"#e5e7eb"}`,background:subTab===k?"#0a1628":"#fff",color:subTab===k?"#fff":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:20}}>
+        {[
+          {l:"Total POs",v:pos.length,c:"#7c3aed"},
+          {l:"Pending Value",v:fmt3(totalPending),c:"#f59e0b"},
+          {l:"Received Value",v:fmt3(totalReceived),c:"#059669"},
+          {l:"Suppliers",v:suppliers.length,c:"#0ea5e9"},
+        ].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
+      </div>
+
+      {/* ── PURCHASE ORDERS ── */}
+      {subTab==="pos"&&<>
+        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
+          <button className="btn ba" onClick={()=>{setShowPoForm(true);setPoForm({supplier_id:suppliers[0]?.id||"",expected_date:"",notes:"",items:[{pid:products[0]?.id||"",qty:"",unit_cost:""}]});}}>
+            + New Purchase Order
+          </button>
+        </div>
+
+        {/* New PO form */}
+        {showPoForm&&(
+          <div className="card" style={{padding:22,marginBottom:20,borderTop:"3px solid #7c3aed"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,marginBottom:14}}>📋 New Purchase Order</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:14}}>
+              <div>
+                <label>Supplier *</label>
+                <select value={poForm.supplier_id} onChange={e=>setPoForm(f=>({...f,supplier_id:e.target.value}))}>
+                  <option value="">— Select Supplier —</option>
+                  {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                {!suppliers.length&&<div style={{fontSize:10,color:"#dc2626",marginTop:4}}>⚠️ Add suppliers first</div>}
+              </div>
+              <div><label>Expected Delivery Date</label><input type="date" value={poForm.expected_date} onChange={e=>setPoForm(f=>({...f,expected_date:e.target.value}))}/></div>
+              <div><label>Notes / Reference #</label><input placeholder="e.g. Ref #12345" value={poForm.notes} onChange={e=>setPoForm(f=>({...f,notes:e.target.value}))}/></div>
+            </div>
+
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#6b7280",marginBottom:8}}>ORDER ITEMS</div>
+            {poForm.items.map((it,idx)=>{
+              const prod=products.find(p=>p.id===it.pid);
+              return(
+                <div key={idx} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr auto",gap:8,marginBottom:8,alignItems:"end"}}>
+                  <div>
+                    {idx===0&&<label>Product</label>}
+                    <select value={it.pid} onChange={e=>updatePoItem(idx,"pid",e.target.value)}>
+                      {products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    {idx===0&&<label>Qty *</label>}
+                    <input type="number" min="1" placeholder="0" value={it.qty} onChange={e=>updatePoItem(idx,"qty",e.target.value)}/>
+                  </div>
+                  <div>
+                    {idx===0&&<label>Unit Cost ($) *</label>}
+                    <input type="number" min="0" step="0.01" placeholder={prod?.cost?.toFixed(2)||"0.00"} value={it.unit_cost} onChange={e=>updatePoItem(idx,"unit_cost",e.target.value)}/>
+                  </div>
+                  <div>
+                    {idx===0&&<label>Line Total</label>}
+                    <div style={{padding:"8px 12px",background:"#f9fafb",borderRadius:7,fontWeight:700,color:"#059669",fontSize:13}}>{fmt3((parseFloat(it.qty)||0)*(parseFloat(it.unit_cost)||0))}</div>
+                  </div>
+                  <button onClick={()=>removePoItem(idx)} style={{padding:"8px 10px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,color:"#dc2626",cursor:"pointer",fontWeight:700,marginTop:idx===0?16:0}}>✕</button>
+                </div>
+              );
+            })}
+            <div style={{display:"flex",gap:8,alignItems:"center",marginTop:10}}>
+              <button className="btn bb" onClick={addPoItem}>+ Add Item</button>
+              <div style={{marginLeft:"auto",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,color:"#7c3aed"}}>
+                PO TOTAL: {fmt3(poTotal)}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16,borderTop:"1px solid #e5e7eb",paddingTop:14}}>
+              <button className="btn bgh" onClick={()=>setShowPoForm(false)}>Cancel</button>
+              <button className="btn ba" onClick={savePo} disabled={savingPo}>{savingPo?"Saving…":"💾 Save Draft"}</button>
+            </div>
+          </div>
+        )}
+
+        {/* PO List */}
+        {pos.length===0
+          ?<div className="card" style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+              <div style={{fontSize:36,marginBottom:8}}>📋</div>
+              <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>No purchase orders yet</div>
+              <div style={{fontSize:12}}>Create your first PO to start tracking supplier orders</div>
+            </div>
+          :<div className="card" style={{overflow:"hidden"}}>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                  {["PO #","Date","Supplier","Items","Total","Expected","Status","Actions"].map(h=>(
+                    <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {pos.map(po=>(
+                    <tr key={po.id} style={{borderBottom:"1px solid #f3f4f6"}}>
+                      <td><span style={{fontWeight:700,color:"#7c3aed",fontSize:12}}>{po.id}</span></td>
+                      <td style={{fontSize:11,color:"#6b7280"}}>{new Date(po.created_at).toLocaleDateString()}</td>
+                      <td style={{fontWeight:600,fontSize:12}}>{po.supplier_name||"—"}</td>
+                      <td style={{fontSize:11,color:"#6b7280"}}>{(po.items||[]).length} item{(po.items||[]).length!==1?"s":""}</td>
+                      <td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#7c3aed"}}>{fmt3(po.total)}</td>
+                      <td style={{fontSize:11,color:"#6b7280"}}>{po.expected_date||"—"}</td>
+                      <td>{statusBadge(po.status)}</td>
+                      <td>
+                        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                          <button onClick={()=>setViewPo(po)} style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#7c3aed",cursor:"pointer",fontWeight:700}}>View</button>
+                          {po.status==="draft"&&<button onClick={()=>approvePo(po)} style={{background:"#ecfdf5",border:"1px solid #a7f3d0",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700}}>✓ Approve</button>}
+                          {["ordered","partial"].includes(po.status)&&<button onClick={()=>{setReceivingPo(po);const init={};(po.items||[]).forEach(it=>{init[it.pid]=it.qty-( it.received_qty||0);});setReceivedQtys(init);}} style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#92400e",cursor:"pointer",fontWeight:700}}>📦 Receive</button>}
+                          {po.status==="draft"&&<button onClick={()=>deletePo(po.id)} style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#dc2626",cursor:"pointer",fontWeight:700}}>🗑</button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        }
+
+        {/* View PO modal */}
+        {viewPo&&(
+          <div style={{position:"fixed",inset:0,background:"#00000060",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{background:"#fff",borderRadius:16,padding:24,maxWidth:680,width:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 8px 40px #00000030"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20}}>{viewPo.id}</div>
+                  <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{viewPo.supplier_name} · {new Date(viewPo.created_at).toLocaleDateString()}</div>
+                </div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  {statusBadge(viewPo.status)}
+                  <button onClick={()=>setViewPo(null)} style={{background:"#f3f4f6",border:"none",borderRadius:7,padding:"6px 12px",cursor:"pointer",fontWeight:700}}>✕</button>
+                </div>
+              </div>
+              <table style={{width:"100%",borderCollapse:"collapse",marginBottom:16}}>
+                <thead><tr style={{background:"#f9fafb"}}><th style={{padding:"8px 12px",textAlign:"left",fontSize:11}}>Product</th><th style={{padding:"8px 12px",textAlign:"left",fontSize:11}}>Ordered</th><th style={{padding:"8px 12px",textAlign:"left",fontSize:11}}>Received</th><th style={{padding:"8px 12px",textAlign:"left",fontSize:11}}>Unit Cost</th><th style={{padding:"8px 12px",textAlign:"left",fontSize:11}}>Line Total</th></tr></thead>
+                <tbody>{(viewPo.items||[]).map((it,i)=>{const prod=products.find(p=>p.id===it.pid);return(
+                  <tr key={i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                    <td style={{padding:"10px 12px",fontWeight:600}}>{prod?.name||it.pid}</td>
+                    <td style={{padding:"10px 12px"}}>{it.qty}</td>
+                    <td style={{padding:"10px 12px",color:it.received_qty>=it.qty?"#059669":"#f59e0b",fontWeight:700}}>{it.received_qty||0}</td>
+                    <td style={{padding:"10px 12px"}}>{fmt3(it.unit_cost)}</td>
+                    <td style={{padding:"10px 12px",fontWeight:700,color:"#7c3aed"}}>{fmt3(it.qty*it.unit_cost)}</td>
+                  </tr>
+                );})}
+                <tr style={{background:"#f9fafb",borderTop:"2px solid #e5e7eb"}}>
+                  <td colSpan={4} style={{padding:"10px 12px",fontWeight:800}}>TOTAL</td>
+                  <td style={{padding:"10px 12px"}}><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:18,color:"#7c3aed"}}>{fmt3(viewPo.total)}</span></td>
+                </tr></tbody>
+              </table>
+              {viewPo.notes&&<div style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#6b7280",marginBottom:12}}>📝 {viewPo.notes}</div>}
+              {viewPo.expected_date&&<div style={{fontSize:12,color:"#6b7280"}}>Expected: {viewPo.expected_date}</div>}
+            </div>
+          </div>
+        )}
+
+        {/* Receive PO modal */}
+        {receivingPo&&(
+          <div style={{position:"fixed",inset:0,background:"#00000060",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{background:"#fff",borderRadius:16,padding:24,maxWidth:600,width:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 8px 40px #00000030"}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:18,marginBottom:4}}>📦 Receive Inventory — {receivingPo.id}</div>
+              <div style={{fontSize:12,color:"#6b7280",marginBottom:16}}>Enter actual quantities received. Stock will be added to warehouse shelf.</div>
+              {(receivingPo.items||[]).map((it,i)=>{const prod=products.find(p=>p.id===it.pid);const remaining=it.qty-(it.received_qty||0);return(
+                <div key={i} style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:12,alignItems:"center",marginBottom:10,padding:"10px 14px",background:"#f9fafb",borderRadius:8}}>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:13}}>{prod?.name||it.pid}</div>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>Ordered: {it.qty} · Previously received: {it.received_qty||0} · Remaining: {remaining}</div>
+                  </div>
+                  <div style={{fontSize:11,color:"#6b7280"}}>Receive:</div>
+                  <input type="number" min="0" max={remaining} value={receivedQtys[it.pid]||""} onChange={e=>setReceivedQtys(prev=>({...prev,[it.pid]:e.target.value}))}
+                    style={{width:80,textAlign:"center",border:"1.5px solid #ddd6fe",borderRadius:7,padding:"7px",fontSize:14,fontWeight:700}}/>
+                </div>
+              );})}
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16,borderTop:"1px solid #e5e7eb",paddingTop:14}}>
+                <button className="btn bgh" onClick={()=>{setReceivingPo(null);setReceivedQtys({});}}>Cancel</button>
+                <button className="btn ba" onClick={()=>receiveAll(receivingPo)}>✅ Confirm Receipt</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>}
+
+      {/* ── SUPPLIERS ── */}
+      {subTab==="suppliers"&&<>
+        <div style={{display:"grid",gridTemplateColumns:"360px 1fr",gap:18,alignItems:"start"}}>
+          {/* Add/Edit form */}
+          <div className="card" style={{padding:20,borderTop:"3px solid #0a1628"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:14}}>{editSupId?"✏️ Edit Supplier":"➕ Add Supplier"}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div><label>Supplier Name *</label><input placeholder="e.g. McLane Company" value={supForm.name} onChange={e=>setSupForm(f=>({...f,name:e.target.value}))}/></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><label>Contact Name</label><input placeholder="e.g. John Smith" value={supForm.contact} onChange={e=>setSupForm(f=>({...f,contact:e.target.value}))}/></div>
+                <div><label>Phone</label><input placeholder="e.g. 555-0100" value={supForm.phone} onChange={e=>setSupForm(f=>({...f,phone:e.target.value}))}/></div>
+              </div>
+              <div><label>Email</label><input type="email" placeholder="supplier@email.com" value={supForm.email} onChange={e=>setSupForm(f=>({...f,email:e.target.value}))}/></div>
+              <div><label>Address</label><input placeholder="e.g. 123 Supply Ave, Dallas TX" value={supForm.address} onChange={e=>setSupForm(f=>({...f,address:e.target.value}))}/></div>
+              <div><label>Payment Terms</label>
+                <select value={supForm.payment_terms} onChange={e=>setSupForm(f=>({...f,payment_terms:e.target.value}))}>
+                  {["Net 7","Net 15","Net 30","Net 60","COD","Prepaid"].map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div><label>Notes</label><input placeholder="e.g. Primary tobacco supplier" value={supForm.notes} onChange={e=>setSupForm(f=>({...f,notes:e.target.value}))}/></div>
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+              {editSupId&&<button className="btn bgh" onClick={()=>{setEditSupId(null);setSupForm({name:"",contact:"",phone:"",email:"",address:"",payment_terms:"Net 30",notes:""});}}>Cancel</button>}
+              <button className="btn ba" onClick={saveSup} disabled={savingSup}>{savingSup?"Saving…":editSupId?"💾 Update":"➕ Add Supplier"}</button>
+            </div>
+          </div>
+
+          {/* Supplier list */}
+          <div>
+            {suppliers.length===0
+              ?<div className="card" style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+                  <div style={{fontSize:36,marginBottom:8}}>🏭</div>
+                  <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>No suppliers yet</div>
+                  <div style={{fontSize:12}}>Add your first supplier to start creating purchase orders</div>
+                </div>
+              :suppliers.map(s=>(
+                <div key={s.id} className="card" style={{padding:"14px 18px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#0a1628",marginBottom:3}}>{s.name}</div>
+                    {s.contact&&<div style={{fontSize:11,color:"#6b7280"}}>👤 {s.contact}</div>}
+                    {s.phone&&<div style={{fontSize:11,color:"#6b7280"}}>📞 {s.phone}</div>}
+                    {s.email&&<div style={{fontSize:11,color:"#6b7280"}}>✉️ {s.email}</div>}
+                    {s.address&&<div style={{fontSize:11,color:"#6b7280"}}>📍 {s.address}</div>}
+                    <div style={{marginTop:6,display:"flex",gap:6,flexWrap:"wrap"}}>
+                      <span className="bdg bb2">{s.payment_terms}</span>
+                      <span style={{fontSize:11,color:"#9ca3af"}}>{pos.filter(p=>p.supplier_id===s.id).length} PO{pos.filter(p=>p.supplier_id===s.id).length!==1?"s":""}</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                    <button onClick={()=>{setEditSupId(s.id);setSupForm({name:s.name,contact:s.contact||"",phone:s.phone||"",email:s.email||"",address:s.address||"",payment_terms:s.payment_terms||"Net 30",notes:s.notes||""});}} style={{background:"#ede9fe",border:"1px solid #ddd6fe",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#5b21b6",cursor:"pointer",fontWeight:700}}>✏️ Edit</button>
+                    <button onClick={()=>deleteSup(s.id,s.name)} style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#dc2626",cursor:"pointer",fontWeight:700}}>🗑</button>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </>}
+    </div>
+  );
+}
+
 function ExpensesManager({expenses,setExpenses,trucks,supabase,showToast,showConfirm}){
   const [expForm,setExpForm]=useState({category:"gas",amount:"",description:"",truck_id:"",date:new Date().toLocaleDateString(),receipt_url:""});
   const [saving,setSaving]=useState(false);
@@ -1932,9 +2353,9 @@ export default function App(){
   const[selCust,setSelCust]=useState("");
   const[selLoad,setSelLoad]=useState(null);
   const[formItems,setFormItems]=useState([]);
-  const[np,setNp]=useState({name:"",sku:"",cat:"Beverage",unit:"Case/24",cost:"",price:"",shelf:""});
+  const[np,setNp]=useState({name:"",sku:"",cat:"Beverage",unit:"Case/24",cost:"",price:"",shelf:"",reorder_point:"5"});
   const[nt,setNt]=useState({driver:"",plate:"",route:""});
-  const[nc,setNc]=useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:"",custom_pricing:false,custom_prices:{}});
+  const[nc,setNc]=useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:"",custom_pricing:false,custom_prices:{},credit_limit:""});
   const[rsPid,setRsPid]=useState("");
   const[rsQty,setRsQty]=useState("");
   const[coEdit,setCoEdit]=useState(null);
@@ -2539,10 +2960,10 @@ export default function App(){
   const addProduct=async()=>{
     if(!np.name||!np.sku||!np.cost||!np.price)return showToast("Name, SKU, cost & price required","error");
     setSaving(true);
-    const rec={id:"P"+uid(),name:np.name,sku:np.sku,cat:np.cat,unit:np.unit,cost:parseFloat(np.cost),price:parseFloat(np.price),shelf:parseInt(np.shelf)||0};
+    const rec={id:"P"+uid(),name:np.name,sku:np.sku,cat:np.cat,unit:np.unit,cost:parseFloat(np.cost),price:parseFloat(np.price),shelf:parseInt(np.shelf)||0,reorder_point:parseInt(np.reorder_point)||5};
     const{error}=await supabase.from("products").insert(rec);
     if(error)showToast(error.message,"error");
-    else{setProducts(prev=>[...prev,rec]);showToast(`${np.name} added`);setModal(null);setNp({name:"",sku:"",cat:"Beverage",unit:"Case/24",cost:"",price:"",shelf:""});}
+    else{setProducts(prev=>[...prev,rec]);showToast(`${np.name} added`);setModal(null);setNp({name:"",sku:"",cat:"Beverage",unit:"Case/24",cost:"",price:"",shelf:"",reorder_point:"5"});}
     setSaving(false);
   };
 
@@ -2551,7 +2972,7 @@ export default function App(){
   const saveEditProduct=async()=>{
     setSaving(true);
     const{id,...fields}=editProd;
-    const update={name:fields.name,sku:fields.sku,cat:fields.cat,unit:fields.unit,cost:parseFloat(fields.cost)||0,price:parseFloat(fields.price)||0,shelf:parseInt(fields.shelf)||0};
+    const update={name:fields.name,sku:fields.sku,cat:fields.cat,unit:fields.unit,cost:parseFloat(fields.cost)||0,price:parseFloat(fields.price)||0,shelf:parseInt(fields.shelf)||0,reorder_point:parseInt(fields.reorder_point)||5};
     const{error}=await supabase.from("products").update(update).eq("id",id);
     if(error)showToast(error.message,"error");
     else{setProducts(prev=>prev.map(p=>p.id===id?{...p,...update}:p));showToast("Product updated");setEditingPid(null);}
@@ -2593,13 +3014,13 @@ export default function App(){
   const addCustomer=async()=>{
     if(!nc.name)return showToast("Business name required","error");
     setSaving(true);
-    const rec={id:"C"+uid(),name:nc.name,address:nc.address||"",phone:nc.phone||"",email:nc.email||"",notes:nc.notes||"",truck_id:nc.truck_id||trucks[0]?.id||null};
+    const rec={id:"C"+uid(),name:nc.name,address:nc.address||"",phone:nc.phone||"",email:nc.email||"",notes:nc.notes||"",truck_id:nc.truck_id||trucks[0]?.id||null,credit_limit:parseFloat(nc.credit_limit)||0,state:nc.state||""};
     if(nc.custom_pricing&&nc.custom_prices&&Object.keys(nc.custom_prices).length>0){
       rec.notes=(rec.notes?rec.notes+"\n":"")+"CUSTOM_PRICES:"+JSON.stringify(nc.custom_prices);
     }
     const{error}=await supabase.from("customers").insert(rec);
     if(error)showToast(error.message,"error");
-    else{setCustomers(prev=>[...prev,rec]);showToast(`${nc.name} account opened`);setModal(null);setNc({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:"",custom_pricing:false,custom_prices:{}});}
+    else{setCustomers(prev=>[...prev,rec]);showToast(`${nc.name} account opened`);setModal(null);setNc({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:"",custom_pricing:false,custom_prices:{},credit_limit:""});}
     setSaving(false);
   };
 
@@ -2608,7 +3029,7 @@ export default function App(){
   const saveEditCustomer=async()=>{
     setSaving(true);
     const{id,...fields}=editCust;
-    const update={name:fields.name,address:fields.address||"",phone:fields.phone||"",email:fields.email||"",notes:fields.notes||"",truck_id:fields.truck_id||null};
+    const update={name:fields.name,address:fields.address||"",phone:fields.phone||"",email:fields.email||"",notes:fields.notes||"",truck_id:fields.truck_id||null,credit_limit:parseFloat(fields.credit_limit)||0};
     const{error}=await supabase.from("customers").update(update).eq("id",id);
     if(error)showToast(error.message,"error");
     else{setCustomers(prev=>prev.map(c=>c.id===id?{...c,...update}:c));showToast("Customer updated");setEditingCid(null);}
@@ -3114,6 +3535,7 @@ export default function App(){
   const navItems=[
     {id:"dashboard",label:"Dashboard",icon:ic.dash},
     {id:"inventory",label:"Inventory",icon:ic.box},
+    ...(isAdmin?[{id:"purchaseorders",label:"Purchase Orders",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🛒</span>}]:[]),
     {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
     {id:"taxinvoices",label:"Tax Invoices",icon:ic.inv},
@@ -3274,6 +3696,23 @@ export default function App(){
                 <button className="btn ba" onClick={()=>setTab("orders")}>{ic.orders} Review Orders</button>
               </div>
             )}
+            {(()=>{const lowProds=products.filter(p=>p.shelf<=(p.reorder_point||5));if(!lowProds.length)return null;const outProds=lowProds.filter(p=>p.shelf===0);const warnProds=lowProds.filter(p=>p.shelf>0);return(
+              <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:"12px 18px",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:22}}>⚠️</span>
+                  <div>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#c2410c"}}>
+                      REORDER ALERT — {lowProds.length} PRODUCT{lowProds.length!==1?"S":""} NEED ATTENTION
+                    </div>
+                    <div style={{fontSize:11,color:"#9a3412",marginTop:2}}>
+                      {outProds.length>0&&<span style={{marginRight:10}}>🔴 Out of stock: {outProds.map(p=>p.name).join(", ")}</span>}
+                      {warnProds.length>0&&<span>🟡 Low stock: {warnProds.map(p=>`${p.name} (${p.shelf} left)`).join(", ")}</span>}
+                    </div>
+                  </div>
+                </div>
+                <button className="btn" style={{background:"#c2410c",color:"#fff",padding:"8px 16px",borderRadius:6}} onClick={()=>setTab("purchaseorders")}>🛒 Create Purchase Order</button>
+              </div>
+            );})()}
             <div className="card" style={{padding:18,marginBottom:16}}>
               <div className="sh">📦 Inventory Flow</div>
               <div style={{display:"flex",alignItems:"stretch"}}>
@@ -3364,12 +3803,13 @@ export default function App(){
             </div>
 
             {/* KPI Summary */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:16}}>
               {[
                 {l:"Total Products",v:products.length,c:"#7c3aed"},
                 {l:"Total Shelf Units",v:products.reduce((a,p)=>a+p.shelf,0),c:"#059669"},
                 {l:"Total On Trucks",v:trucks.reduce((a,t)=>a+truckInv(t.id).reduce((b,i)=>b+i.remaining,0),0),c:"#0ea5e9"},
-                {l:"Low Stock",v:products.filter(p=>p.shelf<5).length,c:"#dc2626"},
+                {l:"Low Stock",v:products.filter(p=>p.shelf<=(p.reorder_point||5)&&p.shelf>0).length,c:"#f59e0b"},
+                {l:"Out of Stock",v:products.filter(p=>p.shelf===0).length,c:"#dc2626"},
               ].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
             </div>
 
@@ -3382,15 +3822,15 @@ export default function App(){
               <div className="tw"><table>
                 <thead><tr>
                   <th>Product</th><th>SKU</th><th>Category</th><th>Unit</th>
-                  <th>Cost</th><th>Price</th><th>Margin</th><th>Shelf</th><th>Status</th>
+                  <th>Cost</th><th>Price</th><th>Margin</th><th>Shelf</th><th>Reorder At</th><th>Status</th>
                   {isAdmin&&<th>Actions</th>}
                 </tr></thead>
                 <tbody>{products.map(p=>{
                   const isE=editingPid===p.id;
                   const margin=p.price>0?((p.price-p.cost)/p.price*100).toFixed(0):0;
-                  const low=p.shelf<5;
+                  const low=p.shelf<=(p.reorder_point||5)&&p.shelf>0;
                   return(
-                    <tr key={p.id} style={{background:isE?"#f5f3ff":low&&p.shelf>0?"#fff7ed":p.shelf===0?"#fef2f2":"#fff"}}>
+                    <tr key={p.id} style={{background:isE?"#f5f3ff":p.shelf===0?"#fef2f2":low?"#fff7ed":"#fff"}}>
                       {isE?(
                         <>
                           <td><input className="ei" value={editProd.name} onChange={e=>setEditProd(x=>({...x,name:e.target.value}))}/></td>
@@ -3401,6 +3841,7 @@ export default function App(){
                           <td><input className="ei" type="number" value={editProd.price} onChange={e=>setEditProd(x=>({...x,price:e.target.value}))}/></td>
                           <td>—</td>
                           <td><input className="ei" type="number" value={editProd.shelf} onChange={e=>setEditProd(x=>({...x,shelf:e.target.value}))}/></td>
+                          <td><input className="ei" type="number" value={editProd.reorder_point||5} onChange={e=>setEditProd(x=>({...x,reorder_point:e.target.value}))}/></td>
                           <td>—</td>
                           <td><div style={{display:"flex",gap:4}}><button className="btn bg" onClick={saveEditProduct} disabled={saving}>{ic.save}</button><button className="btn bgh" onClick={()=>setEditingPid(null)}>{ic.X}</button></div></td>
                         </>
@@ -3416,8 +3857,9 @@ export default function App(){
                           <td>
                             <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:p.shelf===0?"#dc2626":low?"#f59e0b":"#059669"}}>{p.shelf}</span>
                           </td>
+                          <td style={{fontSize:11,color:"#6b7280"}}>{p.reorder_point||5}</td>
                           <td>
-                            {p.shelf===0?<span className="bdg br2">OUT</span>:low?<span className="bdg ba2">LOW</span>:<span className="bdg bg2">OK</span>}
+                            {p.shelf===0?<span className="bdg br2">OUT</span>:low?<span className="bdg ba2">⚠️ LOW</span>:<span className="bdg bg2">OK</span>}
                           </td>
                           {isAdmin&&<td><div style={{display:"flex",gap:4}}>
                             <button className="btn bgh" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>startEditProduct(p)}>{ic.edit}</button>
@@ -3834,6 +4276,41 @@ export default function App(){
 
           {/* ══ AR ══ */}
           {tab==="ar"&&<div className="fu">
+            {/* Aging buckets */}
+            {(()=>{
+              const now=new Date();
+              const unpaidSales=visSales.filter(s=>pmtFor(s.id)?.status!=="paid");
+              const ageDays=s=>{const d=new Date(s.created_at||s.date);return isNaN(d)?0:Math.floor((now-d)/(1000*60*60*24));};
+              const buckets=[
+                {label:"Current (0–30d)",min:0,max:30,color:"#059669",bg:"#f0fdf4",border:"#a7f3d0"},
+                {label:"31–60 Days",min:31,max:60,color:"#f59e0b",bg:"#fffbeb",border:"#fde68a"},
+                {label:"61–90 Days",min:61,max:90,color:"#f97316",bg:"#fff7ed",border:"#fed7aa"},
+                {label:"90+ Days",min:91,max:9999,color:"#dc2626",bg:"#fef2f2",border:"#fecaca"},
+              ];
+              const bucketed=buckets.map(b=>({
+                ...b,
+                sales:unpaidSales.filter(s=>{const d=ageDays(s);return d>=b.min&&d<=b.max;}),
+                amount:unpaidSales.filter(s=>{const d=ageDays(s);return d>=b.min&&d<=b.max;}).reduce((a,s)=>a+calcSaleGrandTotal(s),0),
+              }));
+              return(
+                <>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
+                    {bucketed.map(b=>(
+                      <div key={b.label} className="kpi" style={{background:b.bg,border:`1px solid ${b.border}`}}>
+                        <div className="kv" style={{color:b.color}}>{fmt(b.amount)}</div>
+                        <div className="kl" style={{color:b.color}}>{b.label}</div>
+                        <div style={{fontSize:10,color:b.color,marginTop:4,opacity:.7}}>{b.sales.length} invoice{b.sales.length!==1?"s":""}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {bucketed.some(b=>b.sales.length>0&&b.min>60)&&(
+                    <div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"10px 16px",marginBottom:16,fontSize:12,color:"#991b1b"}}>
+                      🚨 <strong>{bucketed.filter(b=>b.min>60).reduce((a,b)=>a+b.sales.length,0)} invoice(s) over 60 days past due.</strong> Immediate collection action recommended.
+                    </div>
+                  )}
+                </>
+              );
+            })()}
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
               {[{l:"Total Billed",v:fmt(visSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0)),c:"#7c3aed"},{l:"Collected",v:fmt(visSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0)),c:"#059669"},{l:"Outstanding",v:fmt(totalAR),c:"#dc2626"}].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
             </div>
@@ -3843,11 +4320,14 @@ export default function App(){
             </div>
             <div className="card">
               {visSales.length===0?<Empty icon="📋" msg="NO TRANSACTIONS"/>:(()=>{
+                const now=new Date();
+                const ageDays=s=>{const d=new Date(s.created_at||s.date);return isNaN(d)?0:Math.floor((now-d)/(1000*60*60*24));};
+                const ageBadge=days=>days<=30?<span className="bdg bg2">0–30d</span>:days<=60?<span className="bdg ba2">31–60d</span>:days<=90?<span className="bdg" style={{background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa"}}>61–90d</span>:<span className="bdg br2">90+d</span>;
                 const filtered=visSales.filter(s=>arFilter==="all"||(arFilter==="unpaid"&&pmtFor(s.id)?.status!=="paid")||(arFilter==="paid"&&pmtFor(s.id)?.status==="paid"));
                 return filtered.length===0?<Empty icon="🔍" msg="NO RECORDS MATCH"/>:(
-                  <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Driver</th><th>Grand Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
-                  <tbody>{filtered.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid;return(
-                    <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
+                  <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Age</th><th>Driver</th><th>Grand Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
+                  <tbody>{filtered.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid,days=ageDays(s);return(
+                    <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{pmt?.status==="paid"?<span className="bdg bg2">Paid</span>:ageBadge(days)}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
                     <td><div style={{display:"flex",gap:5}}>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}<button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.inv}</button>{isAdmin&&<button className="btn bp" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>openAmend(s)}>✏️</button>}{isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}</div></td>
                   </tr>);})}
                   </tbody></table></div>
@@ -4164,6 +4644,15 @@ export default function App(){
             showToast={showToast}
           />}
 
+          {/* ══ PURCHASE ORDERS ══ */}
+          {tab==="purchaseorders"&&isAdmin&&<PurchaseOrders
+            products={products}
+            setProducts={setProducts}
+            supabase={supabase}
+            showToast={showToast}
+            showConfirm={showConfirm}
+          />}
+
           {/* ══ EXPENSES ══ */}
           {tab==="expenses"&&isAdmin&&<ExpensesManager
             expenses={expenses}
@@ -4203,6 +4692,7 @@ export default function App(){
                   </select>
                 </div>
                 <div><label>Assigned Driver</label><select value={editCust.truck_id||""} onChange={e=>setEditCust(x=>({...x,truck_id:e.target.value}))}><option value="">— Unassigned —</option>{trucks.map(t=><option key={t.id} value={t.id}>{t.driver} ({t.route||t.plate})</option>)}</select></div>
+                <div><label>💳 Credit Limit ($) — 0 = unlimited</label><input type="number" min="0" step="0.01" placeholder="0 = unlimited" value={editCust.credit_limit||""} onChange={e=>setEditCust(x=>({...x,credit_limit:e.target.value}))}/></div>
                 <div><label>Notes</label><input 
                   value={(editCust.notes||"").replace(/CUSTOM_PRICES:[^}]*}/g,"").replace(/\nRETURNED_CHECK:1/g,"").replace(/RETURNED_CHECK:1\n?/g,"").trim()}
                   onChange={e=>{
@@ -4319,7 +4809,18 @@ export default function App(){
                         <div key={k.l} style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:k.c}}>{k.v}</div><div style={{fontSize:9,color:"#9ca3af",letterSpacing:".05em",marginTop:1}}>{k.l}</div></div>
                       ))}
                     </div>
-                    <div style={{fontSize:10,color:"#9ca3af",marginTop:10}}>Driver: <span style={{color:"#7c3aed"}}>{truck?.driver||"Unassigned"}</span></div>
+                    {c.credit_limit>0&&unpaid>0&&(()=>{const pct=Math.min(100,(unpaid/c.credit_limit)*100);const over=unpaid>=c.credit_limit;return(
+                      <div style={{marginTop:10,background:over?"#fef2f2":"#fff7ed",border:`1px solid ${over?"#fecaca":"#fed7aa"}`,borderRadius:8,padding:"8px 10px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                          <span style={{fontSize:10,fontWeight:700,color:over?"#dc2626":"#c2410c"}}>{over?"🔴 CREDIT LIMIT EXCEEDED":"🟡 CREDIT LIMIT"}</span>
+                          <span style={{fontSize:10,fontWeight:700,color:over?"#dc2626":"#c2410c"}}>{fmt(unpaid)} / {fmt(c.credit_limit)}</span>
+                        </div>
+                        <div style={{height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:pct+"%",background:over?"#dc2626":"#f59e0b",borderRadius:3,transition:"width .3s"}}/>
+                        </div>
+                      </div>
+                    );})()}
+                    <div style={{fontSize:10,color:"#9ca3af",marginTop:10}}>Driver: <span style={{color:"#7c3aed"}}>{truck?.driver||"Unassigned"}</span>{c.credit_limit>0&&<span style={{marginLeft:8}}>· Limit: <span style={{color:"#212121",fontWeight:700}}>{fmt(c.credit_limit)}</span></span>}</div>
                   </div>
                 );
               })}
@@ -5305,6 +5806,10 @@ export default function App(){
             <div><label>Price ($) *</label><input type="number" min="0" step="0.01" placeholder="0.00" value={np.price} onChange={e=>setNp(p=>({...p,price:e.target.value}))}/></div>
             <div><label>Starting Stock</label><input type="number" min="0" placeholder="0" value={np.shelf} onChange={e=>setNp(p=>({...p,shelf:e.target.value}))}/></div>
           </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div><label>Reorder Alert At (units)</label><input type="number" min="0" placeholder="5" value={np.reorder_point} onChange={e=>setNp(p=>({...p,reorder_point:e.target.value}))}/></div>
+            <div style={{display:"flex",alignItems:"flex-end"}}><div style={{fontSize:11,color:"#6b7280",padding:"8px 0"}}>⚠️ Alert fires when shelf stock hits this number</div></div>
+          </div>
           {np.cost&&np.price&&<div style={{background:"#f9fafb",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#6b7280"}}>Margin: <span style={{color:"#059669",fontWeight:700}}>{parseFloat(np.price)>0?`${(((parseFloat(np.price)-parseFloat(np.cost))/parseFloat(np.price))*100).toFixed(1)}%`:"—"}</span></div>}
           <Divider/>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
@@ -5379,6 +5884,12 @@ export default function App(){
               <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>Notes (optional)</label>
               <input value={nc.notes||""} onChange={e=>setNc(p=>({...p,notes:e.target.value}))} placeholder="Optional notes..."
                 style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>💳 Credit Limit ($) — 0 = unlimited</label>
+              <input type="number" min="0" step="0.01" value={nc.credit_limit||""} onChange={e=>setNc(p=>({...p,credit_limit:e.target.value}))} placeholder="e.g. 500.00 — leave blank for unlimited"
+                style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
+              {nc.credit_limit>0&&<div style={{fontSize:11,color:"#854d0e",marginTop:4}}>⚠️ Driver will be warned when this customer's unpaid balance exceeds {fmt(parseFloat(nc.credit_limit)||0)}</div>}
             </div>
             {/* Custom Pricing */}
             <div style={{background:"#f5f3ff",border:"1.5px solid #ddd6fe",borderRadius:10,padding:"12px 14px"}}>
