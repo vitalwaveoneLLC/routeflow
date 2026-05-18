@@ -4018,7 +4018,7 @@ export default function App(){
             const item=toReturn.find(i=>i.pid===x.id);
             return item?{...x,shelf:x.shelf+item.remaining}:x;
           }));
-          showToast(`<-️ ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to warehouse`);
+          showToast(`↩️ ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to warehouse`);
         }
         await supabase.from("loads").delete().eq("truck_id",id);
         await supabase.from("trucks").delete().eq("id",id);
