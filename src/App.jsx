@@ -2667,14 +2667,16 @@ export default function App(){
         const{data:rr}=await supabase.from("truck_resets").select("*").order("created_at",{ascending:false});
         if(rr)setTruckResets(rr);
       }catch{setTruckResets([]);}
-      // Load driver profiles - graceful fallback if lat/lng/last_seen don't exist yet
-      try{
-        const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id,lat,lng,last_seen,email").eq("role","driver");
-        if(dpData)setDriverProfiles(dpData);
-      }catch{
-        // Columns may not exist yet - load without location fields
-        const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id").eq("role","driver");
-        if(dpData)setDriverProfiles(dpData.map(p=>({...p,lat:null,lng:null,last_seen:null})));
+      // Load driver profiles - safe fallback if lat/lng/last_seen columns don't exist
+      {
+        const{data:dpData,error:dpErr}=await supabase.from("profiles").select("id,role,truck_id,lat,lng,last_seen,email").eq("role","driver");
+        if(!dpErr&&dpData){
+          setDriverProfiles(dpData);
+        }else{
+          // Columns don't exist yet — load base fields only
+          const{data:dpBase}=await supabase.from("profiles").select("id,role,truck_id,email").eq("role","driver");
+          if(dpBase)setDriverProfiles(dpBase.map(p=>({...p,lat:null,lng:null,last_seen:null})));
+        }
       }
       // Also reload paymentsLog
       const pmLR = await supabase.from("payments_log").select("*").order("created_at",{ascending:false});
