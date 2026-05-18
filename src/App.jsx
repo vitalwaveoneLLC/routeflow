@@ -853,6 +853,294 @@ let ALL_STATES_TAX = [
   {id:"DC",name:"Washington DC",  otp:96,   cig:4.50, due:"20th",    form:"FR-800",                  note:"OTP 96% — highest overall"},
 ];
 
+// -- EXPENSE CATEGORIES -------------------------------------------------------
+const EXPENSE_CATS=[
+  {k:"gas",e:"⛽",l:"Gas / Fuel",line:"Line 9"},
+  {k:"mileage",e:"🚗",l:"Mileage",line:"Line 9"},
+  {k:"parking_tolls",e:"🅿️",l:"Parking / Tolls",line:"Line 22"},
+  {k:"maintenance",e:"🔧",l:"Maintenance",line:"Line 13"},
+  {k:"truck_insurance",e:"🚘",l:"Truck Insurance",line:"Line 15"},
+  {k:"inspection_registration",e:"🔍",l:"Inspection / Registration",line:"Line 22"},
+  {k:"supplies",e:"📦",l:"Supplies",line:"Line 22"},
+  {k:"phone",e:"📱",l:"Phone / Communication",line:"Line 25"},
+  {k:"warehouse",e:"🏢",l:"Warehouse / Storage",line:"Line 20"},
+  {k:"licenses_permits",e:"📜",l:"Licenses & Permits",line:"Line 23"},
+  {k:"bank_fees",e:"🏦",l:"Bank / Processing Fees",line:"Line 27"},
+  {k:"business_insurance",e:"🛡️",l:"Business Insurance",line:"Line 15"},
+  {k:"excise_tax",e:"🧾",l:"Tobacco Excise Tax Paid",line:"Line 23"},
+  {k:"legal_accounting",e:"⚖️",l:"Legal / Accounting",line:"Line 17"},
+  {k:"food",e:"🍔",l:"Food & Meals",line:"Line 24"},
+  {k:"accommodation",e:"🏨",l:"Accommodation",line:"Line 24"},
+  {k:"other",e:"📋",l:"Other",line:"Line 22"},
+];
+
+function ExpensesManager({expenses,setExpenses,trucks,supabase,showToast,showConfirm}){
+  const [expForm,setExpForm]=useState({category:"gas",amount:"",description:"",truck_id:"",date:new Date().toLocaleDateString(),receipt_url:""});
+  const [saving,setSaving]=useState(false);
+  const [filter,setFilter]=useState("all");
+  const [catFilter,setCatFilter]=useState("all");
+  const [search,setSearch]=useState("");
+  const [viewReceipt,setViewReceipt]=useState(null);
+  const [uploading,setUploading]=useState(false);
+  const uid2=()=>Math.random().toString(36).slice(2,8).toUpperCase();
+  const fmt2=n=>`$${Number(n||0).toFixed(2)}`;
+
+  const catMap=Object.fromEntries(EXPENSE_CATS.map(c=>[c.k,c]));
+
+  const submit=async()=>{
+    if(!expForm.amount||parseFloat(expForm.amount)<=0)return showToast("Amount required","error");
+    setSaving(true);
+    try{
+      const truck=trucks.find(t=>t.id===expForm.truck_id);
+      const rec={
+        id:"EXP-"+uid2(),
+        truck_id:expForm.truck_id||null,
+        driver_name:truck?.driver||"Admin",
+        category:expForm.category,
+        amount:parseFloat(expForm.amount),
+        description:expForm.description||"",
+        receipt_url:expForm.receipt_url||"",
+        date:expForm.date||new Date().toLocaleDateString(),
+        created_at:new Date().toISOString(),
+      };
+      const{error}=await supabase.from("expenses").insert(rec);
+      if(error)throw error;
+      setExpenses(prev=>[rec,...prev]);
+      setExpForm({category:"gas",amount:"",description:"",truck_id:"",date:new Date().toLocaleDateString(),receipt_url:""});
+      showToast("✅ Expense recorded");
+    }catch(e){showToast(e.message,"error");}
+    setSaving(false);
+  };
+
+  const uploadReceipt=async(file)=>{
+    if(!file)return;
+    setUploading(true);
+    try{
+      const ext=file.name.split(".").pop();
+      const path=`expenses/EXP-${uid2()}.${ext}`;
+      const{error:upErr}=await supabase.storage.from("receipts").upload(path,file,{upsert:true});
+      if(upErr)throw upErr;
+      const url=supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
+      setExpForm(f=>({...f,receipt_url:url}));
+      showToast("📸 Receipt uploaded");
+    }catch(e){showToast("Upload failed: "+e.message,"error");}
+    setUploading(false);
+  };
+
+  const deleteExp=async(id)=>{
+    showConfirm("Delete this expense?",async()=>{
+      const{error}=await supabase.from("expenses").delete().eq("id",id);
+      if(error){showToast(error.message,"error");return;}
+      setExpenses(prev=>prev.filter(e=>e.id!==id));
+      showToast("Expense deleted");
+    });
+  };
+
+  // Filtered list
+  const now2=new Date();
+  let filtered=expenses.filter(e=>{
+    if(catFilter!=="all"&&e.category!==catFilter)return false;
+    if(filter==="month"){const d=new Date(e.created_at);return d.getMonth()===now2.getMonth()&&d.getFullYear()===now2.getFullYear();}
+    if(filter==="q"){const d=new Date(e.created_at);return Math.floor(d.getMonth()/3)===Math.floor(now2.getMonth()/3)&&d.getFullYear()===now2.getFullYear();}
+    if(filter==="ytd"){const d=new Date(e.created_at);return d.getFullYear()===now2.getFullYear();}
+    return true;
+  });
+  if(search.trim())filtered=filtered.filter(e=>(e.driver_name||"").toLowerCase().includes(search.toLowerCase())||(e.description||"").toLowerCase().includes(search.toLowerCase())||(e.category||"").toLowerCase().includes(search.toLowerCase()));
+
+  const total=filtered.reduce((a,e)=>a+parseFloat(e.amount||0),0);
+  const byCat=EXPENSE_CATS.map(c=>({...c,amt:filtered.filter(e=>e.category===c.k).reduce((a,e)=>a+parseFloat(e.amount||0),0)})).filter(c=>c.amt>0);
+
+  const selectedCat=catMap[expForm.category]||EXPENSE_CATS[0];
+
+  return(
+    <div className="fu">
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#212121"}}>💸 Expenses</div>
+          <div style={{fontSize:12,color:"#9ca3af"}}>All driver + operating expenses — linked to IRS Schedule C</div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {[["all","All Time"],["ytd","This Year"],["q","This Quarter"],["month","This Month"]].map(([k,l])=>(
+            <button key={k} onClick={()=>setFilter(k)}
+              style={{padding:"7px 14px",borderRadius:20,border:`1.5px solid ${filter===k?"#0a1628":"#e5e7eb"}`,background:filter===k?"#0a1628":"#fff",color:filter===k?"#fff":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI row */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:20}}>
+        {[
+          {l:"Total Expenses",v:fmt2(total),c:"#dc2626"},
+          {l:"This Month",v:fmt2(expenses.filter(e=>{const d=new Date(e.created_at);return d.getMonth()===now2.getMonth()&&d.getFullYear()===now2.getFullYear();}).reduce((a,e)=>a+parseFloat(e.amount||0),0)),c:"#f59e0b"},
+          {l:"# Records",v:filtered.length,c:"#7c3aed"},
+          {l:"Drivers",v:[...new Set(filtered.map(e=>e.driver_name).filter(Boolean))].length,c:"#0ea5e9"},
+        ].map(k=>(
+          <div key={k.l} className="kpi">
+            <div className="kv" style={{color:k.c}}>{k.v}</div>
+            <div className="kl">{k.l}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:18,alignItems:"start"}}>
+
+        {/* ADD FORM */}
+        <div className="card" style={{padding:20,borderTop:"3px solid #dc2626"}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:14}}>➕ Record Expense</div>
+
+          {/* Category grid */}
+          <label>Category</label>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginBottom:12,marginTop:4}}>
+            {EXPENSE_CATS.map(c=>(
+              <button key={c.k} onClick={()=>setExpForm(f=>({...f,category:c.k}))}
+                title={c.line}
+                style={{padding:"7px 4px",borderRadius:8,border:`1.5px solid ${expForm.category===c.k?"#dc2626":"#e5e7eb"}`,background:expForm.category===c.k?"#fef2f2":"#fff",cursor:"pointer",textAlign:"center",fontFamily:"'Inter',sans-serif",transition:"all .12s"}}>
+                <div style={{fontSize:16}}>{c.e}</div>
+                <div style={{fontSize:9,fontWeight:600,color:expForm.category===c.k?"#dc2626":"#6b7280",marginTop:2,lineHeight:1.2}}>{c.l}</div>
+              </button>
+            ))}
+          </div>
+
+          <div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:7,padding:"6px 10px",fontSize:11,color:"#5b21b6",marginBottom:12}}>
+            📋 {selectedCat.line} — Schedule C
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div><label>Amount ($) *</label><input type="number" min="0" step="0.01" placeholder="0.00" value={expForm.amount} onChange={e=>setExpForm(f=>({...f,amount:e.target.value}))}/></div>
+            <div><label>Date</label><input type="date" value={expForm.date?new Date(expForm.date).toISOString().slice(0,10):""} onChange={e=>setExpForm(f=>({...f,date:new Date(e.target.value).toLocaleDateString()}))}/></div>
+          </div>
+
+          <div style={{marginBottom:10}}>
+            <label>Driver / Truck (optional)</label>
+            <select value={expForm.truck_id} onChange={e=>setExpForm(f=>({...f,truck_id:e.target.value}))}>
+              <option value="">— Admin / General —</option>
+              {trucks.map(t=><option key={t.id} value={t.id}>{t.driver} ({t.route||t.plate})</option>)}
+            </select>
+          </div>
+
+          <div style={{marginBottom:10}}>
+            <label>Description</label>
+            <input placeholder="e.g. Shell gas station, truck oil change…" value={expForm.description} onChange={e=>setExpForm(f=>({...f,description:e.target.value}))}/>
+          </div>
+
+          <div style={{marginBottom:14}}>
+            <label>Receipt Photo {uploading?"(uploading…)":""}</label>
+            {expForm.receipt_url
+              ?<div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <span style={{fontSize:12,color:"#059669",fontWeight:600}}>✅ Receipt attached</span>
+                  <button onClick={()=>setExpForm(f=>({...f,receipt_url:""}))} style={{fontSize:11,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:5,padding:"3px 8px",cursor:"pointer",color:"#dc2626"}}>Remove</button>
+                </div>
+              :<input type="file" accept="image/*,application/pdf" onChange={e=>uploadReceipt(e.target.files[0])} disabled={uploading}/>
+            }
+          </div>
+
+          <button onClick={submit} disabled={saving||uploading}
+            style={{width:"100%",background:"#dc2626",color:"#fff",border:"none",borderRadius:9,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",opacity:saving?0.7:1}}>
+            {saving?"Saving…":"💸 Record Expense"}
+          </button>
+        </div>
+
+        {/* RIGHT SIDE */}
+        <div>
+          {/* Category breakdown */}
+          {byCat.length>0&&(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:8,marginBottom:16}}>
+              {byCat.map(c=>(
+                <div key={c.k} className="card" style={{padding:"12px 14px",borderLeft:`3px solid ${catFilter===c.k?"#dc2626":"#e5e7eb"}`,cursor:"pointer"}}
+                  onClick={()=>setCatFilter(p=>p===c.k?"all":c.k)}>
+                  <div style={{fontSize:20,marginBottom:4}}>{c.e}</div>
+                  <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>{c.l.toUpperCase()}</div>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:18,color:"#f59e0b"}}>{fmt2(c.amt)}</div>
+                  <div style={{fontSize:9,color:"#9ca3af"}}>{c.line}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Search + filter */}
+          <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+            <input placeholder="🔍 Search driver, description, category…" value={search} onChange={e=>setSearch(e.target.value)} style={{flex:1,minWidth:200}}/>
+            {catFilter!=="all"&&<button onClick={()=>setCatFilter("all")} style={{padding:"7px 12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,fontSize:11,color:"#dc2626",cursor:"pointer",fontWeight:700}}>✕ Clear filter</button>}
+          </div>
+
+          {/* Table */}
+          {filtered.length===0
+            ?<div className="card" style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+                <div style={{fontSize:32,marginBottom:8}}>📋</div>
+                <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>No expenses recorded</div>
+                <div style={{fontSize:12}}>Add your first expense using the form on the left</div>
+              </div>
+            :<div className="card" style={{overflow:"hidden"}}>
+              <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",background:"#f9fafb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#6b7280"}}>{filtered.length} RECORDS · {catFilter!=="all"?`FILTERED: ${(catMap[catFilter]?.l||catFilter).toUpperCase()}`:"ALL CATEGORIES"}</span>
+                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#dc2626"}}>TOTAL: {fmt2(total)}</span>
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                    {["Date","Driver","Category","Line","Amount","Description","Receipt","Action"].map(h=>(
+                      <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {filtered.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(e=>{
+                      const cat=catMap[e.category]||{e:"📋",l:e.category,line:"Line 22"};
+                      return(
+                        <tr key={e.id} style={{borderBottom:"1px solid #f3f4f6"}}>
+                          <td style={{padding:"9px 13px",fontSize:12,color:"#6b7280",whiteSpace:"nowrap"}}>{e.date}</td>
+                          <td style={{padding:"9px 13px",fontSize:12,color:"#212121",fontWeight:600}}>{e.driver_name||"Admin"}</td>
+                          <td style={{padding:"9px 13px"}}>
+                            <span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>
+                              {cat.e} {cat.l}
+                            </span>
+                          </td>
+                          <td style={{padding:"9px 13px"}}><span style={{fontSize:10,color:"#9ca3af",fontFamily:"monospace"}}>{cat.line}</span></td>
+                          <td style={{padding:"9px 13px",fontWeight:800,color:"#dc2626",fontFamily:"'Barlow Condensed',sans-serif",fontSize:15}}>{fmt2(parseFloat(e.amount||0))}</td>
+                          <td style={{padding:"9px 13px",fontSize:12,color:"#6b7280",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.description||"—"}</td>
+                          <td style={{padding:"9px 13px"}}>
+                            {e.receipt_url
+                              ?<button onClick={()=>setViewReceipt(e.receipt_url)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700}}>📸 View</button>
+                              :<span style={{fontSize:11,color:"#d1d5db"}}>—</span>}
+                          </td>
+                          <td style={{padding:"9px 13px"}}>
+                            <button onClick={()=>deleteExp(e.id)} style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#dc2626",cursor:"pointer",fontWeight:700}}>🗑</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{background:"#fef9c3",borderTop:"2px solid #fde68a"}}>
+                      <td colSpan={4} style={{padding:"11px 13px",fontWeight:800,fontSize:13}}>TOTAL DEDUCTIBLE (Schedule C)</td>
+                      <td style={{padding:"11px 13px"}}><span style={{background:"#f59e0b",color:"#fff",padding:"4px 12px",borderRadius:6,fontSize:14,fontWeight:800}}>{fmt2(total)}</span></td>
+                      <td colSpan={3}/>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+
+      {/* Receipt viewer */}
+      {viewReceipt&&(
+        <div style={{position:"fixed",inset:0,background:"#00000080",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"#fff",borderRadius:16,padding:20,maxWidth:600,width:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{fontWeight:700,fontSize:15}}>📸 Receipt</div>
+              <button onClick={()=>setViewReceipt(null)} style={{background:"#f3f4f6",border:"none",borderRadius:7,padding:"6px 12px",cursor:"pointer",fontWeight:700}}>✕ Close</button>
+            </div>
+            {viewReceipt.toLowerCase().includes(".pdf")?<iframe src={viewReceipt} style={{width:"100%",height:500,border:"none",borderRadius:8}}/>:<img src={viewReceipt} alt="receipt" style={{width:"100%",borderRadius:8,border:"1px solid #e5e7eb"}}/>}
+            <a href={viewReceipt} target="_blank" rel="noreferrer" style={{display:"block",marginTop:10,textAlign:"center",background:"#0a1628",color:"#fff",padding:"10px",borderRadius:8,fontSize:13,fontWeight:700,textDecoration:"none"}}>🔗 Open Full Size</a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expenses,stateTaxes,setStateTaxes,calcSaleTax,calcSaleGrandTotal,isTaxableProd,pmtFor,fmt,supabase,showToast}){
   const [irsTab,setIrsTab]=useState("overview");
   const [period,setPeriod]=useState("all");
@@ -2836,6 +3124,7 @@ export default function App(){
     ...(isAdmin?[{id:"truckmanagement",label:"Truck Management",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🚚</span>,badge:truckResets.filter(r=>r.status==="pending").length||0}]:[]),
     ...(isAdmin?[{id:"returnedchecks",label:"Returned Checks",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🔴</span>,badge:payments.filter(p=>p.status==="returned_check").length||0}]:[]),
     ...(isAdmin?[{id:"pl",label:"P&L Report",icon:ic.pl}]:[]),
+    ...(isAdmin?[{id:"expenses",label:"Expenses",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>💸</span>}]:[]),
     ...(isAdmin?[{id:"irs",label:"IRS Reports",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13,marginRight:0}}>🏛</span>}]:[]),
     {id:"customers",label:"Customers",icon:ic.users},
     ...(isAdmin?[{id:"userapprovals",label:"New Users Approval",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>👥</span>,badge:pendingApprovals}]:[]),
@@ -3873,6 +4162,16 @@ export default function App(){
             setStateTaxes={setStateTaxes}
             supabase={supabase}
             showToast={showToast}
+          />}
+
+          {/* ══ EXPENSES ══ */}
+          {tab==="expenses"&&isAdmin&&<ExpensesManager
+            expenses={expenses}
+            setExpenses={setExpenses}
+            trucks={trucks}
+            supabase={supabase}
+            showToast={showToast}
+            showConfirm={showConfirm}
           />}
 
           {/* ══ IRS REPORTS ══ */}
