@@ -230,6 +230,213 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
 }
 
 // -- DRIVER LOAD TAB -----------------------------------------------------------
+function DriverRouteTab({driverData, setDriverData, setDriverTab, setDriverSaleCust}){
+  const today=new Date().toLocaleDateString("en-US",{weekday:"long"}); // e.g. "Monday"
+  const sched=React.useMemo(()=>{try{return JSON.parse(driverData.truck?.schedule||"{}");}catch{return{};}}, [driverData.truck?.schedule]);
+  const stops=sched[today]||[];
+  const customers=driverData.customers||[];
+  const [checked,setChecked]=useState({}); // {cid: true} for visited stops
+
+  const navToAddress=addr=>{
+    if(!addr)return;
+    const enc=encodeURIComponent(addr);
+    const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
+    window.open(isIOS?`maps://maps.apple.com/?q=${enc}`:`https://www.google.com/maps/search/?api=1&query=${enc}`,"_blank");
+  };
+
+  const visitedCount=Object.keys(checked).length;
+  const totalStops=stops.length;
+
+  if(totalStops===0) return(
+    <div style={{padding:"40px 20px",textAlign:"center",color:"#9ca3af"}}>
+      <div style={{fontSize:48,marginBottom:12}}>📅</div>
+      <div style={{fontWeight:700,fontSize:16,marginBottom:6,color:"#374151"}}>No stops scheduled for today</div>
+      <div style={{fontSize:13,color:"#9ca3af"}}>Today is {today}. Your admin hasn't assigned any stops for this day yet.</div>
+    </div>
+  );
+
+  return(
+    <div>
+      {/* Header */}
+      <div style={{background:"#0a1628",borderRadius:12,padding:"14px 18px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#fff"}}>📅 Today's Route — {today}</div>
+          <div style={{fontSize:12,color:"#4b6080",marginTop:2}}>{visitedCount} of {totalStops} stops visited</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:28,color:visitedCount===totalStops?"#10b981":"#f59e0b"}}>{visitedCount}/{totalStops}</div>
+          <div style={{fontSize:10,color:"#4b6080"}}>completed</div>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{height:6,background:"#e5e7eb",borderRadius:3,overflow:"hidden",marginBottom:16}}>
+        <div style={{height:"100%",width:`${totalStops>0?(visitedCount/totalStops)*100:0}%`,background:"#10b981",borderRadius:3,transition:"width .4s"}}/>
+      </div>
+
+      {/* Stops list */}
+      {stops.map((s,idx)=>{
+        const cust=customers.find(c=>c.id===s.cid);
+        const isVisited=!!checked[s.cid];
+        const isNext=!isVisited&&Object.keys(checked).length===idx;
+        return(
+          <div key={s.cid} style={{
+            background:isVisited?"#f0fdf4":isNext?"#fffbeb":"#fff",
+            border:`1.5px solid ${isVisited?"#a7f3d0":isNext?"#fde68a":"#e5e7eb"}`,
+            borderRadius:12,padding:"14px 16px",marginBottom:10,
+            opacity:isVisited?0.7:1,transition:"all .2s"
+          }}>
+            <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+              {/* Stop number / check */}
+              <button onClick={()=>setChecked(prev=>isVisited?Object.fromEntries(Object.entries(prev).filter(([k])=>k!==s.cid)):{...prev,[s.cid]:true})}
+                style={{width:40,height:40,borderRadius:"50%",border:`2px solid ${isVisited?"#10b981":isNext?"#f59e0b":"#e5e7eb"}`,background:isVisited?"#10b981":isNext?"#fffbeb":"#f9fafb",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:isVisited?18:14,fontWeight:800,color:isVisited?"#fff":isNext?"#92400e":"#9ca3af",fontFamily:"'Barlow Condensed',sans-serif"}}>
+                {isVisited?"✓":idx+1}
+              </button>
+
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:6}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14,color:isVisited?"#6b7280":"#0a1628",textDecoration:isVisited?"line-through":"none"}}>{cust?.name||s.cid}</div>
+                    {cust?.phone&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📞 {cust.phone}</div>}
+                    {cust?.address&&<div style={{fontSize:11,color:"#9ca3af"}}>{cust.address}</div>}
+                    {s.note&&<div style={{fontSize:11,color:"#f59e0b",marginTop:3,fontStyle:"italic"}}>📝 {s.note}</div>}
+                    {isNext&&<div style={{fontSize:11,color:"#92400e",fontWeight:700,marginTop:4}}>⬆️ NEXT STOP</div>}
+                  </div>
+                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                    {cust?.address&&!isVisited&&(
+                      <button onClick={()=>navToAddress(cust.address)}
+                        style={{background:"#0a1628",color:"#fff",border:"none",borderRadius:7,padding:"6px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                        🗺 Navigate
+                      </button>
+                    )}
+                    {!isVisited&&(
+                      <button onClick={()=>{setDriverSaleCust(s.cid);setDriverTab("sell");}}
+                        style={{background:"#059669",color:"#fff",border:"none",borderRadius:7,padding:"6px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                        💳 Sell
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {visitedCount===totalStops&&totalStops>0&&(
+        <div style={{background:"#f0fdf4",border:"2px solid #10b981",borderRadius:12,padding:"20px",textAlign:"center",marginTop:8}}>
+          <div style={{fontSize:36,marginBottom:8}}>🎉</div>
+          <div style={{fontWeight:800,fontSize:16,color:"#065f46"}}>All stops completed!</div>
+          <div style={{fontSize:13,color:"#047857",marginTop:4}}>Great work today. Don't forget to submit your expenses.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DriverStatsTab({driverData, products}){
+  const sales=driverData.sales||[];
+  const now=new Date();
+  const fmt=n=>`$${Number(n||0).toFixed(2)}`;
+
+  const todaySales=sales.filter(s=>new Date(s.created_at).toDateString()===now.toDateString());
+  const monthSales=sales.filter(s=>{const d=new Date(s.created_at);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});
+  const paidSales=sales.filter(s=>s._paid);
+  const collectionRate=sales.length>0?((paidSales.length/sales.length)*100).toFixed(0):0;
+
+  // Top products sold
+  const prodQtys={};
+  sales.forEach(s=>(s.items||[]).forEach(it=>{prodQtys[it.pid]=(prodQtys[it.pid]||0)+(it.qty||0);}));
+  const topProds=Object.entries(prodQtys).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  // Top customers by revenue
+  const custRevs={};
+  sales.forEach(s=>{custRevs[s.cust_id]=(custRevs[s.cust_id]||0)+parseFloat(s.total||0);});
+  const topCusts=Object.entries(custRevs).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  // Daily revenue last 7 days
+  const last7=Array.from({length:7},(_,i)=>{
+    const d=new Date();d.setDate(d.getDate()-i);
+    const ds=d.toDateString();
+    return{label:d.toLocaleDateString("en-US",{weekday:"short"}),rev:sales.filter(s=>new Date(s.created_at).toDateString()===ds).reduce((a,s)=>a+parseFloat(s.total||0),0)};
+  }).reverse();
+  const maxRev=Math.max(...last7.map(d=>d.rev),1);
+
+  return(
+    <div>
+      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#0a1628",marginBottom:14}}>📊 My Performance</div>
+
+      {/* KPI cards */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+        {[
+          {l:"Today's Sales",v:todaySales.length,sub:fmt(todaySales.reduce((a,s)=>a+parseFloat(s.total||0),0)),c:"#7c3aed"},
+          {l:"This Month",v:monthSales.length,sub:fmt(monthSales.reduce((a,s)=>a+parseFloat(s.total||0),0)),c:"#059669"},
+          {l:"Collection Rate",v:`${collectionRate}%`,sub:`${paidSales.length} of ${sales.length} paid`,c:collectionRate>=80?"#059669":"#dc2626"},
+          {l:"Total Customers",v:driverData.customers?.length||0,sub:"on your route",c:"#0ea5e9"},
+        ].map(k=>(
+          <div key={k.l} style={{background:"#fff",borderRadius:10,padding:"14px",border:"1px solid #e5e7eb"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:24,color:k.c}}>{k.v}</div>
+            <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginTop:2}}>{k.l}</div>
+            <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Revenue last 7 days bar chart */}
+      <div style={{background:"#fff",borderRadius:10,padding:"14px",border:"1px solid #e5e7eb",marginBottom:14}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#6b7280",marginBottom:12}}>REVENUE — LAST 7 DAYS</div>
+        <div style={{display:"flex",gap:6,alignItems:"flex-end",height:80}}>
+          {last7.map((d,i)=>(
+            <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+              <div style={{fontSize:9,color:"#9ca3af",fontWeight:600}}>{d.rev>0?`$${Math.round(d.rev)}`:""}</div>
+              <div style={{width:"100%",background:d.rev>0?"#7c3aed":"#f3f4f6",borderRadius:"4px 4px 0 0",height:`${(d.rev/maxRev)*64}px`,minHeight:d.rev>0?4:0,transition:"height .3s"}}/>
+              <div style={{fontSize:9,color:"#9ca3af",fontWeight:600}}>{d.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Top products */}
+      {topProds.length>0&&(
+        <div style={{background:"#fff",borderRadius:10,padding:"14px",border:"1px solid #e5e7eb",marginBottom:14}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#6b7280",marginBottom:10}}>TOP PRODUCTS SOLD</div>
+          {topProds.map(([pid,qty],i)=>{
+            const p=products.find(x=>x.id===pid);
+            const maxQ=topProds[0][1];
+            return p?(
+              <div key={pid} style={{marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+                  <span style={{fontWeight:600,color:"#0a1628"}}>{i+1}. {p.name}</span>
+                  <span style={{color:"#7c3aed",fontWeight:700}}>{qty} units</span>
+                </div>
+                <div style={{height:5,background:"#f3f4f6",borderRadius:3,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${(qty/maxQ)*100}%`,background:"#7c3aed",borderRadius:3}}/>
+                </div>
+              </div>
+            ):null;
+          })}
+        </div>
+      )}
+
+      {/* Top customers */}
+      {topCusts.length>0&&(
+        <div style={{background:"#fff",borderRadius:10,padding:"14px",border:"1px solid #e5e7eb"}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#6b7280",marginBottom:10}}>TOP CUSTOMERS BY REVENUE</div>
+          {topCusts.map(([cid,rev],i)=>{
+            const c=driverData.customers?.find(x=>x.id===cid);
+            return c?(
+              <div key={cid} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f3f4f6"}}>
+                <div style={{fontSize:12,fontWeight:600,color:"#0a1628"}}>{i+1}. {c.name}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#059669"}}>{fmt(rev)}</div>
+              </div>
+            ):null;
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
   const [items, setItems] = useState({});
   const [saving, setSaving] = useState(false);
@@ -768,6 +975,23 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           </div>
           <div style={{fontSize:10,color:"#92400e",marginTop:4}}>This balance will be added to the new invoice</div>
         </div>}
+        {selCustObj?.credit_limit>0&&(()=>{
+          const limit=parseFloat(selCustObj.credit_limit);
+          const pct=Math.min(100,(custUnpaidBalance/limit)*100);
+          const over=custUnpaidBalance>=limit;
+          return(
+            <div style={{marginTop:8,background:over?"#1a0505":"#0d1f0d",border:`2px solid ${over?"#dc2626":"#a7f3d0"}`,borderRadius:8,padding:"10px 14px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                <span style={{fontWeight:700,fontSize:12,color:over?"#dc2626":"#10b981"}}>{over?"🔴 CREDIT LIMIT EXCEEDED":"💳 Credit Limit"}</span>
+                <span style={{fontSize:11,color:over?"#f87171":"#6ee7b7"}}>${custUnpaidBalance.toFixed(2)} / ${limit.toFixed(2)}</span>
+              </div>
+              <div style={{height:5,background:"#374151",borderRadius:3,overflow:"hidden",marginBottom:4}}>
+                <div style={{height:"100%",width:`${pct}%`,background:over?"#dc2626":"#10b981",borderRadius:3,transition:"width .3s"}}/>
+              </div>
+              {over&&<div style={{fontSize:11,color:"#f87171",fontWeight:600}}>⚠️ Contact admin before selling to this customer</div>}
+            </div>
+          );
+        })()}
       </div>
       <div style={{display:"flex",gap:6,marginBottom:12}}>
         <button onClick={()=>setScanning(false)} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${!scanning?"#0ea5e9":"#e5e7eb"}`,background:!scanning?"#f0f9ff":"#fff",color:!scanning?"#0ea5e9":"#6b7280",fontWeight:600,cursor:"pointer",fontSize:12,fontFamily:"'Inter',sans-serif"}}>📋 Manual</button>
@@ -2263,24 +2487,48 @@ export default function OrderPortal() {
               </div>
 
               {/* Tab navigation */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:6,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr 1fr 1fr",gap:6,marginBottom:16}}>
                 {[
                   {k:"dashboard",e:"🏠",l:"Home"},
+                  {k:"route",e:"📅",l:"Route"},
                   {k:"load",e:"📦",l:"Load"},
                   {k:"sell",e:"💳",l:"Sell"},
                   {k:"expenses",e:"💸",l:"Expenses"},
+                  {k:"performance",e:"📊",l:"Stats"},
                   {k:"history",e:"📄",l:"History"},
                 ].map(t=>(
                   <button key={t.k} onClick={()=>setDriverTab(t.k)}
-                    style={{padding:"10px 6px",borderRadius:9,border:`1.5px solid ${driverTab===t.k?"#0ea5e9":"#e5e7eb"}`,background:driverTab===t.k?"#f0f9ff":"#fff",cursor:"pointer",textAlign:"center",fontFamily:"'Inter',sans-serif",transition:"all .15s"}}>
+                    style={{padding:"10px 4px",borderRadius:9,border:`1.5px solid ${driverTab===t.k?"#0ea5e9":"#e5e7eb"}`,background:driverTab===t.k?"#f0f9ff":"#fff",cursor:"pointer",textAlign:"center",fontFamily:"'Inter',sans-serif",transition:"all .15s"}}>
                     <div style={{fontSize:18}}>{t.e}</div>
-                    <div style={{fontSize:10,fontWeight:600,color:driverTab===t.k?"#0ea5e9":"#6b7280",marginTop:3}}>{t.l}</div>
+                    <div style={{fontSize:9,fontWeight:600,color:driverTab===t.k?"#0ea5e9":"#6b7280",marginTop:3}}>{t.l}</div>
                   </button>
                 ))}
               </div>
 
               {/* ── HOME TAB ── */}
               {driverTab==="dashboard"&&<div>
+                {/* Today's Route Quick Banner */}
+                {(()=>{
+                  const today=new Date().toLocaleDateString("en-US",{weekday:"long"});
+                  try{
+                    const sched=JSON.parse(driverData.truck?.schedule||"{}");
+                    const stops=sched[today]||[];
+                    if(!stops.length)return null;
+                    return(
+                      <div onClick={()=>setDriverTab("route")} style={{background:"#0a1628",borderRadius:10,padding:"12px 16px",marginBottom:14,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <span style={{fontSize:22}}>📅</span>
+                          <div>
+                            <div style={{fontWeight:700,fontSize:13,color:"#fff"}}>{today}'s Route — {stops.length} stop{stops.length!==1?"s":""}</div>
+                            <div style={{fontSize:11,color:"#4b6080",marginTop:2}}>Tap to see your delivery schedule</div>
+                          </div>
+                        </div>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#f59e0b"}}>{stops.length} →</div>
+                      </div>
+                    );
+                  }catch{return null;}
+                })()}
+
                 <div style={{background:driverData.activeLoad?"#f0fdf4":"#fef9c3",border:`1px solid ${driverData.activeLoad?"#a7f3d0":"#fde68a"}`,borderRadius:10,padding:"12px 16px",marginBottom:14,display:"flex",alignItems:"center",gap:12}}>
                   <div style={{fontSize:24}}>{driverData.activeLoad?"🟢":"🟡"}</div>
                   <div>
@@ -2584,6 +2832,10 @@ export default function OrderPortal() {
               </div>}
 
               {/* ── LOAD TAB ── */}
+              {driverTab==="route"&&<DriverRouteTab driverData={driverData} setDriverData={setDriverData} setDriverTab={setDriverTab} setDriverSaleCust={setDriverSaleCust}/>}
+
+              {driverTab==="performance"&&<DriverStatsTab driverData={driverData} products={products}/>}
+
               {driverTab==="load"&&<DriverLoadTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co}/>}
 
               {/* ── SELL TAB ── */}
