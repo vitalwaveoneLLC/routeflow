@@ -3581,18 +3581,30 @@ export default function App(){
     setLoading(false);
   },[profile]);
 
-  // Email helper — uses Resend API via company settings
+  // Email helper — uses Gmail SMTP via Supabase Edge Function
   const sendEmail=async(to,subject,html)=>{
-    if(!co?.resend_api_key||!co?.from_email)return{ok:false,err:"Email not configured"};
+    if(!co?.gmail_user||!co?.gmail_app_password||!co?.from_email)return{ok:false,err:"Email not configured — add Gmail credentials in Settings"};
     if(!to||!to.includes("@"))return{ok:false,err:"No valid email address"};
     try{
-      const res=await fetch("https://api.resend.com/emails",{
+      const{data:{session}}=await supabase.auth.getSession();
+      const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-email`,{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":`Bearer ${co.resend_api_key}`},
-        body:JSON.stringify({from:co.from_email,to,subject,html}),
+        headers:{
+          "Content-Type":"application/json",
+          "Authorization":`Bearer ${session?.access_token}`,
+        },
+        body:JSON.stringify({
+          to,
+          subject,
+          html,
+          gmail_user:co.gmail_user,
+          gmail_app_password:co.gmail_app_password,
+          from_name:co.name||"VitalWaveOne",
+          from_email:co.from_email||co.gmail_user,
+        }),
       });
       const data=await res.json();
-      if(!res.ok)return{ok:false,err:data.message||"Send failed"};
+      if(!res.ok)return{ok:false,err:data.error||"Send failed"};
       return{ok:true};
     }catch(e){return{ok:false,err:e.message};}
   };
@@ -4164,7 +4176,7 @@ export default function App(){
       setSales(prev=>[ns,...prev]);setPayments(prev=>[...prev,{sale_id:ns.id,status:"unpaid"}]);
       showToast("Sale recorded");setModal(null);setTimeout(()=>{setViewSale(ns);setModal("invoice");},80);
       // Auto-email invoice if enabled
-      if(co?.email_invoices&&co?.resend_api_key&&co?.from_email){
+      if(co?.email_invoices&&co?.gmail_user&&co?.gmail_app_password){
         const cust=getC(ns.cust_id);
         if(cust?.email?.includes("@")){
           sendEmail(cust.email,`Invoice ${ns.id} from ${co?.name||"Your Supplier"}`,buildInvoiceEmail(ns,cust))
@@ -5376,7 +5388,7 @@ export default function App(){
             <div style={{display:"flex",gap:7,marginBottom:14,flexWrap:"wrap"}}>
               {["all","unpaid","paid"].map(f=><button key={f} className={`btn ${arFilter===f?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>setArFilter(f)}>{f}</button>)}
               <button className="btn bpr" style={{marginLeft:"auto"}} onClick={exportAR}>{ic.dl} Export CSV</button>
-              {co?.email_reminders&&co?.resend_api_key&&(
+              {co?.email_reminders&&co?.gmail_user&&co?.gmail_app_password&&(
                 <button className="btn bb" style={{fontSize:11}} onClick={async()=>{
                   const now=new Date();
                   const unpaid=visSales.filter(s=>pmtFor(s.id)?.status!=="paid");
@@ -6660,25 +6672,34 @@ export default function App(){
                     <div key={f.k}><label>{f.l}</label><input value={coEdit[f.k]||""} onChange={e=>setCoEdit(prev=>({...prev,[f.k]:e.target.value}))}/></div>
                   ))}
                   <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"14px 16px"}}>
-                    <div style={{fontWeight:700,fontSize:13,color:"#0369a1",marginBottom:10}}>✉️ Email Notifications (Resend API)</div>
-                    <div style={{fontSize:11,color:"#6b7280",marginBottom:10}}>
-                      Get a free API key at <a href="https://resend.com" target="_blank" rel="noreferrer" style={{color:"#0369a1"}}>resend.com</a> — 100 emails/day free. Used for invoice emails + overdue reminders.
+                    <div style={{fontWeight:700,fontSize:13,color:"#0369a1",marginBottom:10}}>✉️ Email Notifications (Gmail SMTP)</div>
+                    <div style={{fontSize:11,color:"#6b7280",marginBottom:10,lineHeight:1.6}}>
+                      Uses your Gmail account to send invoices and reminders. Requires a Gmail <strong>App Password</strong> — not your regular Gmail password.<br/>
+                      <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" style={{color:"#0369a1"}}>Get App Password →</a> (requires 2FA to be enabled on your Google account)
                     </div>
                     <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                      <div><label>Resend API Key</label><input type="password" placeholder="re_xxxxxxxxxxxx" value={coEdit.resend_api_key||""} onChange={e=>setCoEdit(prev=>({...prev,resend_api_key:e.target.value}))}/></div>
-                      <div><label>From Email (must be verified in Resend)</label><input type="email" placeholder="invoices@yourcompany.com" value={coEdit.from_email||""} onChange={e=>setCoEdit(prev=>({...prev,from_email:e.target.value}))}/></div>
-                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                        <label style={{margin:0,fontWeight:500,fontSize:12}}>
-                          <input type="checkbox" checked={!!coEdit.email_invoices} onChange={e=>setCoEdit(prev=>({...prev,email_invoices:e.target.checked}))} style={{marginRight:6}}/>
+                      <div><label>Gmail Address</label><input type="email" placeholder="yourname@gmail.com or you@yourdomain.com" value={coEdit.gmail_user||""} onChange={e=>setCoEdit(prev=>({...prev,gmail_user:e.target.value,from_email:e.target.value}))}/></div>
+                      <div><label>Gmail App Password (16 characters, no spaces)</label><input type="password" placeholder="xxxx xxxx xxxx xxxx" value={coEdit.gmail_app_password||""} onChange={e=>setCoEdit(prev=>({...prev,gmail_app_password:e.target.value.replace(/\s/g,"")}))}/>
+                        <div style={{fontSize:10,color:"#9ca3af",marginTop:3}}>Google Account → Security → 2-Step Verification → App passwords → Create</div>
+                      </div>
+                      <div><label>Display Name (shown in From field)</label><input placeholder={coEdit.name||"VitalWaveOne LLC"} value={coEdit.from_email||""} onChange={e=>setCoEdit(prev=>({...prev,from_email:e.target.value}))}/>
+                        <div style={{fontSize:10,color:"#9ca3af",marginTop:3}}>Usually same as your Gmail address</div>
+                      </div>
+                      <div style={{display:"flex",gap:8,flexDirection:"column"}}>
+                        <label style={{margin:0,fontWeight:500,fontSize:12,display:"flex",alignItems:"center",gap:6}}>
+                          <input type="checkbox" checked={!!coEdit.email_invoices} onChange={e=>setCoEdit(prev=>({...prev,email_invoices:e.target.checked}))} style={{marginRight:2}}/>
                           Auto-email invoice to customer after every sale
                         </label>
-                      </div>
-                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                        <label style={{margin:0,fontWeight:500,fontSize:12}}>
-                          <input type="checkbox" checked={!!coEdit.email_reminders} onChange={e=>setCoEdit(prev=>({...prev,email_reminders:e.target.checked}))} style={{marginRight:6}}/>
+                        <label style={{margin:0,fontWeight:500,fontSize:12,display:"flex",alignItems:"center",gap:6}}>
+                          <input type="checkbox" checked={!!coEdit.email_reminders} onChange={e=>setCoEdit(prev=>({...prev,email_reminders:e.target.checked}))} style={{marginRight:2}}/>
                           Send overdue payment reminders (30 / 60 / 90 days)
                         </label>
                       </div>
+                      {coEdit.gmail_user&&coEdit.gmail_app_password&&(
+                        <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,padding:"8px 12px",fontSize:11,color:"#065f46"}}>
+                          ✅ Configured — emails will send from <strong>{coEdit.gmail_user}</strong>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -7477,12 +7498,12 @@ export default function App(){
           {(()=>{
             const cust=getC(viewSale.cust_id);
             const hasEmail=cust?.email&&cust.email.includes("@");
-            const hasConfig=co?.resend_api_key&&co?.from_email;
+            const hasConfig=co?.gmail_user&&co?.gmail_app_password;
             return(
               <button className="btn bb" style={{fontSize:11,padding:"7px 12px"}}
                 title={!hasConfig?"Configure email in Settings first":!hasEmail?"Customer has no email address":"Send invoice by email"}
                 onClick={async()=>{
-                  if(!hasConfig)return showToast("Configure Resend API key in Settings first","error");
+                  if(!hasConfig)return showToast("Configure Gmail in Settings first","error");
                   if(!hasEmail)return showToast("Customer has no email address","error");
                   const result=await sendEmail(cust.email,`Invoice ${viewSale.id} from ${co?.name||"Your Supplier"}`,buildInvoiceEmail(viewSale,cust));
                   if(result.ok)showToast(`✅ Invoice emailed to ${cust.email}`);
