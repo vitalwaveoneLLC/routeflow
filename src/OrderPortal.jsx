@@ -2380,7 +2380,7 @@ export default function OrderPortal() {
       const gt = sub+tax+prevBalance;
       // Use new send-email edge function (Gmail SMTP)
       const{data:{session}}=await supabase.auth.getSession();
-      const res=await fetch(`${SUPABASE_URL}/functions/v1/send-email`,{
+      const res=await fetch(`${SUPABASE_URL}/functions/v1/send-invoice-email`,{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${session?.access_token}`},
         body:JSON.stringify({
