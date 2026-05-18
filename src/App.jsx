@@ -2284,6 +2284,7 @@ export default function App(){
   const[payments,setPayments]=useState([]);
   const[orders,setOrders]=useState([]);
   const[expenses,setExpenses]=useState([]);
+  const[creditMemos,setCreditMemos]=useState([]);
   const[paymentsLog,setPaymentsLog]=useState([]);
   const[walkinRegs,setWalkinRegs]=useState([]);
   const[driverProfiles,setDriverProfiles]=useState([]);
@@ -2344,7 +2345,7 @@ export default function App(){
   const[selCust,setSelCust]=useState("");
   const[selLoad,setSelLoad]=useState(null);
   const[formItems,setFormItems]=useState([]);
-  const[np,setNp]=useState({name:"",sku:"",cat:"Beverage",unit:"Case/24",cost:"",price:"",shelf:"",reorder_point:"5"});
+  const[np,setNp]=useState({name:"",sku:"",cat:"Beverage",unit:"Case",case_qty:"24",cost:"",price:"",shelf:"",reorder_point:"5"});
   const[nt,setNt]=useState({driver:"",plate:"",route:""});
   const[nc,setNc]=useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:"",custom_pricing:false,custom_prices:{},credit_limit:""});
   const[rsPid,setRsPid]=useState("");
@@ -2632,7 +2633,7 @@ export default function App(){
   const loadAll=useCallback(async()=>{
     setLoading(true);
     try{
-      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR,wiR]=await Promise.all([
+      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR,wiR,cmR]=await Promise.all([
         supabase.from("company").select("*").single(),
         supabase.from("products").select("*").order("name"),
         supabase.from("trucks").select("*").order("driver"),
@@ -2645,6 +2646,7 @@ export default function App(){
         supabase.from("state_taxes").select("*").order("name"),
         supabase.from("expenses").select("*").order("created_at",{ascending:false}),
         supabase.from("walkin_registrations").select("*").order("created_at",{ascending:false}),
+        supabase.from("credit_memos").select("*").order("created_at",{ascending:false}),
       ]);
       if(coR.data){setCo(coR.data);setCoEdit(coR.data);}
       if(prR.data)setProducts(prR.data);
@@ -2658,6 +2660,7 @@ export default function App(){
       if(stR.data)setStateTaxes(stR.data);
       if(exR.data)setExpenses(exR.data);
       if(wiR.data)setWalkinRegs(wiR.data);
+      if(cmR.data)setCreditMemos(cmR.data);
       // Load truck reset requests (graceful fallback if table doesn't exist yet)
       try{
         const{data:rr}=await supabase.from("truck_resets").select("*").order("created_at",{ascending:false});
@@ -2949,10 +2952,10 @@ export default function App(){
   const addProduct=async()=>{
     if(!np.name||!np.sku||!np.cost||!np.price)return showToast("Name, SKU, cost & price required","error");
     setSaving(true);
-    const rec={id:"P"+uid(),name:np.name,sku:np.sku,cat:np.cat,unit:np.unit,cost:parseFloat(np.cost),price:parseFloat(np.price),shelf:parseInt(np.shelf)||0,reorder_point:parseInt(np.reorder_point)||5};
+    const rec={id:"P"+uid(),name:np.name,sku:np.sku,cat:np.cat,unit:np.unit,case_qty:parseInt(np.case_qty)||1,cost:parseFloat(np.cost),price:parseFloat(np.price),shelf:parseInt(np.shelf)||0,reorder_point:parseInt(np.reorder_point)||5};
     const{error}=await supabase.from("products").insert(rec);
     if(error)showToast(error.message,"error");
-    else{setProducts(prev=>[...prev,rec]);showToast(`${np.name} added`);setModal(null);setNp({name:"",sku:"",cat:"Beverage",unit:"Case/24",cost:"",price:"",shelf:"",reorder_point:"5"});}
+    else{setProducts(prev=>[...prev,rec]);showToast(`${np.name} added`);setModal(null);setNp({name:"",sku:"",cat:"Beverage",unit:"Case",case_qty:"24",cost:"",price:"",shelf:"",reorder_point:"5"});}
     setSaving(false);
   };
 
@@ -2961,7 +2964,7 @@ export default function App(){
   const saveEditProduct=async()=>{
     setSaving(true);
     const{id,...fields}=editProd;
-    const update={name:fields.name,sku:fields.sku,cat:fields.cat,unit:fields.unit,cost:parseFloat(fields.cost)||0,price:parseFloat(fields.price)||0,shelf:parseInt(fields.shelf)||0,reorder_point:parseInt(fields.reorder_point)||5};
+    const update={name:fields.name,sku:fields.sku,cat:fields.cat,unit:fields.unit,case_qty:parseInt(fields.case_qty)||1,cost:parseFloat(fields.cost)||0,price:parseFloat(fields.price)||0,shelf:parseInt(fields.shelf)||0,reorder_point:parseInt(fields.reorder_point)||5};
     const{error}=await supabase.from("products").update(update).eq("id",id);
     if(error)showToast(error.message,"error");
     else{setProducts(prev=>prev.map(p=>p.id===id?{...p,...update}:p));showToast("Product updated");setEditingPid(null);}
@@ -3527,6 +3530,7 @@ export default function App(){
     ...(isAdmin?[{id:"purchaseorders",label:"Purchase Orders",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🛒</span>}]:[]),
     {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
+    ...(isAdmin?[{id:"creditmemos",label:"Credit Memos",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>📝</span>}]:[]),
     {id:"taxinvoices",label:"Tax Invoices",icon:ic.inv},
     {id:"statetax",label:"State Activation",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>⚙️</span>},
     {id:"ar",label:"Accounts Receivable",icon:ic.ar},
@@ -3810,14 +3814,15 @@ export default function App(){
               </div>
               <div className="tw"><table>
                 <thead><tr>
-                  <th>Product</th><th>SKU</th><th>Category</th><th>Unit</th>
-                  <th>Cost</th><th>Price</th><th>Margin</th><th>Shelf</th><th>Reorder At</th><th>Status</th>
+                  <th>Product</th><th>SKU</th><th>Category</th><th>Sell By</th><th>Case Qty</th>
+                  <th>Cost</th><th>Price</th><th>Unit Price</th><th>Margin</th><th>Shelf</th><th>Reorder At</th><th>Status</th>
                   {isAdmin&&<th>Actions</th>}
                 </tr></thead>
                 <tbody>{products.map(p=>{
                   const isE=editingPid===p.id;
                   const margin=p.price>0?((p.price-p.cost)/p.price*100).toFixed(0):0;
                   const low=p.shelf<=(p.reorder_point||5)&&p.shelf>0;
+                  const unitPrice=p.case_qty>1?(p.price/(p.case_qty||1)).toFixed(2):null;
                   return(
                     <tr key={p.id} style={{background:isE?"#f5f3ff":p.shelf===0?"#fef2f2":low?"#fff7ed":"#fff"}}>
                       {isE?(
@@ -3826,8 +3831,10 @@ export default function App(){
                           <td><input className="ei" value={editProd.sku} onChange={e=>setEditProd(x=>({...x,sku:e.target.value}))}/></td>
                           <td><input className="ei" value={editProd.cat} onChange={e=>setEditProd(x=>({...x,cat:e.target.value}))}/></td>
                           <td><input className="ei" value={editProd.unit} onChange={e=>setEditProd(x=>({...x,unit:e.target.value}))}/></td>
+                          <td><input className="ei" type="number" min="1" value={editProd.case_qty||1} onChange={e=>setEditProd(x=>({...x,case_qty:e.target.value}))}/></td>
                           <td><input className="ei" type="number" value={editProd.cost} onChange={e=>setEditProd(x=>({...x,cost:e.target.value}))}/></td>
                           <td><input className="ei" type="number" value={editProd.price} onChange={e=>setEditProd(x=>({...x,price:e.target.value}))}/></td>
+                          <td>—</td>
                           <td>—</td>
                           <td><input className="ei" type="number" value={editProd.shelf} onChange={e=>setEditProd(x=>({...x,shelf:e.target.value}))}/></td>
                           <td><input className="ei" type="number" value={editProd.reorder_point||5} onChange={e=>setEditProd(x=>({...x,reorder_point:e.target.value}))}/></td>
@@ -3840,8 +3847,10 @@ export default function App(){
                           <td style={{fontFamily:"monospace",fontSize:11,color:"#6b7280"}}>{p.sku}</td>
                           <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{p.cat}</span></td>
                           <td style={{color:"#6b7280",fontSize:11}}>{p.unit}</td>
+                          <td style={{color:"#6b7280",fontSize:11,textAlign:"center"}}>{p.case_qty||1}</td>
                           <td style={{color:"#6b7280"}}>{fmt(p.cost)}</td>
                           <td style={{fontWeight:600,color:"#059669"}}>{fmt(p.price)}</td>
+                          <td style={{fontSize:11,color:"#9ca3af"}}>{unitPrice?`$${unitPrice}/ea`:"—"}</td>
                           <td><span style={{fontSize:11,color:margin>30?"#059669":margin>15?"#f59e0b":"#dc2626",fontWeight:600}}>{margin}%</span></td>
                           <td>
                             <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:p.shelf===0?"#dc2626":low?"#f59e0b":"#059669"}}>{p.shelf}</span>
@@ -4260,6 +4269,133 @@ export default function App(){
                 </div>
               </div>
             </div>
+            );
+          })()}
+
+          {/* ══ CREDIT MEMOS ══ */}
+          {tab==="creditmemos"&&isAdmin&&(()=>{
+            const uid4=()=>Math.random().toString(36).slice(2,8).toUpperCase();
+            const[cmForm,setCmForm]=useState({cust_id:"",invoice_id:"",reason:"Return",amount:"",notes:""});
+            const[cmSaving,setCmSaving]=useState(false);
+            const openBalance=cid=>creditMemos.filter(m=>m.cust_id===cid&&m.status==="open").reduce((a,m)=>a+parseFloat(m.amount||0),0);
+            const saveMemo=async()=>{
+              if(!cmForm.cust_id||!cmForm.amount||parseFloat(cmForm.amount)<=0)return showToast("Customer and amount required","error");
+              setCmSaving(true);
+              const rec={id:"CM-"+uid4(),cust_id:cmForm.cust_id,invoice_id:cmForm.invoice_id||null,reason:cmForm.reason||"Return",amount:parseFloat(cmForm.amount),notes:cmForm.notes||"",status:"open",created_at:new Date().toISOString()};
+              const{error}=await supabase.from("credit_memos").insert(rec);
+              if(error){showToast(error.message,"error");setCmSaving(false);return;}
+              setCreditMemos(prev=>[rec,...prev]);
+              setCmForm({cust_id:"",invoice_id:"",reason:"Return",amount:"",notes:""});
+              showToast("✅ Credit memo issued");
+              setCmSaving(false);
+            };
+            const voidMemo=id=>showConfirm("Void this credit memo?",async()=>{
+              await supabase.from("credit_memos").update({status:"voided"}).eq("id",id);
+              setCreditMemos(prev=>prev.map(m=>m.id===id?{...m,status:"voided"}:m));
+              showToast("Credit memo voided");
+            });
+            const applyMemo=async id=>{
+              await supabase.from("credit_memos").update({status:"applied"}).eq("id",id);
+              setCreditMemos(prev=>prev.map(m=>m.id===id?{...m,status:"applied"}:m));
+              showToast("Credit applied to account");
+            };
+            const totalOpen=creditMemos.filter(m=>m.status==="open").reduce((a,m)=>a+parseFloat(m.amount||0),0);
+            const statusBadge=s=>({open:<span className="bdg ba2">OPEN</span>,applied:<span className="bdg bg2">APPLIED</span>,voided:<span className="bdg br2">VOIDED</span>}[s]||<span className="bdg bgr">{s}</span>);
+            return(
+              <div className="fu">
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,marginBottom:4}}>📝 Credit Memos</div>
+                <div style={{fontSize:12,color:"#9ca3af",marginBottom:16}}>Issue credits for product returns or billing adjustments. Open credits reduce the customer's outstanding balance.</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
+                  {[{l:"Total Memos",v:creditMemos.length,c:"#7c3aed"},{l:"Open Credits",v:fmt(totalOpen),c:"#dc2626"},{l:"Applied",v:creditMemos.filter(m=>m.status==="applied").length,c:"#059669"},{l:"Voided",v:creditMemos.filter(m=>m.status==="voided").length,c:"#9ca3af"}].map(k=>(
+                    <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>
+                  ))}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:18,alignItems:"start"}}>
+                  {/* Issue form */}
+                  <div className="card" style={{padding:20,borderTop:"3px solid #7c3aed"}}>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:14}}>➕ Issue Credit Memo</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                      <div><label>Customer *</label>
+                        <select value={cmForm.cust_id} onChange={e=>setCmForm(f=>({...f,cust_id:e.target.value,invoice_id:""}))}>
+                          <option value="">— Select Customer —</option>
+                          {customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      </div>
+                      {cmForm.cust_id&&openBalance(cmForm.cust_id)>0&&(
+                        <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,padding:"7px 10px",fontSize:11,color:"#065f46"}}>
+                          💳 Existing open credit: <strong>{fmt(openBalance(cmForm.cust_id))}</strong>
+                        </div>
+                      )}
+                      <div><label>Related Invoice (optional)</label>
+                        <select value={cmForm.invoice_id} onChange={e=>setCmForm(f=>({...f,invoice_id:e.target.value}))}>
+                          <option value="">— No specific invoice —</option>
+                          {sales.filter(s=>!cmForm.cust_id||s.cust_id===cmForm.cust_id).slice(0,50).map(s=>(
+                            <option key={s.id} value={s.id}>{s.id} · {s.date} · {fmt(calcSaleGrandTotal(s))}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div><label>Reason</label>
+                        <select value={cmForm.reason} onChange={e=>setCmForm(f=>({...f,reason:e.target.value}))}>
+                          {["Return","Damaged Goods","Billing Error","Overcharge","Goodwill","Short Shipment","Other"].map(r=><option key={r}>{r}</option>)}
+                        </select>
+                      </div>
+                      <div><label>Credit Amount ($) *</label>
+                        <input type="number" min="0" step="0.01" placeholder="0.00" value={cmForm.amount} onChange={e=>setCmForm(f=>({...f,amount:e.target.value}))}/>
+                      </div>
+                      <div><label>Internal Notes</label>
+                        <input placeholder="e.g. Customer returned 2 damaged cases" value={cmForm.notes} onChange={e=>setCmForm(f=>({...f,notes:e.target.value}))}/>
+                      </div>
+                      <button onClick={saveMemo} disabled={cmSaving} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:9,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",opacity:cmSaving?0.7:1}}>
+                        {cmSaving?"Saving…":"📝 Issue Credit Memo"}
+                      </button>
+                    </div>
+                  </div>
+                  {/* Memos list */}
+                  <div>
+                    {creditMemos.length===0
+                      ?<div className="card" style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+                          <div style={{fontSize:36,marginBottom:8}}>📝</div>
+                          <div style={{fontSize:14,fontWeight:600}}>No credit memos yet</div>
+                          <div style={{fontSize:12}}>Issue your first credit memo using the form</div>
+                        </div>
+                      :<div className="card" style={{overflow:"hidden"}}>
+                        <div style={{overflowX:"auto"}}>
+                          <table style={{width:"100%",borderCollapse:"collapse"}}>
+                            <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                              {["Memo #","Date","Customer","Invoice","Reason","Amount","Status","Actions"].map(h=>(
+                                <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
+                              ))}
+                            </tr></thead>
+                            <tbody>
+                              {creditMemos.map(m=>{
+                                const cust=customers.find(c=>c.id===m.cust_id);
+                                return(
+                                  <tr key={m.id} style={{borderBottom:"1px solid #f3f4f6",background:m.status==="voided"?"#fafafa":"#fff"}}>
+                                    <td style={{padding:"9px 13px",fontWeight:700,color:"#7c3aed",fontSize:12}}>{m.id}</td>
+                                    <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{new Date(m.created_at).toLocaleDateString()}</td>
+                                    <td style={{padding:"9px 13px",fontWeight:600,fontSize:12}}>{cust?.name||"—"}</td>
+                                    <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{m.invoice_id||"—"}</td>
+                                    <td style={{padding:"9px 13px"}}><span className="bdg bb2">{m.reason}</span></td>
+                                    <td style={{padding:"9px 13px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:m.status==="voided"?"#9ca3af":"#dc2626"}}>{fmt(m.amount)}</td>
+                                    <td style={{padding:"9px 13px"}}>{statusBadge(m.status)}</td>
+                                    <td style={{padding:"9px 13px"}}>
+                                      <div style={{display:"flex",gap:5}}>
+                                        {m.status==="open"&&<button onClick={()=>applyMemo(m.id)} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700}}>✅ Apply</button>}
+                                        {m.status==="open"&&<button onClick={()=>voidMemo(m.id)} style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#dc2626",cursor:"pointer",fontWeight:700}}>✕ Void</button>}
+                                        {m.notes&&<span style={{fontSize:10,color:"#9ca3af",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"inline-block"}} title={m.notes}>📝 {m.notes}</span>}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    }
+                  </div>
+                </div>
+              </div>
             );
           })()}
 
@@ -4809,6 +4945,39 @@ export default function App(){
                         </div>
                       </div>
                     );})()}
+                    {/* Purchase History Analytics */}
+                    {cs.length>0&&(()=>{
+                      // Top products by qty sold to this customer
+                      const prodQtys={};
+                      cs.forEach(s=>(s.items||[]).forEach(it=>{prodQtys[it.pid]=(prodQtys[it.pid]||0)+(it.qty||0);}));
+                      const topProds=Object.entries(prodQtys).sort((a,b)=>b[1]-a[1]).slice(0,3);
+                      // Order frequency
+                      const sortedDates=cs.map(s=>new Date(s.created_at||s.date)).filter(d=>!isNaN(d)).sort((a,b)=>b-a);
+                      const lastOrder=sortedDates[0];
+                      const daysSinceLast=lastOrder?Math.floor((new Date()-lastOrder)/(1000*60*60*24)):null;
+                      const avgDaysBetween=sortedDates.length>1?(sortedDates.slice(0,-1).reduce((a,d,i)=>a+Math.floor((d-sortedDates[i+1])/(1000*60*60*24)),0)/(sortedDates.length-1)).toFixed(0):null;
+                      return(
+                        <div style={{marginTop:10,background:"#f9fafb",borderRadius:8,padding:"10px 12px"}}>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:11,color:"#6b7280",marginBottom:6,letterSpacing:".06em"}}>📊 BUYING PATTERNS</div>
+                          <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:6}}>
+                            {lastOrder&&<div style={{fontSize:11}}><span style={{color:"#9ca3af"}}>Last order:</span> <span style={{fontWeight:700,color:daysSinceLast>30?"#dc2626":"#059669"}}>{daysSinceLast===0?"Today":`${daysSinceLast}d ago`}</span></div>}
+                            {avgDaysBetween&&<div style={{fontSize:11}}><span style={{color:"#9ca3af"}}>Avg frequency:</span> <span style={{fontWeight:700,color:"#7c3aed"}}>every {avgDaysBetween} days</span></div>}
+                          </div>
+                          {topProds.length>0&&(
+                            <div>
+                              <div style={{fontSize:10,color:"#9ca3af",marginBottom:4}}>Top products:</div>
+                              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                                {topProds.map(([pid,qty])=>{const prod=getP(pid);return prod?(
+                                  <span key={pid} style={{background:"#ede9fe",color:"#7c3aed",fontSize:10,padding:"2px 8px",borderRadius:5,fontWeight:600}}>
+                                    {prod.name} ×{qty}
+                                  </span>
+                                ):null;})}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     <div style={{fontSize:10,color:"#9ca3af",marginTop:10}}>Driver: <span style={{color:"#7c3aed"}}>{truck?.driver||"Unassigned"}</span>{c.credit_limit>0&&<span style={{marginLeft:8}}>· Limit: <span style={{color:"#212121",fontWeight:700}}>{fmt(c.credit_limit)}</span></span>}</div>
                   </div>
                 );
@@ -4875,6 +5044,7 @@ export default function App(){
             const subTabs=[
               ["overview","📊 Overview"],
               ["drivers","🚚 Drivers"],
+              ["schedule","📅 Delivery Schedule"],
               ["assign","👤 Assign Customers"],
               ["resets",`🔄 Reset Requests${truckResets.filter(r=>r.status==="pending").length?` (${truckResets.filter(r=>r.status==="pending").length})`:""}` ],
               ["map","🗺 Live Map"],
@@ -5039,6 +5209,147 @@ export default function App(){
                   <DriverTruckAssignment supabase={supabase} trucks={trucks} showToast={showToast}/>
                 </div>
               </>}
+
+              {/* ── DELIVERY SCHEDULE ── */}
+              {tmTab==="schedule"&&(()=>{
+                const[schedTruck,setSchedTruck]=useState(trucks[0]?.id||"");
+                const[schedDay,setSchedDay]=useState("Monday");
+                const[saving2,setSaving2]=useState(false);
+                const truck=trucks.find(t=>t.id===schedTruck);
+                const days=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+                // Customers assigned to this truck
+                const assignedCusts=customers.filter(c=>c.truck_id===schedTruck);
+                // Get schedule from truck.schedule (jsonb) or empty
+                const getSchedule=()=>{try{return JSON.parse(truck?.schedule||"{}");}catch{return{};}};
+                const sched=getSchedule();
+                const dayStops=sched[schedDay]||[];
+                // Move stop up/down
+                const moveStop=(idx,dir)=>{
+                  const stops=[...dayStops];
+                  const newIdx=idx+dir;
+                  if(newIdx<0||newIdx>=stops.length)return;
+                  [stops[idx],stops[newIdx]]=[stops[newIdx],stops[idx]];
+                  saveSchedule({...sched,[schedDay]:stops});
+                };
+                const addStop=cid=>{
+                  if(dayStops.find(s=>s.cid===cid))return showToast("Already on this day's route","error");
+                  const stops=[...dayStops,{cid,note:""}];
+                  saveSchedule({...sched,[schedDay]:stops});
+                };
+                const removeStop=cid=>{
+                  const stops=dayStops.filter(s=>s.cid!==cid);
+                  saveSchedule({...sched,[schedDay]:stops});
+                };
+                const updateNote=(cid,note)=>{
+                  const stops=dayStops.map(s=>s.cid===cid?{...s,note}:s);
+                  saveSchedule({...sched,[schedDay]:stops});
+                };
+                const saveSchedule=async(newSched)=>{
+                  setSaving2(true);
+                  await supabase.from("trucks").update({schedule:JSON.stringify(newSched)}).eq("id",schedTruck);
+                  setTrucks(prev=>prev.map(t=>t.id===schedTruck?{...t,schedule:JSON.stringify(newSched)}:t));
+                  setSaving2(false);
+                };
+                return(
+                  <div>
+                    {/* Truck + Day selectors */}
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+                      <div className="card" style={{padding:14}}>
+                        <label>Select Driver / Truck</label>
+                        <select value={schedTruck} onChange={e=>setSchedTruck(e.target.value)}>
+                          {trucks.map(t=><option key={t.id} value={t.id}>{t.driver} — {t.plate} {t.route?`(${t.route})`:""}</option>)}
+                        </select>
+                      </div>
+                      <div className="card" style={{padding:14}}>
+                        <label>Day of Week</label>
+                        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:4}}>
+                          {days.map(d=>(
+                            <button key={d} onClick={()=>setSchedDay(d)}
+                              style={{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${schedDay===d?"#0a1628":"#e5e7eb"}`,background:schedDay===d?"#0a1628":"#fff",color:schedDay===d?"#fff":"#6b7280",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                              {d.slice(0,3)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+                      {/* Route for selected day */}
+                      <div className="card" style={{padding:18,borderTop:"3px solid #0a1628"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14}}>{truck?.driver} — {schedDay} Route</div>
+                          {saving2&&<span style={{fontSize:11,color:"#9ca3af"}}>Saving…</span>}
+                        </div>
+                        {dayStops.length===0
+                          ?<div style={{textAlign:"center",padding:"24px 0",color:"#9ca3af",fontSize:13}}>
+                              <div style={{fontSize:28,marginBottom:8}}>📍</div>
+                              No stops on {schedDay} yet.<br/>Add from the list →
+                            </div>
+                          :dayStops.map((s,idx)=>{
+                            const cust=customers.find(c=>c.id===s.cid);
+                            return(
+                              <div key={s.cid} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:8,padding:"10px 12px",background:"#f9fafb",borderRadius:8,border:"1px solid #e5e7eb"}}>
+                                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:18,color:"#0a1628",minWidth:24,textAlign:"center",lineHeight:1.4}}>{idx+1}</div>
+                                <div style={{flex:1}}>
+                                  <div style={{fontWeight:600,fontSize:13,color:"#212121"}}>{cust?.name||s.cid}</div>
+                                  <div style={{fontSize:11,color:"#9ca3af"}}>{cust?.address||""}</div>
+                                  <input placeholder="Stop note (e.g. call ahead)" value={s.note||""} onChange={e=>updateNote(s.cid,e.target.value)}
+                                    style={{marginTop:4,width:"100%",border:"1px solid #e5e7eb",borderRadius:5,padding:"4px 8px",fontSize:11,boxSizing:"border-box"}}/>
+                                </div>
+                                <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                                  <button onClick={()=>moveStop(idx,-1)} disabled={idx===0} style={{background:"#f3f4f6",border:"none",borderRadius:4,padding:"2px 6px",cursor:"pointer",fontSize:12,opacity:idx===0?0.3:1}}>▲</button>
+                                  <button onClick={()=>moveStop(idx,1)} disabled={idx===dayStops.length-1} style={{background:"#f3f4f6",border:"none",borderRadius:4,padding:"2px 6px",cursor:"pointer",fontSize:12,opacity:idx===dayStops.length-1?0.3:1}}>▼</button>
+                                  <button onClick={()=>removeStop(s.cid)} style={{background:"#fef2f2",border:"none",borderRadius:4,padding:"2px 6px",cursor:"pointer",fontSize:12,color:"#dc2626"}}>✕</button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        }
+                      </div>
+
+                      {/* Add customers */}
+                      <div className="card" style={{padding:18,borderTop:"3px solid #7c3aed"}}>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:12}}>➕ Add Stop — Assigned Customers</div>
+                        {assignedCusts.length===0
+                          ?<div style={{fontSize:12,color:"#9ca3af"}}>No customers assigned to this truck yet.</div>
+                          :assignedCusts.map(c=>{
+                            const already=dayStops.find(s=>s.cid===c.id);
+                            return(
+                              <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f3f4f6"}}>
+                                <div>
+                                  <div style={{fontWeight:600,fontSize:12,color:already?"#9ca3af":"#212121"}}>{c.name}</div>
+                                  <div style={{fontSize:10,color:"#9ca3af"}}>{c.address||""}</div>
+                                </div>
+                                <button onClick={()=>addStop(c.id)} disabled={!!already}
+                                  style={{background:already?"#f3f4f6":"#ede9fe",border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,color:already?"#9ca3af":"#7c3aed",cursor:already?"default":"pointer",fontWeight:700}}>
+                                  {already?"✓ Added":"+ Add"}
+                                </button>
+                              </div>
+                            );
+                          })
+                        }
+                      </div>
+                    </div>
+
+                    {/* Weekly summary */}
+                    <div className="card" style={{padding:18,marginTop:16}}>
+                      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:12}}>📅 Weekly Overview — {truck?.driver}</div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:8}}>
+                        {days.map(d=>{
+                          const stops=(sched[d]||[]);
+                          return(
+                            <div key={d} onClick={()=>setSchedDay(d)} style={{padding:"10px 8px",background:schedDay===d?"#0a1628":stops.length?"#f5f3ff":"#f9fafb",borderRadius:8,cursor:"pointer",textAlign:"center",border:`1px solid ${schedDay===d?"#0a1628":stops.length?"#ddd6fe":"#e5e7eb"}`}}>
+                              <div style={{fontSize:11,fontWeight:700,color:schedDay===d?"#fff":stops.length?"#7c3aed":"#9ca3af"}}>{d.slice(0,3).toUpperCase()}</div>
+                              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,color:schedDay===d?"#fff":stops.length?"#7c3aed":"#d1d5db",marginTop:4}}>{stops.length}</div>
+                              <div style={{fontSize:9,color:schedDay===d?"#c4b5fd":"#9ca3af"}}>{stops.length===1?"stop":"stops"}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* ── ASSIGN CUSTOMERS ── */}
               {tmTab==="assign"&&<>
@@ -5786,10 +6097,16 @@ export default function App(){
             <div><label>Product Name *</label><input placeholder="e.g. Red Bull 250ml" value={np.name} onChange={e=>setNp(p=>({...p,name:e.target.value}))}/></div>
             <div><label>SKU *</label><input placeholder="e.g. RB-250" value={np.sku} onChange={e=>setNp(p=>({...p,sku:e.target.value}))}/></div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
             <div><label>Category</label><select value={np.cat} onChange={e=>setNp(p=>({...p,cat:e.target.value}))}>{["Beverage","Tobacco","Snack","Health","Misc","Other"].map(c=><option key={c}>{c}</option>)}</select></div>
-            <div><label>Unit</label><input placeholder="Case/24" value={np.unit} onChange={e=>setNp(p=>({...p,unit:e.target.value}))}/></div>
+            <div><label>Sell By</label><select value={np.unit} onChange={e=>setNp(p=>({...p,unit:e.target.value}))}>
+              {["Case","Pack","Carton","Box","Each","Bag","Bottle","Can"].map(u=><option key={u}>{u}</option>)}
+            </select></div>
+            <div><label>Units per Case</label><input type="number" min="1" placeholder="24" value={np.case_qty} onChange={e=>setNp(p=>({...p,case_qty:e.target.value}))}/></div>
           </div>
+          {np.case_qty>1&&np.price&&<div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,padding:"8px 12px",fontSize:11,color:"#065f46"}}>
+            📦 {np.unit} price: <strong>${parseFloat(np.price).toFixed(2)}</strong> · Per unit: <strong>${(parseFloat(np.price)/(parseInt(np.case_qty)||1)).toFixed(2)}</strong>
+          </div>}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
             <div><label>Cost ($) *</label><input type="number" min="0" step="0.01" placeholder="0.00" value={np.cost} onChange={e=>setNp(p=>({...p,cost:e.target.value}))}/></div>
             <div><label>Price ($) *</label><input type="number" min="0" step="0.01" placeholder="0.00" value={np.price} onChange={e=>setNp(p=>({...p,price:e.target.value}))}/></div>
