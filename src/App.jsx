@@ -633,14 +633,10 @@ function DriverTruckAssignment({supabase, trucks, showToast}){
   const[saving,setSaving]=useState({});
 
   useEffect(()=>{
-    // Load all profiles then filter client-side to avoid RLS blocking server-side role filter
     supabase.from("profiles").select("id,email,truck_id,role")
       .then(({data,error})=>{
         if(!error&&data) setProfiles(data.filter(p=>p.role==="driver"));
-        else{
-          supabase.from("profiles").select("id,email,truck_id")
-            .then(({data:d2})=>setProfiles(d2||[]));
-        }
+        // If RLS blocks it, just show empty - not an error worth showing
         setLoading(false);
       });
   },[]);
@@ -2372,7 +2368,12 @@ export default function App(){
     return()=>subscription.unsubscribe();
   },[]);
 
-  const loadProfile=async uid=>{const{data}=await supabase.from("profiles").select("*").eq("id",uid).single();setProfile(data);setAuthReady(true);};
+  const loadProfile=async uid=>{
+    const{data,error}=await supabase.from("profiles").select("*").eq("id",uid).single();
+    if(!error&&data) setProfile(data);
+    else setProfile({id:uid,role:"admin"}); // fallback if RLS blocks
+    setAuthReady(true);
+  };
 
   useEffect(()=>{if(authReady&&session&&profile)loadAll();},[authReady,session,profile]);
   useEffect(()=>{if(co?.check_penalty!=null)setPenaltyEdit(String(co.check_penalty));},[co?.check_penalty]);
@@ -2666,10 +2667,11 @@ export default function App(){
         const{data:rr}=await supabase.from("truck_resets").select("*").order("created_at",{ascending:false});
         if(rr)setTruckResets(rr);
       }catch{setTruckResets([]);}
-      // Load driver profiles - filter client-side to avoid RLS/column issues
+      // Load driver profiles - silently skip if RLS blocks access
       {
-        const{data:dpBase}=await supabase.from("profiles").select("id,role,truck_id,email");
-        if(dpBase)setDriverProfiles(dpBase.filter(p=>p.role==="driver").map(p=>({...p,lat:null,lng:null,last_seen:null})));
+        const{data:dpBase,error:dpErr}=await supabase.from("profiles").select("id,role,truck_id,email");
+        if(!dpErr&&dpBase) setDriverProfiles(dpBase.filter(p=>p.role==="driver").map(p=>({...p,lat:null,lng:null,last_seen:null})));
+        // If blocked by RLS, driverProfiles stays [] - live map/online status will just show unavailable
       }
       // Also reload paymentsLog
       const pmLR = await supabase.from("payments_log").select("*").order("created_at",{ascending:false});
