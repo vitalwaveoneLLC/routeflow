@@ -1848,20 +1848,22 @@ export default function OrderPortal() {
   useEffect(()=>{
     if(!driverData?.userId) return;
     const sendLocation = ()=>{
-      if(!navigator.geolocation) return;
+      // Silently attempt location update — columns may not exist, errors are ignored
+      const updateLastSeen = () => {
+        supabase.from("profiles").update({last_seen:new Date().toISOString()})
+          .eq("id",driverData.userId).then(()=>{}).catch(()=>{});
+      };
+      if(!navigator.geolocation){ updateLastSeen(); return; }
       navigator.geolocation.getCurrentPosition(pos=>{
         supabase.from("profiles").update({
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
           last_seen: new Date().toISOString(),
-        }).eq("id", driverData.userId).then(()=>{});
-      }, ()=>{
-        // Permission denied or unavailable - just update last_seen
-        supabase.from("profiles").update({last_seen:new Date().toISOString()}).eq("id",driverData.userId).then(()=>{});
-      });
+        }).eq("id", driverData.userId).then(()=>{}).catch(()=>{});
+      }, ()=>{ updateLastSeen(); });
     };
-    sendLocation(); // immediately on login
-    const interval = setInterval(sendLocation, 60000); // every 60s
+    sendLocation();
+    const interval = setInterval(sendLocation, 60000);
     return ()=>clearInterval(interval);
   },[driverData?.userId]);
 

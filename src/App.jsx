@@ -633,12 +633,11 @@ function DriverTruckAssignment({supabase, trucks, showToast}){
   const[saving,setSaving]=useState({});
 
   useEffect(()=>{
-    // Query profiles table directly - driver_profiles view may not exist
-    supabase.from("profiles").select("id,email,truck_id,role").eq("role","driver")
+    // Load all profiles then filter client-side to avoid RLS blocking server-side role filter
+    supabase.from("profiles").select("id,email,truck_id,role")
       .then(({data,error})=>{
-        if(!error&&data) setProfiles(data);
+        if(!error&&data) setProfiles(data.filter(p=>p.role==="driver"));
         else{
-          // Final fallback: try without role filter in case column differs
           supabase.from("profiles").select("id,email,truck_id")
             .then(({data:d2})=>setProfiles(d2||[]));
         }
@@ -2667,10 +2666,10 @@ export default function App(){
         const{data:rr}=await supabase.from("truck_resets").select("*").order("created_at",{ascending:false});
         if(rr)setTruckResets(rr);
       }catch{setTruckResets([]);}
-      // Load driver profiles - base fields only (lat/lng/last_seen added via Supabase if columns exist)
+      // Load driver profiles - filter client-side to avoid RLS/column issues
       {
-        const{data:dpBase}=await supabase.from("profiles").select("id,role,truck_id,email").eq("role","driver");
-        if(dpBase)setDriverProfiles(dpBase.map(p=>({...p,lat:null,lng:null,last_seen:null})));
+        const{data:dpBase}=await supabase.from("profiles").select("id,role,truck_id,email");
+        if(dpBase)setDriverProfiles(dpBase.filter(p=>p.role==="driver").map(p=>({...p,lat:null,lng:null,last_seen:null})));
       }
       // Also reload paymentsLog
       const pmLR = await supabase.from("payments_log").select("*").order("created_at",{ascending:false});
