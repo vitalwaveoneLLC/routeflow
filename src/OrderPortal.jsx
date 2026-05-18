@@ -217,7 +217,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
         </table>
         <div style={{display:"flex",justifyContent:"flex-end"}}>
           <div style={{width:220}}>
-            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null,parseFloat(sale.previous_balance||0)>0?[`⚠️ Prev. Balance (${sale.previous_invoice_ids||""})`,`$${parseFloat(sale.previous_balance||0).toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6",background:l.includes("Prev")?"#fef2f2":"transparent",margin:l.includes("Prev")?"0 -4px":0,padding:l.includes("Prev")?"5px 4px":"5px 0"}}><span style={{fontSize:12,color:l.includes("Prev")?"#dc2626":"#6b7280",fontWeight:l.includes("Prev")?700:400}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":l.includes("Prev")?"#dc2626":"#212121",fontWeight:l.includes("Prev")?700:400}}>{v}</span></div>)}
+            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null,parseFloat(sale.previous_balance||0)>0?[`[!]️ Prev. Balance (${sale.previous_invoice_ids||""})`,`$${parseFloat(sale.previous_balance||0).toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6",background:l.includes("Prev")?"#fef2f2":"transparent",margin:l.includes("Prev")?"0 -4px":0,padding:l.includes("Prev")?"5px 4px":"5px 0"}}><span style={{fontSize:12,color:l.includes("Prev")?"#dc2626":"#6b7280",fontWeight:l.includes("Prev")?700:400}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":l.includes("Prev")?"#dc2626":"#212121",fontWeight:l.includes("Prev")?700:400}}>{v}</span></div>)}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL DUE</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${(gt+parseFloat(sale.previous_balance||0)).toFixed(2)}</span></div>
           </div>
         </div>
@@ -249,7 +249,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
     });
     if(overLimit){
       const p=products.find(x=>x.id===overLimit.pid);
-      return setMsg({t:"error",m:`⚠️ Only ${p?.shelf} of "${p?.name}" available on shelf — can't load ${overLimit.qty}`});
+      return setMsg({t:"error",m:`[!]️ Only ${p?.shelf} of "${p?.name}" available on shelf  -  can't load ${overLimit.qty}`});
     }
 
     setSaving(true);
@@ -262,7 +262,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
         return p?supabase.from("products").update({shelf:Math.max(0,p.shelf-item.qty)}).eq("id",p.id):Promise.resolve();
       }));
       setDriverData(prev=>({...prev,activeLoad:nl}));
-      setMsg({t:"success",m:`✅ Loaded ${loadItems.reduce((a,i)=>a+i.qty,0)} units! Ready to sell.`});
+      setMsg({t:"success",m:`[OK] Loaded ${loadItems.reduce((a,i)=>a+i.qty,0)} units! Ready to sell.`});
       setItems({});
     }catch(e){setMsg({t:"error",m:e.message});}
     setSaving(false);
@@ -424,9 +424,9 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     if(match){
       const remaining = getRemainingQty(match.id);
       const current = items[match.id]||0;
-      if(current >= remaining) return setMsg({t:"error",m:`⚠️ Only ${remaining} of "${match.name}" left on truck`});
+      if(current >= remaining) return setMsg({t:"error",m:`[!]️ Only ${remaining} of "${match.name}" left on truck`});
       setItems(prev=>({...prev,[match.id]:current+1}));
-      setMsg({t:"success",m:`✓ ${match.name} added`});
+      setMsg({t:"success",m:`[OK] ${match.name} added`});
     } else {
       // Check if it's out-of-stock on truck but available on shelf
       const outMatch = outStockProducts.find(p=>p.sku?.toLowerCase()===code.toLowerCase()||p.id?.toLowerCase()===code.toLowerCase());
@@ -446,7 +446,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     const overLimit = saleItems.find(i=>i.qty > getRemainingQty(i.pid));
     if(overLimit){
       const p = products.find(x=>x.id===overLimit.pid);
-      return setMsg({t:"error",m:`⚠️ Only ${getRemainingQty(overLimit.pid)} of "${p?.name}" remaining on truck. Adjust quantity.`});
+      return setMsg({t:"error",m:`[!]️ Only ${getRemainingQty(overLimit.pid)} of "${p?.name}" remaining on truck. Adjust quantity.`});
     }
 
     setSaving(true);
@@ -603,7 +603,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
             style={{flex:1,padding:"13px",background:"#059669",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
             {paymentSaving?"Saving...":"✅ Confirm Payment"}
           </button>}
-          <button onClick={()=>{setShowPayment(false);setCreatedSale(null);setMsg({t:"success",m:`Invoice ${createdSale.id} saved — collect payment later`});}}
+          <button onClick={()=>{setShowPayment(false);setCreatedSale(null);setMsg({t:"success",m:`Invoice ${createdSale.id} saved  -  collect payment later`});}}
             style={{flex:payForm.method==="card"?1:0,padding:"13px 16px",background:"#f9fafb",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:10,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
             💾 Collect Later
           </button>
@@ -845,7 +845,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         )}
       </div>
       {gt>0&&<div style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px",marginBottom:12}}>
-        {[["Subtotal",fmt(sub),""],hasTaxableItems&&tax>0?[`Tobacco/Vape Tax · ${custStateId} (${driverTaxRate}%)`,fmt(tax),"#059669"]:null,custUnpaidBalance>0?["⚠️ Previous Balance",fmt(custUnpaidBalance),"#dc2626"]:null,["Grand Total",fmt(gt+custUnpaidBalance),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].filter(Boolean).map(([l,v,c])=>(
+        {[["Subtotal",fmt(sub),""],hasTaxableItems&&tax>0?[`Tobacco/Vape Tax   -   ${custStateId} (${driverTaxRate}%)`,fmt(tax),"#059669"]:null,custUnpaidBalance>0?["⚠️ Previous Balance",fmt(custUnpaidBalance),"#dc2626"]:null,["Grand Total",fmt(gt+custUnpaidBalance),"#0ea5e9"],["Your Profit",fmt(profit),"#059669"]].filter(Boolean).map(([l,v,c])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
             <span style={{fontSize:12,color:"#6b7280"}}>{l}</span>
             <span style={{fontWeight:700,fontSize:l==="Grand Total"?16:13,color:c||"#212121"}}>{v}</span>
@@ -984,7 +984,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     });
     if(overLimit){
       const p=products.find(x=>x.id===overLimit.pid);
-      return setWiMsg({t:"error",m:`⚠️ Only ${p?.shelf} of "${p?.name}" available on shelf — adjust quantity`});
+      return setWiMsg({t:"error",m:`[!]️ Only ${p?.shelf} of "${p?.name}" available on shelf  -  adjust quantity`});
     }
 
     setWiSaving(true);
@@ -1006,7 +1006,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       setDriverData(prev=>({...prev, sales:[{...ns,_paid:true},...prev.sales]}));
       setWiSales(prev=>[{...ns,_paid:true},...prev]);
       setWiItems({});setWiPrevBal(0);setWiPrevInvs([]);setWiCheck("");setWiZelle("");setWiReceiptFile(null);setWiReceiptUrl("");
-      setWiMsg({t:"success",m:`✅ Invoice ${invId} created! View it in History.`});
+      setWiMsg({t:"success",m:`[OK] Invoice ${invId} created! View it in History.`});
     }catch(e){setWiMsg({t:"error",m:e.message});}
     setWiSaving(false);
   };
@@ -1046,7 +1046,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       if(stockErr){
         const prod = products.find(x=>x.id===stockErr.pid);
         const increase = stockErr.qty - (oldMap[stockErr.pid]||0);
-        throw new Error(`⚠️ Only ${prod?.shelf||0} of "${prod?.name}" on shelf — can't add ${increase} more`);
+        throw new Error(`[!]️ Only ${prod?.shelf||0} of "${prod?.name}" on shelf  -  can't add ${increase} more`);
       }
 
       // Recalculate totals
@@ -1094,7 +1094,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
           <select value={wiCust} onChange={e=>handleWiCust(e.target.value)}
             style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:9,padding:"10px 12px",fontSize:13,background:"#fff",color:"#111",marginBottom:8}}>
             <option value="">— Select customer —</option>
-            {[...customers].sort((a,b)=>a.name.localeCompare(b.name)).map(c=><option key={c.id} value={c.id}>{c.name}{c.state?` · ${c.state}`:""}</option>)}
+            {[...customers].sort((a,b)=>a.name.localeCompare(b.name)).map(c=><option key={c.id} value={c.id}>{c.name}{c.state?`   -   ${c.state}`:""}</option>)}
           </select>
         </>}
         {wiCustObj&&<div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>
@@ -1146,7 +1146,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                   <div>
                     <div style={{fontWeight:600,fontSize:13,color:"#0a1628"}}>{p.name}</div>
-                    <div style={{fontSize:10,color:"#9ca3af"}}>{p.sku&&`${p.sku} · `}{p.unit} · {p.shelf} in stock{isTaxableProd(p)&&<span style={{marginLeft:5,background:"#fef3c7",color:"#92400e",padding:"1px 5px",borderRadius:3,fontSize:9,fontWeight:700}}>TOBACCO TAX</span>}</div>
+                    <div style={{fontSize:10,color:"#9ca3af"}}>{p.sku&&`${p.sku}   -   `}{p.unit} · {p.shelf} in stock{isTaxableProd(p)&&<span style={{marginLeft:5,background:"#fef3c7",color:"#92400e",padding:"1px 5px",borderRadius:3,fontSize:9,fontWeight:700}}>TOBACCO TAX</span>}</div>
                   </div>
                   <div style={{textAlign:"right"}}>
                     <div style={{fontWeight:800,fontSize:16,color:"#059669"}}>{fmt2(ep)}</div>
@@ -1704,7 +1704,7 @@ export default function OrderPortal() {
         const avail = p?.totalStock||0;
         return avail===0
           ? `"${p?.name||i.pid}" is out of stock`
-          : `"${p?.name||i.pid}" — only ${avail} available, you ordered ${i.qty}`;
+          : `"${p?.name||i.pid}"  -  only ${avail} available, you ordered ${i.qty}`;
       });
       setPortalError("⚠️ Stock issue: " + msgs.join(" · ") + " — please adjust quantities.");
       return;
@@ -2007,7 +2007,7 @@ export default function OrderPortal() {
       });
       await supabase.from("sales").update({email_sent:true,email_sent_at:new Date().toISOString()}).eq("id",sale.id);
       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,email_sent:true}:s)}));
-      setMsg({t:"success",m:`✓ Invoice emailed to ${cust.email}`});
+      setMsg({t:"success",m:`[OK] Invoice emailed to ${cust.email}`});
     }catch(e){
       setMsg({t:"error",m:"Email error: "+e.message});
     }
@@ -2253,7 +2253,7 @@ export default function OrderPortal() {
                   <div style={{fontSize:24}}>{driverData.activeLoad?"🟢":"🟡"}</div>
                   <div>
                     <div style={{fontWeight:700,fontSize:14,color:driverData.activeLoad?"#065f46":"#92400e"}}>{driverData.activeLoad?"Truck Loaded & Active":"Truck Not Loaded"}</div>
-                    <div style={{fontSize:12,color:driverData.activeLoad?"#047857":"#92400e"}}>{driverData.activeLoad?`Load ${driverData.activeLoad.id} · ${(driverData.activeLoad.items||[]).reduce((a,i)=>a+i.qty,0)} units loaded`:"Tap Load to load your truck"}</div>
+                    <div style={{fontSize:12,color:driverData.activeLoad?"#047857":"#92400e"}}>{driverData.activeLoad?`Load ${driverData.activeLoad.id}   -   ${(driverData.activeLoad.items||[]).reduce((a,i)=>a+i.qty,0)} units loaded`:"Tap Load to load your truck"}</div>
                   </div>
                 </div>
 
@@ -2331,7 +2331,7 @@ export default function OrderPortal() {
                             <div style={{fontSize:12,color:"#9a3412",marginTop:2}}>{totalRemaining} units still on truck · admin approval required</div>
                           </div>
                           <button onClick={()=>{
-                            if(!window.confirm(`Request inventory reset?\n\nThis will send a request to your admin to:\n• Return ${totalRemaining} remaining units to warehouse\n• Close your current load\n\nYou cannot undo this request.`)) return;
+                            if(!window.confirm("Request inventory reset?\n\nThis will ask your admin to:\n- Return "+totalRemaining+" units to warehouse\n- Close your current load\n\nYou cannot undo this request.")) return;
                             supabase.from("truck_resets").insert({
                               id:"RST-"+Math.random().toString(36).slice(2,8).toUpperCase(),
                               truck_id:driverData.truck?.id,
@@ -2340,23 +2340,25 @@ export default function OrderPortal() {
                               remaining_units:totalRemaining,
                               load_id:driverData.activeLoad?.id||null,
                               status:"pending",
-                              note:`Driver requested reset — ${totalRemaining} units remaining`,
+                              note:"Driver requested reset - "+totalRemaining+" units remaining",
                               created_at:new Date().toISOString(),
                             }).then(({error})=>{
                               if(error) setMsg({t:"error",m:"Failed: "+error.message});
                               else{
                                 setDriverData(prev=>({...prev,resetStatus:"pending"}));
-                                setMsg({t:"success",m:"✅ Reset request sent to admin — awaiting approval"});
+                                setMsg({t:"success",m:"Reset request sent to admin - awaiting approval"});
                               }
                             });
                           }}
                             style={{background:"#c2410c",color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
-                            🔄 Request Reset
+                            Request Reset
                           </button>
                         </div>}
                     </div>
                   );
                 })()}
+
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
                   {[
                     {l:"Customers",v:driverData.customers.length,e:"⛽",c:"#0ea5e9"},
                     {l:"Today's Sales",v:driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).length,e:"📄",c:"#7c3aed"},
@@ -2390,7 +2392,7 @@ export default function OrderPortal() {
                         setDriverData(prev=>({...prev,customers:[rec,...prev.customers]}));
                         setShowAddCust(false);
                         setNewCustForm({name:"",address:"",phone:"",email:"",state:""});
-                        setMsg({t:"success",m:`✅ ${rec.name} added to your route`});
+                        setMsg({t:"success",m:`[OK] ${rec.name} added to your route`});
                       }catch(e){setMsg({t:"error",m:e.message});}
                       setNewCustSaving(false);
                     };
@@ -2960,7 +2962,7 @@ export default function OrderPortal() {
           </div>
           <div style={{background:"#0a1628",borderRadius:12,padding:"16px 22px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
             <div style={{display:"flex",gap:22,flexWrap:"wrap"}}>
-              {[{l:"Products",v:orderItems.length},{l:"Subtotal",v:fmt(subtotal)},{l:`Tax · Tobacco only`,v:fmt(tax)},{l:"TOTAL",v:fmt(total),big:true}].map(k=>(
+              {[{l:"Products",v:orderItems.length},{l:"Subtotal",v:fmt(subtotal)},{l:`Tax   -   Tobacco only`,v:fmt(tax)},{l:"TOTAL",v:fmt(total),big:true}].map(k=>(
                 <div key={k.l}><div style={{fontSize:9,color:"#4b6080",letterSpacing:".08em"}}>{k.l}</div><div style={{fontFamily:"'Playfair Display',serif",fontSize:k.big?24:16,color:k.big?"#f59e0b":"#fff"}}>{k.v}</div></div>
               ))}
             </div>
@@ -3029,7 +3031,7 @@ export default function OrderPortal() {
                   <span>Previous Balance</span><span>{fmt(custPrevBalance)}</span>
                 </div>
               </div>}
-              {[{l:"Subtotal",v:fmt(subtotal)},{l:`Tax · Tobacco only`,v:fmt(tax)},{l:"New Order Total",v:fmt(total)},...(custPrevBalance>0?[{l:"⚠️ Previous Balance",v:fmt(custPrevBalance)}]:[])].map(k=>(
+              {[{l:"Subtotal",v:fmt(subtotal)},{l:`Tax   -   Tobacco only`,v:fmt(tax)},{l:"New Order Total",v:fmt(total)},...(custPrevBalance>0?[{l:"⚠️ Previous Balance",v:fmt(custPrevBalance)}]:[])].map(k=>(
                 <div key={k.l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #ffffff10"}}>
                   <span style={{fontSize:12,color:k.l.includes("Balance")?"#fca5a5":"#4b6080"}}>{k.l}</span>
                   <span style={{fontSize:12,color:k.l.includes("Balance")?"#fca5a5":"#9ca3af"}}>{k.v}</span>
@@ -3097,7 +3099,7 @@ export default function OrderPortal() {
 
               {portalError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:9,padding:"12px 16px",fontSize:13,color:"#dc2626",marginBottom:12,fontWeight:500}}>{portalError}</div>}
               <button className="btn-amber" style={{width:"100%",justifyContent:"center",padding:"13px",opacity:(payMethod==="card"&&!stripeReady)?0.5:1}} onClick={()=>{setPortalError("");handleSubmit();}} disabled={submitting||(payMethod==="card"&&!stripeReady)}>
-                {submitting?<><span className="sp">⟳</span>Processing…</>:payMethod==="card"?`💳 Pay ${fmt(grandTotal)} Now`:`✓ Submit Order — Pay on Delivery`}
+                {submitting?<><span className="sp">⟳</span>Processing…</>:payMethod==="card"?`💳 Pay ${fmt(grandTotal)} Now`:`[OK] Submit Order  -  Pay on Delivery`}
               </button>
               <div style={{fontSize:10,color:"#374151",textAlign:"center",marginTop:8,lineHeight:1.6}}>
                 {payMethod==="delivery"?"Driver will collect payment upon delivery":"Your card will be charged immediately"}

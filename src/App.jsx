@@ -555,7 +555,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
               <span style={{fontSize:13,color:"#6b7280"}}>Subtotal</span><span style={{fontSize:13}}>{fmt(sub)}</span>
             </div>
             {tax>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
-              <span style={{fontSize:13,color:"#6b7280"}}>{`Tobacco/Vape Tax · ${stateId} (${stateRate}%)`}</span>
+              <span style={{fontSize:13,color:"#6b7280"}}>{`Tobacco/Vape Tax   -   ${stateId} (${stateRate}%)`}</span>
               <span style={{fontSize:13,color:"#059669"}}>{fmt(tax)}</span>
             </div>}
             {parseFloat(sale.previous_balance||0)>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6",background:"#fef2f2",margin:"0 -4px",padding:"6px 4px"}}>
@@ -678,7 +678,7 @@ function DriverTruckAssignment({supabase, trucks, showToast}){
                 style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:7,padding:"8px 10px",fontSize:12,fontFamily:"'Barlow',sans-serif",background:"#fff"}}>
                 <option value="">— Select Truck —</option>
                 {trucks.map(t=>(
-                  <option key={t.id} value={t.id}>{t.driver} · {t.plate} {t.route?`· ${t.route}`:""}</option>
+                  <option key={t.id} value={t.id}>{t.driver} · {t.plate} {t.route?`  -   ${t.route}`:""}</option>
                 ))}
               </select>
             </div>
@@ -1381,7 +1381,7 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
       const exists=prev.find(s=>s.id===rec.id);
       return exists?prev.map(s=>s.id===rec.id?rec:s):[...prev,rec];
     });
-    showToast(`✅ ${stData.id} — ${stData.name} ${exempt?"added as exempt":"activated"}`);
+    showToast(`[OK] ${stData.id}  -  ${stData.name} ${exempt?"added as exempt":"activated"}`);
     setAdding(false);
   };
 
@@ -1406,7 +1406,7 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
     const{error}=await supabase.from("state_taxes").upsert(updated);
     if(error){showToast(error.message,"error");setSavingEdit(false);return;}
     setStateTaxes(prev=>prev.map(s=>s.id===st.id?updated:s));
-    showToast(`✅ ${st.id} rates updated — OTP ${newRate}% · Cig $${newCig.toFixed(2)}/pack`);
+    showToast(`[OK] ${st.id} rates updated  -  OTP ${newRate}%   -   Cig $${newCig.toFixed(2)}/pack`);
     setEditingId(null);
     setSavingEdit(false);
   };
@@ -1839,7 +1839,7 @@ export default function App(){
           });
           L.marker([p.lat,p.lng],{icon:driverIcon})
             .addTo(mapInst.current)
-            .bindPopup(`<b>🚚 ${truck?.driver||"Driver"}</b><br/>Last seen: ${p.last_seen?new Date(p.last_seen).toLocaleTimeString():"Unknown"}<br/>Route: ${truck?.route||"—"}`);
+            .bindPopup(`<b>🚚 ${truck?.driver||"Driver"}</b><br/>Last seen: ${p.last_seen?new Date(p.last_seen).toLocaleTimeString():"Unknown"}<br/>Route: ${truck?.route||" - "}`);
           allLatLngs.push([p.lat,p.lng]);
         });
 
@@ -2212,7 +2212,7 @@ export default function App(){
         setProducts(prev=>prev.map(x=>{const u=toUpdate.find(p=>p.sku===x.sku);return u?{...x,...u,id:x.id}:x;}));
         updated=toUpdate.length;
       }
-      showToast(`✓ Imported: ${inserted} added, ${updated} updated`);
+      showToast(`[OK] Imported: ${inserted} added, ${updated} updated`);
       setCsvPreview([]);setCsvErrors([]);setModal(null);
     }catch(e){showToast(e.message,"error");}
     setCsvImporting(false);
@@ -2332,13 +2332,13 @@ export default function App(){
             const item=toReturn.find(i=>i.pid===x.id);
             return item?{...x,shelf:x.shelf+item.remaining}:x;
           }));
-          showToast(`↩️ ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to warehouse`);
+          showToast(`<-️ ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to warehouse`);
         }
         await supabase.from("loads").delete().eq("truck_id",id);
         await supabase.from("trucks").delete().eq("id",id);
         setTrucks(prev=>prev.filter(t=>t.id!==id));
         setLoads(prev=>prev.filter(l=>l.truck_id!==id));
-        showToast(`"${driver}" truck deleted — inventory returned to shelf`);
+        showToast(`"${driver}" truck deleted  -  inventory returned to shelf`);
       }catch(e){showToast(e.message,"error");}
     });
   };
@@ -2382,7 +2382,7 @@ export default function App(){
       await supabase.from("truck_resets").update({status:"approved",reviewed_at:new Date().toISOString()}).eq("id",req.id);
       setTruckResets(prev=>prev.map(r=>r.id===req.id?{...r,status:"approved",reviewed_at:new Date().toISOString()}:r));
       const truck=getT(req.truck_id);
-      showToast(`✅ ${truck?.driver||"Truck"} inventory reset — ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to shelf`);
+      showToast(`[OK] ${truck?.driver||"Truck"} inventory reset  -  ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to shelf`);
     }catch(e){showToast("Reset failed: "+e.message,"error");}
   };
 
@@ -2390,7 +2390,7 @@ export default function App(){
     await supabase.from("truck_resets").update({status:"rejected",reviewed_at:new Date().toISOString()}).eq("id",req.id);
     setTruckResets(prev=>prev.map(r=>r.id===req.id?{...r,status:"rejected",reviewed_at:new Date().toISOString()}:r));
     const truck=getT(req.truck_id);
-    showToast(`❌ Reset request for ${truck?.driver||"truck"} rejected`);
+    showToast(`[X] Reset request for ${truck?.driver||"truck"} rejected`);
   };
 
   const openLoad=tid=>{
@@ -2406,7 +2406,7 @@ export default function App(){
     const overLimit=items.find(i=>{const p=getP(i.pid);return !p||i.qty>p.shelf;});
     if(overLimit){
       const p=getP(overLimit.pid);
-      return showToast(`⚠️ Not enough shelf stock for "${p?.name}" — only ${p?.shelf} available`,"error");
+      return showToast(`[!]️ Not enough shelf stock for "${p?.name}"  -  only ${p?.shelf} available`,"error");
     }
     setSaving(true);
     try{
@@ -2517,7 +2517,7 @@ export default function App(){
     setCo(prev=>({...prev,check_penalty:val}));
     setCoEdit(prev=>({...prev,check_penalty:val}));
     setPenaltySaving(false);
-    showToast(`✅ Penalty fee updated to $${val}`);
+    showToast(`[OK] Penalty fee updated to $${val}`);
   };
 
   const saveAmend=async()=>{
@@ -2545,7 +2545,7 @@ export default function App(){
       if(stockErr){
         const prod=getP(stockErr.pid);
         const increase=stockErr.qty-(oldMap[stockErr.pid]||0);
-        showToast(`⚠️ Not enough shelf stock for "${prod?.name}" — need ${increase} more but only ${prod?.shelf} on shelf`,"error");
+        showToast(`[!]️ Not enough shelf stock for "${prod?.name}"  -  need ${increase} more but only ${prod?.shelf} on shelf`,"error");
         setAmendSaving(false);return;
       }
 
@@ -2573,7 +2573,7 @@ export default function App(){
         ?{...s,items:newItems,total:newSub,profit:newProfit,amended_at:new Date().toISOString()}
         :s
       ));
-      showToast(`✅ Invoice ${amendSale.id} amended`);
+      showToast(`[OK] Invoice ${amendSale.id} amended`);
       setModal(null);setAmendSale(null);setAmendItems({});
     }catch(e){showToast("Error: "+e.message,"error");}
     setAmendSaving(false);
@@ -2744,9 +2744,9 @@ export default function App(){
       setFormItems(prev=>prev.map(fi=>
         fi.pid===match.pid ? {...fi, qty:Math.min(fi.max, fi.qty+1)} : fi
       ));
-      setScanMsg({type:"success", text:`✓ ${p.name} — qty updated`});
+      setScanMsg({type:"success", text:`[OK] ${p.name}  -  qty updated`});
     } else {
-      setScanMsg({type:"error", text:`❌ No product found for: ${barcode}`});
+      setScanMsg({type:"error", text:`[X] No product found for: ${barcode}`});
     }
     setScanInput("");
     setTimeout(()=>setScanMsg(null), 2500);
@@ -2952,7 +2952,7 @@ export default function App(){
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                       <div>
                         <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#212121"}}>{t.driver}</div>
-                        <div style={{fontSize:10,color:"#9ca3af"}}>{t.plate}{t.route&&` · ${t.route}`}</div>
+                        <div style={{fontSize:10,color:"#9ca3af"}}>{t.plate}{t.route&&`   -   ${t.route}`}</div>
                       </div>
                       <span className={`bdg ${t.locked?"br2":load?"ba2":"bgr"}`}>{t.locked?"🔒 LOCKED":load?"ACTIVE":"IDLE"}</span>
                     </div>
@@ -3359,7 +3359,7 @@ export default function App(){
                 <div style={{fontSize:24}}>{curStateExempt?"✅":"🏛"}</div>
                 <div>
                   <div style={{fontWeight:700,fontSize:14,color:curStateExempt?"#059669":"#7c3aed"}}>{stateTaxes.find(s=>s.id===selState)?.name||selState} — {curStateExempt?"TAX EXEMPT":"TAXABLE"}</div>
-                  <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{curStateExempt?"Tobacco/Nicotine sales are NOT taxable in this state":`Tobacco/Nicotine taxed at ${curStateTax}% · Other products not taxed`}</div>
+                  <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{curStateExempt?"Tobacco/Nicotine sales are NOT taxable in this state":`Tobacco/Nicotine taxed at ${curStateTax}%   -   Other products not taxed`}</div>
                 </div>
               </div>}
 
@@ -3377,7 +3377,7 @@ export default function App(){
               <div className="card" style={{marginBottom:16}}>
                 <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>
-                    📊 SALES SUMMARY {selState!=="ALL"?`— ${selState}`:"— ALL STATES"}
+                    📊 SALES SUMMARY {selState!=="ALL"?` -  ${selState}`:"— ALL STATES"}
                     <span style={{fontWeight:400,fontSize:11,color:"#9ca3af",marginLeft:8}}>{sumSales.length} invoices</span>
                   </div>
                 </div>
@@ -3999,7 +3999,7 @@ export default function App(){
               if(error) return showToast(error.message,"error");
               setTrucks(prev=>prev.map(t=>t.id===editTruck.id?{...t,driver:editTruck.driver.trim(),plate:editTruck.plate.trim(),route:editTruck.route?.trim()||""}:t));
               setEditTruck(null);
-              showToast(`✅ ${editTruck.driver} updated`);
+              showToast(`[OK] ${editTruck.driver} updated`);
             };
 
             const assignCustomer = async () => {
@@ -4079,7 +4079,7 @@ export default function App(){
                           <div style={{fontWeight:800,fontSize:14,color:"#0a1628"}}>{t.driver}</div>
                           <span style={{fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:10,background:isOnline?"#dcfce7":"#f3f4f6",color:isOnline?"#065f46":"#9ca3af"}}>{isOnline?"🟢 ONLINE":"⚫ OFFLINE"}</span>
                         </div>
-                        <div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>{t.plate}{t.route&&` · ${t.route}`}</div>
+                        <div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>{t.plate}{t.route&&`   -   ${t.route}`}</div>
                         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
                           {[["Customers",tCusts.length,"#7c3aed"],["On Truck",inv.reduce((a,i)=>a+i.remaining,0),"#0ea5e9"],["Today Rev",`$${todayRev.toFixed(0)}`,todayRev>0?"#059669":"#9ca3af"]].map(([l,v,c])=>(
                             <div key={l}><div style={{fontSize:9,color:"#9ca3af",fontWeight:700}}>{l}</div><div style={{fontWeight:800,fontSize:14,color:c}}>{v}</div></div>
@@ -4094,9 +4094,9 @@ export default function App(){
                           {inv.reduce((a,i)=>a+i.remaining,0)>0&&(()=>{
                             const hasPending=truckResets.some(r=>r.truck_id===t.id&&r.status==="pending");
                             return hasPending
-                              ?<span style={{fontSize:9,fontWeight:700,padding:"4px 8px",borderRadius:6,background:"#fef9c3",color:"#854d0e",border:"1px solid #fde68a"}}>⏳ Reset Pending</span>
+                              ?<span style={{fontSize:9,fontWeight:700,padding:"4px 8px",borderRadius:6,background:"#fef9c3",color:"#854d0e",border:"1px solid #fde68a"}}>Reset Pending</span>
                               :<button style={{fontSize:10,padding:"4px 10px",border:"1.5px solid #f97316",background:"#fff7ed",color:"#c2410c",borderRadius:6,cursor:"pointer",fontWeight:700,fontFamily:"'Inter',sans-serif"}}
-                                onClick={()=>showConfirm(`Reset ALL inventory on ${t.driver}'s truck to zero?\n\nThis will:\n• Return ${inv.reduce((a,i)=>a+i.remaining,0)} remaining units to warehouse shelf\n• Close the active load\n• Requires your admin approval\n\nThe driver will be notified.`,()=>{
+                                onClick={()=>showConfirm("Reset ALL inventory on "+t.driver+"'s truck?\n\n- Return "+inv.reduce((a,i)=>a+i.remaining,0)+" units to warehouse shelf\n- Close the active load\n- Requires admin approval",()=>{
                                   supabase.from("truck_resets").insert({
                                     id:"RST-"+uid(),
                                     truck_id:t.id,
@@ -4105,21 +4105,20 @@ export default function App(){
                                     remaining_units:inv.reduce((a,i)=>a+i.remaining,0),
                                     load_id:activeLoad(t.id)?.id||null,
                                     status:"pending",
-                                    note:`Reset requested for ${t.driver} (${t.plate})`,
+                                    note:"Reset requested for "+t.driver+" ("+t.plate+")",
                                     created_at:new Date().toISOString(),
                                   }).then(({error})=>{
                                     if(error)showToast("Failed to submit reset: "+error.message,"error");
                                     else{
                                       setTruckResets(prev=>[{id:"RST-"+uid(),truck_id:t.id,driver_name:t.driver,status:"pending",remaining_units:inv.reduce((a,i)=>a+i.remaining,0),created_at:new Date().toISOString()},...prev]);
-                                      showToast("🔄 Reset request submitted — pending approval");
+                                      showToast("Reset request submitted - pending approval");
                                       setTmTab("resets");
                                     }
                                   });
                                 })}>
-                                🔄 Reset
+                                Reset Inventory
                               </button>;
                           })()}
-                        </div>
                         </div>
                       </div>
                     );
@@ -4217,7 +4216,7 @@ export default function App(){
                   return(
                     <div key={t.id} className="card" style={{marginBottom:12,overflow:"hidden",borderTop:`3px solid #0ea5e9`}}>
                       <div style={{padding:"12px 16px",background:"#f0f9ff",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <div style={{fontWeight:800,fontSize:13,color:"#0a1628"}}>🚚 {t.driver} <span style={{color:"#6b7280",fontWeight:400}}>· {t.plate}{t.route&&` · ${t.route}`}</span></div>
+                        <div style={{fontWeight:800,fontSize:13,color:"#0a1628"}}>🚚 {t.driver} <span style={{color:"#6b7280",fontWeight:400}}>· {t.plate}{t.route&&`   -   ${t.route}`}</span></div>
                         <span style={{fontWeight:700,fontSize:12,color:"#0ea5e9"}}>{tCusts.length} customers</span>
                       </div>
                       {tCusts.length===0
@@ -4874,7 +4873,7 @@ export default function App(){
             </div>
             {nc.state&&(()=>{const st=stateTaxes.find(x=>x.id===nc.state);return st?(
               <div style={{fontSize:11,color:st.exempt?"#059669":"#854d0e",background:st.exempt?"#f0fdf4":"#fef9c3",padding:"6px 10px",borderRadius:6}}>
-                {st.exempt?`✅ ${nc.state} — Tax Exempt`:`🏛 ${nc.state} — ${st.rate}% tobacco/vape tax`}
+                {st.exempt?`✅ ${nc.state}  -  Tax Exempt`:`🏛 ${nc.state}  -  ${st.rate}% tobacco/vape tax`}
               </div>
             ):(
               <div style={{fontSize:11,color:"#9ca3af"}}>ℹ️ {nc.state} — No tax rate configured yet</div>
@@ -4939,7 +4938,7 @@ export default function App(){
         </div>
       </Modal>}
 
-      {modal==="load"&&<Modal title={`🚚 Load Truck — ${getT(selTruck)?.driver}`} onClose={()=>setModal(null)}>
+      {modal==="load"&&<Modal title={`🚚 Load Truck  -  ${getT(selTruck)?.driver}`} onClose={()=>setModal(null)}>
         <div>
           {isAdmin&&<div style={{marginBottom:12}}><label>Select Truck</label><select value={selTruck} onChange={e=>{setSelTruck(e.target.value);setFormItems(products.map(p=>({pid:p.id,qty:0})));}}>{trucks.map(t=><option key={t.id} value={t.id}>{t.driver} — {t.plate}</option>)}</select></div>}
           <div style={{fontSize:10,color:"#6b7280",letterSpacing:".07em",fontWeight:700,marginBottom:8}}>QUANTITIES TO LOAD</div>
@@ -4975,7 +4974,7 @@ export default function App(){
         </div>
       </Modal>}
 
-      {modal==="sale"&&<Modal title={`💳 Record Sale — ${getT(selTruck)?.driver}`} onClose={()=>{setModal(null);setScanning(false);setScanInput("");setScanMsg(null);}}>
+      {modal==="sale"&&<Modal title={`💳 Record Sale  -  ${getT(selTruck)?.driver}`} onClose={()=>{setModal(null);setScanning(false);setScanInput("");setScanMsg(null);}}>
         <div>
           <div style={{marginBottom:12}}><label>Customer</label><select value={selCust} onChange={e=>setSelCust(e.target.value)}>{customers.filter(c=>c.truck_id===selTruck).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
           {selCust&&(()=>{const c=getC(selCust);return(<>
@@ -5122,7 +5121,7 @@ export default function App(){
         </div>
       </Modal>}
 
-      {modal==="return"&&<Modal title={`↩️ Return Stock — ${getT(selTruck)?.driver}`} onClose={()=>setModal(null)}>
+      {modal==="return"&&<Modal title={`↩️ Return Stock  -  ${getT(selTruck)?.driver}`} onClose={()=>setModal(null)}>
         <div>
           <div style={{fontSize:10,color:"#6b7280",letterSpacing:".07em",fontWeight:700,marginBottom:8}}>RETURN TO SHELF</div>
           <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:300,overflowY:"auto",paddingRight:3}}>
@@ -5187,7 +5186,7 @@ export default function App(){
                       <div>
                         <div style={{fontWeight:700,fontSize:13,color:"#212121"}}>{p?.name||item.pid}</div>
                         <div style={{fontSize:10,color:"#9ca3af",marginTop:2}}>
-                          {p?.sku&&`${p.sku} · `}{fmt(ep)} each{isTaxableProd(p)&&<span style={{marginLeft:4,color:"#7c3aed",fontWeight:700,fontSize:9}}>TOBACCO TAX</span>}
+                          {p?.sku&&`${p.sku}   -   `}{fmt(ep)} each{isTaxableProd(p)&&<span style={{marginLeft:4,color:"#7c3aed",fontWeight:700,fontSize:9}}>TOBACCO TAX</span>}
                           {" · "}<span style={{color:(p?.shelf||0)===0?"#dc2626":(p?.shelf||0)<5?"#f59e0b":"#059669",fontWeight:700}}>{p?.shelf||0} on shelf</span>
                           {" · "}<span style={{color:"#6b7280"}}>max {maxQty} with original</span>
                         </div>
@@ -5195,7 +5194,7 @@ export default function App(){
                       <div style={{textAlign:"right",flexShrink:0}}>
                         <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:overShelf?"#dc2626":changed?"#7c3aed":"#212121"}}>{fmt(qty*ep)}</div>
                         {changed&&<div style={{fontSize:10,fontWeight:700,color:diff>0?"#dc2626":"#059669",marginTop:1}}>
-                          {diff>0?`▲ +${diff}`:`▼ ${diff}`} from original ({origQty})
+                          {diff>0?`^ +${diff}`:`v ${diff}`} from original ({origQty})
                         </div>}
                       </div>
                     </div>
