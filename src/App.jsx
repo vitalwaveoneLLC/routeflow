@@ -1116,8 +1116,65 @@ function RecurringOrdersTab({recurringOrders,setRecurringOrders,customers,produc
   const[form,setForm]=useState({cust_id:"",truck_id:"",frequency:"Weekly",day:"Monday",items:[],notes:"",active:true});
   const[saving,setSaving]=useState(false);
   const[showForm,setShowForm]=useState(false);
+  const[generating,setGenerating]=useState({});
   const days=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
   const freqs=["Daily","Weekly","Bi-weekly","Monthly"];
+  const todayName=new Date().toLocaleDateString("en-US",{weekday:"long"});
+
+  // Determine if a recurring order is due today
+  const isDue=r=>{
+    if(!r.active)return false;
+    if(r.frequency==="Daily")return true;
+    if(r.frequency==="Weekly")return r.day===todayName;
+    if(r.frequency==="Bi-weekly"){
+      if(r.day!==todayName)return false;
+      if(!r.last_run)return true;
+      const last=new Date(r.last_run);
+      const diff=Math.floor((new Date()-last)/(1000*60*60*24));
+      return diff>=14;
+    }
+    if(r.frequency==="Monthly"){
+      if(!r.last_run)return r.day===todayName;
+      const last=new Date(r.last_run);
+      const diff=Math.floor((new Date()-last)/(1000*60*60*24));
+      return diff>=28&&r.day===todayName;
+    }
+    return false;
+  };
+
+  // Generate an actual order from a recurring template
+  const generateOrder=async(r)=>{
+    setGenerating(prev=>({...prev,[r.id]:true}));
+    try{
+      const cust=customers.find(c=>c.id===r.cust_id);
+      const truck=trucks.find(t=>t.id===r.truck_id);
+      const total=r.items.reduce((a,it)=>{const p=products.find(x=>x.id===it.pid);return a+(p?.price||0)*it.qty;},0);
+      const rec={
+        id:"ORD-"+uid5(),
+        cust_id:r.cust_id,
+        customer_name:cust?.name||r.cust_name,
+        customer_address:cust?.address||"",
+        customer_phone:cust?.phone||"",
+        date:new Date().toLocaleDateString(),
+        items:r.items,
+        subtotal:total,
+        tax:0,
+        total,
+        notes:`Auto-generated from recurring order ${r.id}${r.notes?` — ${r.notes}`:""}`,
+        status:"approved",
+        payment_method:"delivery",
+        truck_id:r.truck_id||null,
+        created_at:new Date().toISOString(),
+      };
+      const{error}=await supabase.from("orders").insert(rec);
+      if(error)throw error;
+      // Update last_run
+      await supabase.from("recurring_orders").update({last_run:new Date().toISOString()}).eq("id",r.id);
+      setRecurringOrders(prev=>prev.map(x=>x.id===r.id?{...x,last_run:new Date().toISOString()}:x));
+      showToast(`✅ Order generated for ${cust?.name||r.cust_name}`);
+    }catch(e){showToast(e.message,"error");}
+    setGenerating(prev=>({...prev,[r.id]:false}));
+  };
 
   const addItem=()=>setForm(f=>({...f,items:[...f.items,{pid:products[0]?.id||"",qty:1}]}));
   const updateItem=(idx,k,v)=>setForm(f=>({...f,items:f.items.map((it,i)=>i===idx?{...it,[k]:v}:it)}));
@@ -1150,19 +1207,41 @@ function RecurringOrdersTab({recurringOrders,setRecurringOrders,customers,produc
   });
 
   const orderTotal=items=>items.reduce((a,it)=>{const p=products.find(x=>x.id===it.pid);return a+(p?.price||0)*(it.qty||0);},0);
+  const dueToday=recurringOrders.filter(isDue);
 
   return(
     <div className="fu">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
         <div>
           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22}}>🔁 Recurring Orders</div>
-          <div style={{fontSize:12,color:"#9ca3af"}}>Scheduled orders that auto-remind you every week, bi-week, or month</div>
+          <div style={{fontSize:12,color:"#9ca3af"}}>Scheduled orders — generates automatically based on frequency</div>
         </div>
         <button className="btn ba" onClick={()=>setShowForm(s=>!s)}>+ New Recurring Order</button>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
-        {[{l:"Total Templates",v:recurringOrders.length,c:"#7c3aed"},{l:"Active",v:recurringOrders.filter(r=>r.active).length,c:"#059669"},{l:"Paused",v:recurringOrders.filter(r=>!r.active).length,c:"#9ca3af"}].map(k=>(
+      {/* Due Today Banner */}
+      {dueToday.length>0&&(
+        <div style={{background:"#f0fdf4",border:"1.5px solid #a7f3d0",borderRadius:10,padding:"14px 18px",marginBottom:16}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#065f46",marginBottom:10}}>
+            🗓 {dueToday.length} ORDER{dueToday.length!==1?"S":""} DUE TODAY ({todayName})
+          </div>
+          {dueToday.map(r=>(
+            <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #d1fae5"}}>
+              <div>
+                <div style={{fontWeight:600,fontSize:13,color:"#0a1628"}}>{r.cust_name}</div>
+                <div style={{fontSize:11,color:"#6b7280"}}>{r.frequency} · {r.items.length} item{r.items.length!==1?"s":""} · Est. {fmt(orderTotal(r.items))}</div>
+              </div>
+              <button onClick={()=>generateOrder(r)} disabled={!!generating[r.id]}
+                style={{background:"#059669",color:"#fff",border:"none",borderRadius:7,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",opacity:generating[r.id]?0.7:1}}>
+                {generating[r.id]?"Generating…":"⚡ Generate Order"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
+        {[{l:"Total Templates",v:recurringOrders.length,c:"#7c3aed"},{l:"Active",v:recurringOrders.filter(r=>r.active).length,c:"#059669"},{l:"Due Today",v:dueToday.length,c:dueToday.length>0?"#f59e0b":"#9ca3af"},{l:"Paused",v:recurringOrders.filter(r=>!r.active).length,c:"#9ca3af"}].map(k=>(
           <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>
         ))}
       </div>
@@ -1221,14 +1300,20 @@ function RecurringOrdersTab({recurringOrders,setRecurringOrders,customers,produc
             <div style={{fontSize:12}}>Create a template for customers who order on a regular schedule</div>
           </div>
         :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>
-          {recurringOrders.map(r=>(
-            <div key={r.id} className="card" style={{padding:16,borderLeft:`3px solid ${r.active?"#059669":"#e5e7eb"}`,opacity:r.active?1:0.7}}>
+          {recurringOrders.map(r=>{
+            const due=isDue(r);
+            return(
+            <div key={r.id} className="card" style={{padding:16,borderLeft:`3px solid ${due?"#f59e0b":r.active?"#059669":"#e5e7eb"}`,opacity:r.active?1:0.7}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                 <div>
                   <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#0a1628"}}>{r.cust_name}</div>
                   <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>🔁 {r.frequency} · Every {r.day}</div>
+                  {r.last_run&&<div style={{fontSize:10,color:"#9ca3af"}}>Last run: {new Date(r.last_run).toLocaleDateString()}</div>}
                 </div>
-                <span className={`bdg ${r.active?"bg2":"bgr"}`}>{r.active?"ACTIVE":"PAUSED"}</span>
+                <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+                  <span className={`bdg ${r.active?"bg2":"bgr"}`}>{r.active?"ACTIVE":"PAUSED"}</span>
+                  {due&&<span className="bdg ba2">DUE TODAY</span>}
+                </div>
               </div>
               <div style={{marginBottom:8}}>
                 {(r.items||[]).map((it,i)=>{const p=products.find(x=>x.id===it.pid);return p?(
@@ -1241,14 +1326,19 @@ function RecurringOrdersTab({recurringOrders,setRecurringOrders,customers,produc
                 Est. {fmt(orderTotal(r.items||[]))}/order
               </div>
               {r.notes&&<div style={{fontSize:10,color:"#9ca3af",marginBottom:8}}>📝 {r.notes}</div>}
-              <div style={{display:"flex",gap:6}}>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {due&&<button onClick={()=>generateOrder(r)} disabled={!!generating[r.id]}
+                  style={{flex:2,background:"#059669",color:"#fff",border:"none",borderRadius:6,padding:"7px",fontSize:11,cursor:"pointer",fontWeight:700,opacity:generating[r.id]?0.7:1}}>
+                  {generating[r.id]?"Generating…":"⚡ Generate Order"}
+                </button>}
                 <button onClick={()=>toggleActive(r.id,r.active)} style={{flex:1,background:r.active?"#fff7ed":"#f0fdf4",border:`1px solid ${r.active?"#fed7aa":"#a7f3d0"}`,borderRadius:6,padding:"5px",fontSize:11,color:r.active?"#c2410c":"#065f46",cursor:"pointer",fontWeight:700}}>
                   {r.active?"⏸ Pause":"▶ Activate"}
                 </button>
                 <button onClick={()=>deleteRec(r.id)} style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"5px 10px",fontSize:11,color:"#dc2626",cursor:"pointer",fontWeight:700}}>🗑</button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       }
     </div>
@@ -1497,19 +1587,24 @@ function PurchaseOrders({products,setProducts,supabase,showToast,showConfirm}){
   };
 
   // Approve PO
+  const logAuditLocal=async(action,entity,detail)=>{
+    try{
+      await supabase.from("audit_log").insert({id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:"admin",action,entity,detail,created_at:new Date().toISOString()});
+    }catch{}
+  };
+
   const approvePo=async(po)=>{
     const{error}=await supabase.from("purchase_orders").update({status:"ordered"}).eq("id",po.id);
     if(error)return showToast(error.message,"error");
     setPos(prev=>prev.map(p=>p.id===po.id?{...p,status:"ordered"}:p));
     showToast("PO approved & sent to supplier");
+    logAuditLocal("APPROVE","PO",`Approved PO ${po.id} — ${po.supplier_name}`);
   };
 
-  // Receive PO — adds stock to shelf and updates product cost
   const receiveAll=async(po)=>{
     const updates=po.items.map(it=>({...it,received_qty:parseInt(receivedQtys[it.pid]||it.qty)}));
     const allReceived=updates.every(it=>it.received_qty>=it.qty);
     try{
-      // Update shelf stock for each item
       for(const it of updates){
         if(it.received_qty>0){
           const prod=products.find(p=>p.id===it.pid);
@@ -1525,6 +1620,7 @@ function PurchaseOrders({products,setProducts,supabase,showToast,showConfirm}){
       setPos(prev=>prev.map(p=>p.id===po.id?{...p,status:newStatus,items:updates}:p));
       setReceivingPo(null);setReceivedQtys({});
       showToast(allReceived?"✅ PO fully received — stock updated":"⚠️ Partial receipt recorded");
+      logAuditLocal("RECEIVE","PO",`${allReceived?"Fully":"Partially"} received PO ${po.id}`);
     }catch(e){showToast(e.message,"error");}
   };
 
@@ -1533,6 +1629,7 @@ function PurchaseOrders({products,setProducts,supabase,showToast,showConfirm}){
       await supabase.from("purchase_orders").delete().eq("id",id);
       setPos(prev=>prev.filter(p=>p.id!==id));
       showToast("PO deleted");
+      logAuditLocal("DELETE","PO",`Deleted PO ${id}`);
     });
   };
 
@@ -2827,6 +2924,7 @@ export default function App(){
   const[tab,setTab]=useState("dashboard");
   const[modal,setModal]=useState(null);
   const[saving,setSaving]=useState(false);
+  const[showNotifs,setShowNotifs]=useState(false);
   const[toast,setToast]=useState(null);
   const[arFilter,setArFilter]=useState("all");
   const[ordFilter,setOrdFilter]=useState("all");
@@ -3513,7 +3611,7 @@ export default function App(){
     const p=getP(rsPid);const ns=p.shelf+parseInt(rsQty);
     const{error}=await supabase.from("products").update({shelf:ns}).eq("id",rsPid);
     if(error)showToast(error.message,"error");
-    else{setProducts(prev=>prev.map(x=>x.id===rsPid?{...x,shelf:ns}:x));showToast(`${p.name} restocked`);setModal(null);setRsQty("");}
+    else{setProducts(prev=>prev.map(x=>x.id===rsPid?{...x,shelf:ns}:x));showToast(`${p.name} restocked`);setModal(null);setRsQty("");logAudit("RESTOCK","Product",`Restocked ${p.name} +${rsQty} units → ${ns} total`);}
     setSaving(false);
   };
 
@@ -3524,7 +3622,7 @@ export default function App(){
     const rec={id:"T"+uid(),driver:nt.driver,plate:nt.plate,route:nt.route||""};
     const{error}=await supabase.from("trucks").insert(rec);
     if(error)showToast(error.message,"error");
-    else{setTrucks(prev=>[...prev,rec]);showToast(`${nt.driver} added`);setModal(null);setNt({driver:"",plate:"",route:""});}
+    else{setTrucks(prev=>[...prev,rec]);showToast(`${nt.driver} added`);setModal(null);setNt({driver:"",plate:"",route:""});logAudit("ADD","Truck",`Added driver ${nt.driver} plate ${nt.plate}`);}
     setSaving(false);
   };
 
@@ -3534,7 +3632,7 @@ export default function App(){
     const{id,...fields}=editTruck;
     const{error}=await supabase.from("trucks").update({driver:fields.driver,plate:fields.plate,route:fields.route}).eq("id",id);
     if(error)showToast(error.message,"error");
-    else{setTrucks(prev=>prev.map(t=>t.id===id?{...t,...fields}:t));showToast("Driver updated");setEditingTid(null);}
+    else{setTrucks(prev=>prev.map(t=>t.id===id?{...t,...fields}:t));showToast("Driver updated");setEditingTid(null);logAudit("EDIT","Truck",`Edited driver ${fields.driver}`);}
     setSaving(false);
   };
 
@@ -3570,6 +3668,7 @@ export default function App(){
         await supabase.from("customers").delete().eq("id",id);
         setCustomers(prev=>prev.filter(c=>c.id!==id));
         showToast(`"${name}" deleted`);
+        logAudit("DELETE","Customer",`Deleted customer ${name}`);
       }catch(e){showToast(e.message,"error");}
     });
   };
@@ -3580,6 +3679,7 @@ export default function App(){
         await supabase.from("products").delete().eq("id",id);
         setProducts(prev=>prev.filter(p=>p.id!==id));
         showToast(`"${name}" deleted`);
+        logAudit("DELETE","Product",`Deleted product ${name}`);
       }catch(e){showToast(e.message,"error");}
     });
   };
@@ -3605,6 +3705,7 @@ export default function App(){
         setTrucks(prev=>prev.filter(t=>t.id!==id));
         setLoads(prev=>prev.filter(l=>l.truck_id!==id));
         showToast(`"${driver}" truck deleted  -  inventory returned to shelf`);
+        logAudit("DELETE","Truck",`Deleted truck for driver ${driver}`);
       }catch(e){showToast(e.message,"error");}
     });
   };
@@ -4207,7 +4308,61 @@ export default function App(){
               {navItems.find(n=>n.id===tab)?.label}
               {!isAdmin&&visTrucks[0]&&<span style={{fontFamily:"'Barlow',sans-serif",fontWeight:400,fontSize:11,color:"#6b7280",marginLeft:10,textTransform:"none"}}>— {visTrucks[0].driver}</span>}
             </div>
-            <div style={{display:"flex",gap:7}}>
+            <div style={{display:"flex",gap:7,alignItems:"center"}}>
+              {isAdmin&&(()=>{
+                // Build live notifications
+                const now=new Date();
+                const notifs=[];
+                // Overdue invoices
+                visSales.filter(s=>pmtFor(s.id)?.status!=="paid").forEach(s=>{
+                  const d=new Date(s.created_at||s.date);
+                  if(!isNaN(d)){
+                    const days=Math.floor((now-d)/(1000*60*60*24));
+                    if(days>=30) notifs.push({type:"overdue",icon:"⏰",msg:`Invoice ${s.id} — ${getC(s.cust_id)?.name||"?"} is ${days}d overdue`,severity:days>=90?"high":days>=60?"med":"low",tab:"ar"});
+                  }
+                });
+                // Low stock
+                products.filter(p=>p.shelf<=(p.reorder_point||5)).forEach(p=>{
+                  notifs.push({type:"stock",icon:"📦",msg:`${p.name} — ${p.shelf===0?"OUT OF STOCK":`only ${p.shelf} left`}`,severity:p.shelf===0?"high":"low",tab:"inventory"});
+                });
+                // Returned checks
+                payments.filter(p=>p.status==="returned_check").forEach(p=>{
+                  const c=customers.find(x=>x.id===p.cust_id);
+                  if(c) notifs.push({type:"check",icon:"🚨",msg:`Returned check — ${c.name}`,severity:"high",tab:"returnedchecks"});
+                });
+                if(!notifs.length) return(
+                  <button className="btn bgh" style={{fontSize:11,position:"relative"}} onClick={()=>setTab("auditlog")} title="No new notifications">🔔</button>
+                );
+                return(
+                  <div style={{position:"relative"}}>
+                    <button onClick={()=>setShowNotifs(s=>!s)}
+                      style={{background:"#fff",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"6px 10px",cursor:"pointer",position:"relative",fontSize:14}}>
+                      🔔
+                      <span style={{position:"absolute",top:-4,right:-4,background:notifs.some(n=>n.severity==="high")?"#dc2626":"#f59e0b",color:"#fff",borderRadius:"50%",width:16,height:16,fontSize:9,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Barlow Condensed',sans-serif"}}>
+                        {notifs.length}
+                      </span>
+                    </button>
+                    {showNotifs&&(
+                      <div style={{position:"absolute",right:0,top:36,width:340,background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,boxShadow:"0 8px 32px #00000018",zIndex:999,overflow:"hidden"}}>
+                        <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14}}>🔔 Notifications ({notifs.length})</div>
+                          <button onClick={()=>setShowNotifs(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#9ca3af"}}>✕</button>
+                        </div>
+                        <div style={{maxHeight:320,overflowY:"auto"}}>
+                          {notifs.map((n,i)=>(
+                            <div key={i} onClick={()=>{setTab(n.tab);setShowNotifs(false);}}
+                              style={{padding:"10px 16px",borderBottom:"1px solid #f9fafb",cursor:"pointer",display:"flex",gap:10,alignItems:"flex-start",background:n.severity==="high"?"#fef2f2":n.severity==="med"?"#fff7ed":"#fff"}}>
+                              <span style={{fontSize:16,flexShrink:0}}>{n.icon}</span>
+                              <div style={{fontSize:12,color:"#374151",lineHeight:1.4}}>{n.msg}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{padding:"8px 16px",borderTop:"1px solid #f3f4f6",fontSize:11,color:"#9ca3af",textAlign:"center"}}>Click any item to navigate</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {isAdmin&&<button className="btn bb" onClick={()=>{setRsPid(products[0]?.id||"");setRsQty("");setModal("restock");}}>{ic.plus} Restock</button>}
               <button className="btn ba" onClick={()=>{const tid=isAdmin?trucks[0]?.id:myTruckId;if(tid)openLoad(tid);}}>{ic.truck} Load Truck</button>
               <button className="btn bgh" style={{fontSize:11}} onClick={loadAll} title="Refresh">↻</button>
@@ -5462,6 +5617,7 @@ export default function App(){
               setTrucks(prev=>prev.map(t=>t.id===editTruck.id?{...t,driver:editTruck.driver.trim(),plate:editTruck.plate.trim(),route:editTruck.route?.trim()||""}:t));
               setEditTruck(null);
               showToast(`[OK] ${editTruck.driver} updated`);
+              logAudit("EDIT","Truck",`Edited driver ${editTruck.driver}`);
             };
 
             const assignCustomer = async () => {

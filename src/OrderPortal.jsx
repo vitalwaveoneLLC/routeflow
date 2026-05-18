@@ -525,6 +525,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const [msg, setMsg] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanInput, setScanInput] = useState("");
+  const [sellUnits, setSellUnits] = useState({}); // {pid: true} = sell by unit instead of case
   const [editInv, setEditInv] = useState(null);
   const [freshCustState, setFreshCustState] = useState("");
   const uid = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
@@ -619,11 +620,30 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const custStateId = freshCustState || selCustObj?.state || driverData.truck?.state || "";
   const custStateTax = driverData.stateTaxes?.find(s=>s.id===custStateId);
   const driverTaxRate = custStateTax?.exempt ? 0 : parseFloat(custStateTax?.rate||0);
-  const sub = inStockProducts.reduce((a,p)=>a+getEffectivePrice(selCustObj,p)*(items[p.id]||0),0);
+  const sub = inStockProducts.reduce((a,p)=>{
+    const qty=items[p.id]||0;if(!qty)return a;
+    const caseQty=parseInt(p.case_qty)||1;
+    const sellByUnit=sellUnits[p.id]||false;
+    const price=sellByUnit?(getEffectivePrice(selCustObj,p)/caseQty):getEffectivePrice(selCustObj,p);
+    return a+price*qty;
+  },0);
   const hasTaxableItems = inStockProducts.some(p=>isTaxableProd(p)&&(items[p.id]||0)>0);
-  const tax = parseFloat((inStockProducts.reduce((a,p)=>isTaxableProd(p)?(a+getEffectivePrice(selCustObj,p)*(items[p.id]||0)):a,0)*driverTaxRate/100).toFixed(2));
+  const tax = parseFloat((inStockProducts.reduce((a,p)=>{
+    const qty=items[p.id]||0;if(!qty||!isTaxableProd(p))return a;
+    const caseQty=parseInt(p.case_qty)||1;
+    const sellByUnit=sellUnits[p.id]||false;
+    const price=sellByUnit?(getEffectivePrice(selCustObj,p)/caseQty):getEffectivePrice(selCustObj,p);
+    return a+price*qty;
+  },0)*driverTaxRate/100).toFixed(2));
   const gt = sub+tax;
-  const profit = inStockProducts.reduce((a,p)=>a+(getEffectivePrice(selCustObj,p)-(p.cost||0))*(items[p.id]||0),0);
+  const profit = inStockProducts.reduce((a,p)=>{
+    const qty=items[p.id]||0;if(!qty)return a;
+    const caseQty=parseInt(p.case_qty)||1;
+    const sellByUnit=sellUnits[p.id]||false;
+    const price=sellByUnit?(getEffectivePrice(selCustObj,p)/caseQty):getEffectivePrice(selCustObj,p);
+    const cost=sellByUnit?((p.cost||0)/caseQty):(p.cost||0);
+    return a+(price-cost)*qty;
+  },0);
 
   const handleScan = (code) => {
     // Check in-stock truck products first
@@ -1012,12 +1032,29 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           const sold = soldMap[p.id]||0;
           const qty = items[p.id]||0;
           const nearLimit = qty >= remaining && remaining > 0;
+          const caseQty = parseInt(p.case_qty)||1;
+          const sellByUnit = sellUnits[p.id]||false;
+          const unitPrice = caseQty>1?(getEffectivePrice(selCustObj,p)/caseQty):getEffectivePrice(selCustObj,p);
+          const effectiveQty = sellByUnit ? qty : qty; // qty is always in display units
+          const lineTotal = sellByUnit ? qty*unitPrice : qty*getEffectivePrice(selCustObj,p);
           return(
             <div key={p.id} className="card" style={{padding:"10px 14px",border:`1.5px solid ${qty>0?"#0ea5e9":"#e5e7eb"}`}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <div style={{flex:1}}>
                   <div style={{fontWeight:600,fontSize:13}}>{p.name}</div>
                   <div style={{fontSize:11,color:"#9ca3af"}}>{(()=>{const ep=getEffectivePrice(selCustObj,p);const isC=ep!==p.price;return<>{isC?<span style={{color:"#7c3aed",fontWeight:700}}>{fmt(ep)} <span style={{fontSize:9,background:"#ede9fe",borderRadius:3,padding:"1px 4px"}}>CUSTOM</span> <span style={{textDecoration:"line-through",color:"#9ca3af",fontWeight:400}}>{fmt(p.price)}</span></span>:<span>{fmt(p.price)}</span>} · {isTaxableProd(p)?<span style={{color:"#7c3aed"}}>taxable</span>:"no tax"}</>;})()}</div>
+                  {caseQty>1&&(
+                    <div style={{display:"flex",gap:6,marginTop:4}}>
+                      <button onClick={()=>setSellUnits(prev=>({...prev,[p.id]:false}))}
+                        style={{padding:"2px 8px",borderRadius:5,border:`1px solid ${!sellByUnit?"#0ea5e9":"#e5e7eb"}`,background:!sellByUnit?"#f0f9ff":"#fff",fontSize:10,fontWeight:700,color:!sellByUnit?"#0ea5e9":"#9ca3af",cursor:"pointer"}}>
+                        📦 Case ({fmt(getEffectivePrice(selCustObj,p))})
+                      </button>
+                      <button onClick={()=>setSellUnits(prev=>({...prev,[p.id]:true}))}
+                        style={{padding:"2px 8px",borderRadius:5,border:`1px solid ${sellByUnit?"#7c3aed":"#e5e7eb"}`,background:sellByUnit?"#f5f3ff":"#fff",fontSize:10,fontWeight:700,color:sellByUnit?"#7c3aed":"#9ca3af",cursor:"pointer"}}>
+                        🔢 Unit ({fmt(unitPrice)}/ea)
+                      </button>
+                    </div>
+                  )}
                   <div style={{fontSize:11,marginTop:3,display:"flex",gap:8,flexWrap:"wrap"}}>
                     <span style={{color:remaining<=3?"#f59e0b":"#059669",fontWeight:700}}>🚚 {remaining} on truck{remaining<=3?" ⚠️":""}</span>
                     <span style={{color:"#9ca3af"}}>{loaded} loaded · {sold} sold</span>
@@ -1026,16 +1063,20 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
                 <div style={{display:"flex",alignItems:"center",gap:5}}>
                   <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.max(0,(prev[p.id]||0)-1)}))}
                     style={{width:28,height:28,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
-                  <input type="number" min="0" max={remaining} value={qty||""} placeholder="0"
-                    onChange={e=>setItems(prev=>({...prev,[p.id]:Math.min(remaining,Math.max(0,parseInt(e.target.value)||0))}))}
+                  <input type="number" min="0" max={sellByUnit?remaining*caseQty:remaining} value={qty||""} placeholder="0"
+                    onChange={e=>setItems(prev=>({...prev,[p.id]:Math.min(sellByUnit?remaining*caseQty:remaining,Math.max(0,parseInt(e.target.value)||0))}))}
                     style={{width:48,textAlign:"center",border:`1.5px solid ${qty>0?"#0ea5e9":"#e5e7eb"}`,borderRadius:6,padding:"5px",fontSize:13,fontWeight:700}}/>
-                  <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.min(remaining,(prev[p.id]||0)+1)}))}
-                    disabled={qty>=remaining}
-                    style={{width:28,height:28,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:qty>=remaining?"#f9fafb":"#fff",cursor:qty>=remaining?"not-allowed":"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:qty>=remaining?"#d1d5db":"#212121"}}>+</button>
+                  <button onClick={()=>setItems(prev=>({...prev,[p.id]:Math.min(sellByUnit?remaining*caseQty:remaining,(prev[p.id]||0)+1)}))}
+                    disabled={qty>=(sellByUnit?remaining*caseQty:remaining)}
+                    style={{width:28,height:28,borderRadius:"50%",border:"1.5px solid #e5e7eb",background:qty>=(sellByUnit?remaining*caseQty:remaining)?"#f9fafb":"#fff",cursor:qty>=(sellByUnit?remaining*caseQty:remaining)?"not-allowed":"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:qty>=(sellByUnit?remaining*caseQty:remaining)?"#d1d5db":"#212121"}}>+</button>
                 </div>
               </div>
-              {qty>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right",fontWeight:600}}>{fmt(qty*getEffectivePrice(selCustObj,p))}{isTaxableProd(p)?<span style={{color:"#059669"}}> +tax</span>:""}</div>}
-              {nearLimit&&qty>0&&<div style={{fontSize:10,color:"#f59e0b",marginTop:2,textAlign:"right",fontWeight:700}}>⚠️ At truck limit — {remaining} max</div>}
+              {qty>0&&<div style={{fontSize:11,color:"#0ea5e9",marginTop:4,textAlign:"right",fontWeight:600}}>
+                {sellByUnit?`${qty} unit${qty!==1?"s":""} @ ${fmt(unitPrice)}/ea = `:""}
+                {fmt(lineTotal)}{isTaxableProd(p)?<span style={{color:"#059669"}}> +tax</span>:""}
+                {sellByUnit&&caseQty>1&&<span style={{color:"#9ca3af",fontSize:10}}> ({(qty/caseQty).toFixed(1)} cases)</span>}
+              </div>}
+              {nearLimit&&qty>0&&!sellByUnit&&<div style={{fontSize:10,color:"#f59e0b",marginTop:2,textAlign:"right",fontWeight:700}}>⚠️ At truck limit — {remaining} max</div>}
             </div>
           );
         })}
