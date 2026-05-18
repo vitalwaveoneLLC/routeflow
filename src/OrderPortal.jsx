@@ -2214,14 +2214,40 @@ export default function OrderPortal() {
                     ${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)} collected
                   </div>
                   <button onClick={async()=>{
-                    // Refresh customers and state taxes
-                    const [custsR, taxesR] = await Promise.all([
-                      supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",driverData.truck?.id),
-                      supabase.from("state_taxes").select("*"),
-                    ]);
-                    setDriverData(prev=>({...prev, customers:custsR.data||prev.customers, stateTaxes:taxesR.data||prev.stateTaxes}));
+                    const truckId = driverData.truck?.id;
+                    if(!truckId) return;
+                    try{
+                      const [custsR, loadsR, salesR, pmtsR, prodsR, taxesR] = await Promise.all([
+                        supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",truckId),
+                        supabase.from("loads").select("*").eq("truck_id",truckId).eq("status","out").order("created_at",{ascending:false}),
+                        supabase.from("sales").select("*").eq("truck_id",truckId).order("created_at",{ascending:false}),
+                        supabase.from("payments").select("sale_id,status,method,amount"),
+                        supabase.from("products").select("*").order("cat").order("name"),
+                        supabase.from("state_taxes").select("*"),
+                      ]);
+                      // Rebuild mergedLoad same as login
+                      const allLoads = loadsR.data||[];
+                      let mergedLoad = null;
+                      if(allLoads.length>0){
+                        const itemMap={};
+                        allLoads.forEach(load=>(load.items||[]).forEach(item=>{itemMap[item.pid]=(itemMap[item.pid]||0)+item.qty;}));
+                        mergedLoad={...allLoads[0],items:Object.entries(itemMap).map(([pid,qty])=>({pid,qty})),_allLoadIds:allLoads.map(l=>l.id)};
+                      }
+                      const paidIds=new Set((pmtsR.data||[]).filter(p=>p.status==="paid").map(p=>p.sale_id));
+                      const salesWithPaid=(salesR.data||[]).map(s=>({...s,_paid:paidIds.has(s.id)}));
+                      setDriverData(prev=>({
+                        ...prev,
+                        customers:custsR.data||prev.customers,
+                        activeLoad:mergedLoad,
+                        sales:salesWithPaid,
+                        stateTaxes:taxesR.data||prev.stateTaxes,
+                      }));
+                      if(prodsR.data) setProducts(prodsR.data);
+                      setMsg({t:"success",m:"Data refreshed"});
+                      setTimeout(()=>setMsg(null),2000);
+                    }catch(e){setMsg({t:"error",m:"Refresh failed: "+e.message});}
                   }} style={{marginTop:4,background:"transparent",border:"1px solid #1e3050",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#4b6080",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-                    ↻ Refresh
+                    Refresh
                   </button>
                   <button onClick={()=>{supabase.auth.signOut();setDriverUser(null);setDriverData(null);setDriverTab("dashboard");}}
                     style={{marginTop:8,background:"transparent",border:"1px solid #1e3050",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#4b6080",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
