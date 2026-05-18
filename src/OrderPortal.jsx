@@ -230,6 +230,95 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
 }
 
 // -- DRIVER LOAD TAB -----------------------------------------------------------
+function CustomerAccountView({selCust,supabase,co,setStep}){
+  const[acctData,setAcctData]=useState(null);
+  const[acctLoading,setAcctLoading]=useState(true);
+  useEffect(()=>{
+    supabase.from("sales").select("*").eq("cust_id",selCust.id).order("created_at",{ascending:false})
+      .then(({data:invs})=>{
+        supabase.from("payments").select("*").in("sale_id",(invs||[]).map(s=>s.id))
+          .then(({data:pmts})=>{
+            setAcctData({invoices:invs||[],payments:pmts||[]});
+            setAcctLoading(false);
+          });
+      });
+  },[selCust.id]);
+
+  if(acctLoading)return<div style={{padding:60,textAlign:"center",color:"#9ca3af"}}>Loading your account…</div>;
+
+  const{invoices,payments}=acctData;
+  const totalDue=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0),0);
+  const totalPaid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0),0);
+
+  return(
+    <div className="fu" style={{maxWidth:700,margin:"0 auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628"}}>{selCust.name}</div>
+          <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>{selCust.phone}{selCust.address?` · ${selCust.address}`:""}</div>
+        </div>
+        <button onClick={()=>setStep("custchoice")} style={{background:"none",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"8px 14px",fontSize:12,color:"#6b7280",cursor:"pointer",fontWeight:600}}>← Back</button>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+        {[{l:"Total Invoices",v:invoices.length,c:"#7c3aed"},{l:"Amount Paid",v:`$${totalPaid.toFixed(2)}`,c:"#059669"},{l:"Balance Due",v:`$${totalDue.toFixed(2)}`,c:totalDue>0?"#dc2626":"#059669"}].map(k=>(
+          <div key={k.l} style={{background:"#fff",borderRadius:10,padding:"14px 16px",border:"1px solid #e5e7eb",textAlign:"center"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:k.c}}>{k.v}</div>
+            <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>{k.l}</div>
+          </div>
+        ))}
+      </div>
+
+      {invoices.length===0
+        ?<div style={{background:"#fff",borderRadius:10,padding:40,textAlign:"center",color:"#9ca3af",border:"1px solid #e5e7eb"}}>
+            <div style={{fontSize:32,marginBottom:8}}>📋</div>
+            <div style={{fontWeight:600}}>No invoices yet</div>
+          </div>
+        :<div style={{background:"#fff",borderRadius:10,overflow:"hidden",border:"1px solid #e5e7eb"}}>
+          <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#6b7280"}}>INVOICE HISTORY</div>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+              {["Invoice #","Date","Items","Total","Status"].map(h=>(
+                <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {invoices.map(s=>{
+                const paid=payments.find(p=>p.sale_id===s.id&&p.status==="paid");
+                return(
+                  <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6"}}>
+                    <td style={{padding:"10px 14px",fontWeight:700,color:"#7c3aed",fontSize:12}}>{s.id}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{s.date}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{(s.items||[]).length} item{(s.items||[]).length!==1?"s":""}</td>
+                    <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontSize:13}}>${parseFloat(s.total||0).toFixed(2)}</td>
+                    <td style={{padding:"10px 14px"}}>
+                      <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:6,background:paid?"#f0fdf4":"#fef2f2",color:paid?"#065f46":"#dc2626"}}>
+                        {paid?"✓ PAID":"UNPAID"}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      }
+
+      {totalDue>0&&<div style={{marginTop:16,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:14,color:"#dc2626"}}>Outstanding Balance</div>
+          <div style={{fontSize:12,color:"#991b1b",marginTop:2}}>Please contact your driver or call {co?.phone||"us"} to settle your account</div>
+        </div>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:24,color:"#dc2626"}}>${totalDue.toFixed(2)}</div>
+      </div>}
+
+      <button onClick={()=>setStep("custchoice")} style={{display:"block",width:"100%",marginTop:16,background:"#0a1628",color:"#fff",border:"none",borderRadius:9,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+        🛒 Place an Order
+      </button>
+    </div>
+  );
+}
+
 function DriverRouteTab({driverData, setDriverData, setDriverTab, setDriverSaleCust}){
   const today=new Date().toLocaleDateString("en-US",{weekday:"long"}); // e.g. "Monday"
   const sched=useMemo(()=>{try{return JSON.parse(driverData.truck?.schedule||"{}");}catch{return{};}}, [driverData.truck?.schedule]);
@@ -2214,7 +2303,7 @@ export default function OrderPortal() {
     setCustPrevInvs(allUnpaid);
 
     setSelCust(match);
-    setStep("order");
+    setStep("custchoice"); // Show order vs view account choice
   };
 
   // Walk-in auth - customers by name+phone, drivers/admin/staff by email+password
@@ -2373,7 +2462,7 @@ export default function OrderPortal() {
         {/* Step indicators — only for customer ordering flow */}
         {!isDriver&&!driverUser&&<div style={{display:"flex",alignItems:"center",gap:6}}>
           {[{k:"home",l:"Start"},{k:"order",l:"Order"},{k:"review",l:"Review"},{k:"confirm",l:"Done"}].map((s,i,arr)=>{
-            const steps=["home","order","review","confirm"];
+            const steps=["home","custchoice","order","review","confirm"];
             const cur=steps.indexOf(step);
             const done=cur>i, active=cur===i;
             return (
@@ -2427,7 +2516,7 @@ export default function OrderPortal() {
           </div>
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:16,maxWidth:900,margin:"0 auto 40px"}} className="grid2">
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,maxWidth:900,margin:"0 auto 40px"}} className="grid2">
           {/* Existing Customer */}
           <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb"}}
             onClick={()=>{setIsExisting(true);setIsNew(false);setIsDriver(false);setIsWalkIn(false);setIsCustPortal(false);}}
@@ -2435,7 +2524,7 @@ export default function OrderPortal() {
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
             <div style={{fontSize:36,marginBottom:12}}>💎</div>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#0a1628",marginBottom:8}}>Existing Customer</div>
-            <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>Welcome back! Access your account and place your order.</div>
+            <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>Welcome back! Place an order or view your invoice history.</div>
             <div style={{marginTop:16,color:"#0a1628",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>Access my account →</div>
             <div style={{marginTop:10,fontSize:12,color:"#9ca3af"}}>
               New customer?{" "}
@@ -2444,17 +2533,6 @@ export default function OrderPortal() {
                 Sign up →
               </span>
             </div>
-          </div>
-
-          {/* Customer History Portal */}
-          <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb",background:"linear-gradient(135deg,#fff,#fefce8)"}}
-            onClick={()=>{setIsCustPortal(true);setIsExisting(false);setIsNew(false);setIsDriver(false);setIsWalkIn(false);}}
-            onMouseEnter={e=>{e.currentTarget.style.borderColor="#f59e0b";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #f59e0b20";}}
-            onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
-            <div style={{fontSize:36,marginBottom:12}}>📋</div>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#0a1628",marginBottom:8}}>My Account</div>
-            <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>View your invoices, payment history, and outstanding balance.</div>
-            <div style={{marginTop:16,color:"#f59e0b",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>View my history →</div>
           </div>
 
           {/* Walk-in */}
@@ -2482,77 +2560,6 @@ export default function OrderPortal() {
         </>}
 
         {/* ── CUSTOMER HISTORY PORTAL ── */}
-        {isCustPortal&&<div className="fu" style={{maxWidth:680,margin:"0 auto"}}>
-          <button onClick={()=>setIsCustPortal(false)} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:13,marginBottom:16,display:"flex",alignItems:"center",gap:4}}>← Back</button>
-          <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0a1628",marginBottom:4}}>📋 My Account</div>
-          <div style={{fontSize:13,color:"#6b7280",marginBottom:20}}>View your invoices and payment history</div>
-          {!custPortalUser
-            ?<div className="card" style={{padding:24}}>
-                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,marginBottom:14}}>Verify Your Identity</div>
-                <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
-                  <div><label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>Business Name</label>
-                    <input placeholder="Enter your business name" value={custPortalName} onChange={e=>setCustPortalName(e.target.value)}
-                      style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/></div>
-                  <div><label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>Phone Number</label>
-                    <input placeholder="Enter your phone number" value={custPortalPhone} onChange={e=>setCustPortalPhone(e.target.value)}
-                      style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/></div>
-                </div>
-                {custPortalError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#dc2626",marginBottom:10}}>{custPortalError}</div>}
-                <button disabled={custPortalLoading} onClick={async()=>{
-                  setCustPortalError("");setCustPortalLoading(true);
-                  try{
-                    const norm=p=>p.replace(/[\s\-\(\)\+\.]/g,"");
-                    const name=custPortalName.trim().toLowerCase();
-                    const phone=norm(custPortalPhone);
-                    const match=customers.find(c=>{
-                      const nm=c.name.toLowerCase();
-                      const ph=norm(c.phone||"");
-                      return(nm.includes(name)||name.includes(nm))&&(ph===phone||ph.endsWith(phone.slice(-7)));
-                    });
-                    if(!match){setCustPortalError("No account found. Check your business name and phone number.");setCustPortalLoading(false);return;}
-                    // Load invoices
-                    const{data:invs}=await supabase.from("sales").select("*").eq("cust_id",match.id).order("created_at",{ascending:false});
-                    const{data:pmts}=await supabase.from("payments").select("*").in("sale_id",(invs||[]).map(s=>s.id));
-                    setCustPortalUser(match);
-                    setCustPortalData({invoices:invs||[],payments:pmts||[]});
-                  }catch(e){setCustPortalError(e.message);}
-                  setCustPortalLoading(false);
-                }} style={{width:"100%",background:"#0a1628",color:"#fff",border:"none",borderRadius:9,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-                  {custPortalLoading?"Checking…":"View My Account →"}
-                </button>
-              </div>
-            :<div>
-                <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:10,padding:"14px 18px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <div style={{fontWeight:700,fontSize:15,color:"#065f46"}}>{custPortalUser.name}</div>
-                    <div style={{fontSize:12,color:"#047857",marginTop:2}}>{custPortalData.invoices.length} invoices · Balance: <strong>${custPortalData.invoices.filter(s=>!custPortalData.payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0),0).toFixed(2)}</strong></div>
-                  </div>
-                  <button onClick={()=>{setCustPortalUser(null);setCustPortalData(null);setCustPortalName("");setCustPortalPhone("");}} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"6px 12px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700}}>Sign Out</button>
-                </div>
-                <div className="card" style={{overflow:"hidden"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse"}}>
-                    <thead><tr style={{background:"#0a1628",color:"#fff"}}>
-                      {["Invoice","Date","Total","Status"].map(h=><th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>)}
-                    </tr></thead>
-                    <tbody>
-                      {custPortalData.invoices.map(s=>{
-                        const paid=custPortalData.payments.find(p=>p.sale_id===s.id&&p.status==="paid");
-                        return(
-                          <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6"}}>
-                            <td style={{padding:"9px 13px",fontWeight:700,color:"#7c3aed",fontSize:12}}>{s.id}</td>
-                            <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{s.date}</td>
-                            <td style={{padding:"9px 13px",fontWeight:700,color:"#059669"}}>${parseFloat(s.total||0).toFixed(2)}</td>
-                            <td style={{padding:"9px 13px"}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:5,background:paid?"#f0fdf4":"#fef2f2",color:paid?"#065f46":"#dc2626"}}>{paid?"✓ PAID":"UNPAID"}</span></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-          }
-        </div>}
-
         {/* ── DRIVER: login + dashboard ── */}
         {isDriver&&<div className="fu">
           {!driverUser?(
@@ -3410,6 +3417,50 @@ export default function OrderPortal() {
           </div>
         </div>}
       </div>}
+
+      {/* ══ CUSTOMER CHOICE — place order or view account ══ */}
+      {step==="custchoice"&&selCust&&<div className="fu">
+        <div style={{maxWidth:560,margin:"0 auto"}}>
+          {/* Welcome header */}
+          <div style={{textAlign:"center",marginBottom:28}}>
+            <div style={{fontSize:36,marginBottom:8}}>👋</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0a1628",marginBottom:6}}>Welcome back, {selCust.name}</div>
+            <div style={{fontSize:13,color:"#6b7280"}}>What would you like to do today?</div>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+            {/* Place Order */}
+            <div className="card" style={{padding:28,cursor:"pointer",border:"2px solid #e5e7eb",textAlign:"center",transition:"all .2s"}}
+              onClick={()=>setStep("order")}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor="#0a1628";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 24px #0a162820";}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
+              <div style={{fontSize:40,marginBottom:12}}>🛒</div>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#0a1628",marginBottom:8}}>Place an Order</div>
+              <div style={{fontSize:12,color:"#6b7280",lineHeight:1.6}}>Browse products and submit your order for delivery</div>
+              <div style={{marginTop:16,background:"#0a1628",color:"#fff",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700}}>Order Now →</div>
+            </div>
+
+            {/* View Account */}
+            <div className="card" style={{padding:28,cursor:"pointer",border:"2px solid #e5e7eb",textAlign:"center",transition:"all .2s",position:"relative"}}
+              onClick={()=>setStep("myaccount")}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor="#f59e0b";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 24px #f59e0b20";}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
+              <div style={{fontSize:40,marginBottom:12}}>📋</div>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#0a1628",marginBottom:8}}>My Account</div>
+              <div style={{fontSize:12,color:"#6b7280",lineHeight:1.6}}>View invoices, payment history and outstanding balance</div>
+              {custPrevBalance>0&&<div style={{marginTop:8,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",fontSize:12,fontWeight:700,color:"#dc2626"}}>
+                ⚠️ Balance due: ${custPrevBalance.toFixed(2)}
+              </div>}
+              <div style={{marginTop:custPrevBalance>0?10:16,background:"#f59e0b",color:"#0a0e18",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700}}>View Account →</div>
+            </div>
+          </div>
+
+          <button onClick={()=>{setStep("home");setIsExisting(false);setSelCust(null);}} style={{display:"block",margin:"20px auto 0",background:"none",border:"none",color:"#9ca3af",fontSize:12,cursor:"pointer"}}>← Back to home</button>
+        </div>
+      </div>}
+
+      {/* ══ MY ACCOUNT ══ */}
+      {step==="myaccount"&&selCust&&<CustomerAccountView selCust={selCust} supabase={supabase} co={co} setStep={setStep}/>}
 
       {/* ══ ORDER FORM ══ */}
       {step==="order"&&<div className="fu">
