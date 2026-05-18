@@ -1977,7 +1977,8 @@ export default function App(){
   const getP=id=>products.find(p=>p.id===id);
   const getT=id=>trucks.find(t=>t.id===id);
   const getC=id=>customers.find(c=>c.id===id);
-  const activeLoad=tid=>loads.find(l=>l.truck_id===tid&&l.status==="out");
+  const activeLoads=tid=>loads.filter(l=>l.truck_id===tid&&l.status==="out");
+  const activeLoad=tid=>activeLoads(tid).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0];
   const pmtFor=sid=>payments.find(p=>p.sale_id===sid);
 
   // -- CUSTOM PRICING -----------------------------------------------------------------------------
@@ -2101,12 +2102,39 @@ export default function App(){
     return sale.state || cust?.state || "";
   };
 
+  // truckInv: aggregate ALL active loads for a truck (driver may load multiple times)
   const truckInv=tid=>{
-    const load=activeLoad(tid);if(!load)return[];
-    const sm={},rm={};
-    sales.filter(s=>s.load_id===load.id).forEach(s=>(s.items||[]).forEach(i=>{sm[i.pid]=(sm[i.pid]||0)+i.qty;}));
-    returns.filter(r=>r.load_id===load.id).forEach(r=>(r.items||[]).forEach(i=>{rm[i.pid]=(rm[i.pid]||0)+i.qty;}));
-    return(load.items||[]).map(i=>({pid:i.pid,loaded:i.qty,sold:sm[i.pid]||0,returned:rm[i.pid]||0,remaining:i.qty-(sm[i.pid]||0)-(rm[i.pid]||0)})).filter(i=>i.loaded>0);
+    const allLoads=loads.filter(l=>l.truck_id===tid&&l.status==="out");
+    if(!allLoads.length) return [];
+    const allLoadIds=new Set(allLoads.map(l=>l.id));
+
+    // Aggregate loaded qty per product across all active loads
+    const loadedMap={};
+    allLoads.forEach(load=>(load.items||[]).forEach(i=>{
+      loadedMap[i.pid]=(loadedMap[i.pid]||0)+i.qty;
+    }));
+
+    // Aggregate sold qty per product across all sales tied to these loads
+    const soldMap={};
+    sales.filter(s=>allLoadIds.has(s.load_id)).forEach(s=>
+      (s.items||[]).forEach(i=>{soldMap[i.pid]=(soldMap[i.pid]||0)+i.qty;})
+    );
+
+    // Aggregate returned qty
+    const retMap={};
+    returns.filter(r=>allLoadIds.has(r.load_id)).forEach(r=>
+      (r.items||[]).forEach(i=>{retMap[i.pid]=(retMap[i.pid]||0)+i.qty;})
+    );
+
+    return Object.entries(loadedMap)
+      .map(([pid,loaded])=>({
+        pid,
+        loaded,
+        sold:soldMap[pid]||0,
+        returned:retMap[pid]||0,
+        remaining:Math.max(0,loaded-(soldMap[pid]||0)-(retMap[pid]||0)),
+      }))
+      .filter(i=>i.loaded>0);
   };
 
   const myTruckId=isAdmin?null:profile?.truck_id;
@@ -2361,28 +2389,64 @@ export default function App(){
   // -- TRUCK INVENTORY RESET --------------------------------------------------
   const approveReset=async(req)=>{
     try{
-      const inv=truckInv(req.truck_id);
-      const load=activeLoad(req.truck_id);
-      // Return remaining stock to shelf
-      const toReturn=inv.filter(i=>i.remaining>0&&getP(i.pid));
+      // Get ALL active loads for this truck (not just the first one)
+      const allActiveLoads=loads.filter(l=>l.truck_id===req.truck_id&&l.status==="out");
+      const allLoadIds=new Set(allActiveLoads.map(l=>l.id));
+
+      // Compute full remaining inventory across all active loads
+      const loadedMap={};
+      allActiveLoads.forEach(load=>(load.items||[]).forEach(i=>{
+        loadedMap[i.pid]=(loadedMap[i.pid]||0)+i.qty;
+      }));
+      const soldMap={};
+      sales.filter(s=>allLoadIds.has(s.load_id)).forEach(s=>
+        (s.items||[]).forEach(i=>{soldMap[i.pid]=(soldMap[i.pid]||0)+i.qty;})
+      );
+      const retMap={};
+      returns.filter(r=>allLoadIds.has(r.load_id)).forEach(r=>
+        (r.items||[]).forEach(i=>{retMap[i.pid]=(retMap[i.pid]||0)+i.qty;})
+      );
+
+      // Build list of items to return to shelf
+      const toReturn=Object.entries(loadedMap)
+        .map(([pid,loaded])=>({
+          pid,
+          remaining:Math.max(0,loaded-(soldMap[pid]||0)-(retMap[pid]||0)),
+        }))
+        .filter(i=>i.remaining>0&&getP(i.pid));
+
+      // Return remaining stock to shelf in one batch
       if(toReturn.length>0){
         await Promise.all(toReturn.map(i=>supabase.from("products")
-          .update({shelf:Math.max(0,(getP(i.pid)?.shelf||0)+i.remaining)}).eq("id",i.pid)));
+          .update({shelf:Math.max(0,(getP(i.pid)?.shelf||0)+i.remaining)})
+          .eq("id",i.pid)));
         setProducts(prev=>prev.map(p=>{
           const item=toReturn.find(i=>i.pid===p.id);
           return item?{...p,shelf:Math.max(0,p.shelf+item.remaining)}:p;
         }));
       }
-      // Close the active load
-      if(load){
-        await supabase.from("loads").update({status:"reset"}).eq("id",load.id);
-        setLoads(prev=>prev.map(l=>l.id===load.id?{...l,status:"reset"}:l));
+
+      // Close ALL active loads for this truck (not just one)
+      if(allActiveLoads.length>0){
+        await supabase.from("loads").update({status:"reset"})
+          .in("id",allActiveLoads.map(l=>l.id));
+        setLoads(prev=>prev.map(l=>
+          allLoadIds.has(l.id)?{...l,status:"reset"}:l
+        ));
       }
+
       // Mark request approved
-      await supabase.from("truck_resets").update({status:"approved",reviewed_at:new Date().toISOString()}).eq("id",req.id);
-      setTruckResets(prev=>prev.map(r=>r.id===req.id?{...r,status:"approved",reviewed_at:new Date().toISOString()}:r));
+      await supabase.from("truck_resets").update({
+        status:"approved",
+        reviewed_at:new Date().toISOString(),
+      }).eq("id",req.id);
+      setTruckResets(prev=>prev.map(r=>
+        r.id===req.id?{...r,status:"approved",reviewed_at:new Date().toISOString()}:r
+      ));
+
       const truck=getT(req.truck_id);
-      showToast(`[OK] ${truck?.driver||"Truck"} inventory reset  -  ${toReturn.reduce((a,i)=>a+i.remaining,0)} units returned to shelf`);
+      const totalReturned=toReturn.reduce((a,i)=>a+i.remaining,0);
+      showToast(`[OK] ${truck?.driver||"Truck"} reset - ${totalReturned} units returned from ${allActiveLoads.length} load(s)`);
     }catch(e){showToast("Reset failed: "+e.message,"error");}
   };
 
