@@ -232,7 +232,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
 // -- DRIVER LOAD TAB -----------------------------------------------------------
 function DriverRouteTab({driverData, setDriverData, setDriverTab, setDriverSaleCust}){
   const today=new Date().toLocaleDateString("en-US",{weekday:"long"}); // e.g. "Monday"
-  const sched=React.useMemo(()=>{try{return JSON.parse(driverData.truck?.schedule||"{}");}catch{return{};}}, [driverData.truck?.schedule]);
+  const sched=useMemo(()=>{try{return JSON.parse(driverData.truck?.schedule||"{}");}catch{return{};}}, [driverData.truck?.schedule]);
   const stops=sched[today]||[];
   const customers=driverData.customers||[];
   const [checked,setChecked]=useState({}); // {cid: true} for visited stops
