@@ -994,6 +994,7 @@ function DeliverySchedule({trucks,setTrucks,customers,supabase,showToast}){
   const[schedTruck,setSchedTruck]=useState(trucks[0]?.id||"");
   const[schedDay,setSchedDay]=useState("Monday");
   const[saving2,setSaving2]=useState(false);
+  const[optimizing,setOptimizing]=useState(false);
   const days=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
   const truck=trucks.find(t=>t.id===schedTruck);
   const getSchedule=()=>{try{return JSON.parse(truck?.schedule||"{}");}catch{return{};}};
@@ -1018,6 +1019,60 @@ function DeliverySchedule({trucks,setTrucks,customers,supabase,showToast}){
   };
   const removeStop=cid=>saveSchedule({...sched,[schedDay]:dayStops.filter(s=>s.cid!==cid)});
   const updateNote=(cid,note)=>saveSchedule({...sched,[schedDay]:dayStops.map(s=>s.cid===cid?{...s,note}:s)});
+
+  // Geocode address using free Nominatim API
+  const geocode=async(address)=>{
+    try{
+      const res=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,{headers:{"Accept-Language":"en-US"}});
+      const data=await res.json();
+      if(data[0])return{lat:parseFloat(data[0].lat),lng:parseFloat(data[0].lon)};
+    }catch{}
+    return null;
+  };
+
+  // Haversine distance in miles
+  const haversine=(a,b)=>{
+    const R=3958.8,dLat=(b.lat-a.lat)*Math.PI/180,dLng=(b.lng-a.lng)*Math.PI/180;
+    const x=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+    return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+  };
+
+  // Nearest-neighbor route optimization
+  const optimizeRoute=async()=>{
+    if(dayStops.length<3)return showToast("Need at least 3 stops to optimize","error");
+    setOptimizing(true);
+    showToast("🗺 Geocoding addresses… this may take a moment");
+    try{
+      // Geocode all stops
+      const coords=[];
+      for(const s of dayStops){
+        const cust=customers.find(c=>c.id===s.cid);
+        const addr=cust?.address;
+        if(addr){
+          await new Promise(r=>setTimeout(r,300)); // rate limit Nominatim
+          const geo=await geocode(addr);
+          coords.push({...s,lat:geo?.lat||null,lng:geo?.lng||null});
+        }else{coords.push({...s,lat:null,lng:null});}
+      }
+      // Separate geocoded and non-geocoded
+      const withCoords=coords.filter(s=>s.lat&&s.lng);
+      const without=coords.filter(s=>!s.lat||!s.lng);
+      if(withCoords.length<2){showToast("Not enough addresses geocoded — add addresses to customers","error");setOptimizing(false);return;}
+      // Nearest-neighbor algorithm starting from first stop
+      const unvisited=[...withCoords];
+      const ordered=[unvisited.splice(0,1)[0]];
+      while(unvisited.length>0){
+        const last=ordered[ordered.length-1];
+        let nearestIdx=0,nearestDist=Infinity;
+        unvisited.forEach((s,i)=>{const d=haversine(last,s);if(d<nearestDist){nearestDist=d;nearestIdx=i;}});
+        ordered.push(unvisited.splice(nearestIdx,1)[0]);
+      }
+      const optimized=[...ordered,...without];
+      await saveSchedule({...sched,[schedDay]:optimized.map(s=>({cid:s.cid,note:s.note||""}))});
+      showToast(`✅ Route optimized — ${ordered.length} stops sorted by distance`);
+    }catch(e){showToast("Optimization failed: "+e.message,"error");}
+    setOptimizing(false);
+  };
   return(
     <div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
@@ -1043,7 +1098,13 @@ function DeliverySchedule({trucks,setTrucks,customers,supabase,showToast}){
         <div className="card" style={{padding:18,borderTop:"3px solid #0a1628"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14}}>{truck?.driver} — {schedDay} Route</div>
-            {saving2&&<span style={{fontSize:11,color:"#9ca3af"}}>Saving…</span>}
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              {saving2&&<span style={{fontSize:11,color:"#9ca3af"}}>Saving…</span>}
+              {dayStops.length>=3&&<button onClick={optimizeRoute} disabled={optimizing}
+                style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:6,padding:"5px 10px",fontSize:10,fontWeight:700,cursor:"pointer",opacity:optimizing?0.7:1}}>
+                {optimizing?"Optimizing…":"🗺 Optimize Route"}
+              </button>}
+            </div>
           </div>
           {dayStops.length===0
             ?<div style={{textAlign:"center",padding:"24px 0",color:"#9ca3af",fontSize:13}}>
@@ -1107,6 +1168,222 @@ function DeliverySchedule({trucks,setTrucks,customers,supabase,showToast}){
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+function BankReconcile({paymentsLog,customers,getC,fmt}){
+  const[bankRows,setBankRows]=useState([]);
+  const[csvErr,setCsvErr]=useState("");
+  const importBankCSV=async(file)=>{
+    if(!file)return;
+    setCsvErr("");
+    const text=await file.text();
+    const lines=text.trim().split("\n").filter(l=>l.trim());
+    const rows=[];
+    for(const line of lines.slice(1)){
+      const parts=line.split(",").map(s=>s.replace(/^"|"$/g,"").trim());
+      const date=parts[0]||"",desc=parts[1]||"";
+      const amtRaw=parts.find(p=>parseFloat(p.replace(/[$,]/g,""))>0)||"0";
+      const amt=parseFloat(amtRaw.replace(/[$,]/g,""))||0;
+      if(amt>0)rows.push({date,desc,amount:amt,matched:null});
+    }
+    if(!rows.length){setCsvErr("No valid rows found. CSV needs: Date, Description, Amount columns.");return;}
+    setBankRows(rows.map(r=>{
+      const match=paymentsLog.find(p=>Math.abs(p.amount-r.amount)<0.01);
+      return{...r,matched:match?.id||null};
+    }));
+  };
+  const matched=bankRows.filter(r=>r.matched);
+  const unmatched=bankRows.filter(r=>!r.matched);
+  const bankTotal=bankRows.reduce((a,r)=>a+r.amount,0);
+  const sysTotal=paymentsLog.reduce((a,p)=>a+p.amount,0);
+  return(
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+        {[{l:"Bank Statement Total",v:fmt(bankTotal),c:"#0ea5e9"},{l:"System Recorded",v:fmt(sysTotal),c:"#059669"},{l:"Difference",v:fmt(Math.abs(bankTotal-sysTotal)),c:Math.abs(bankTotal-sysTotal)<0.01?"#059669":"#dc2626"}].map(k=>(
+          <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>
+        ))}
+      </div>
+      <div className="card" style={{padding:18,marginBottom:16}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,marginBottom:10}}>📥 Import Bank Statement CSV</div>
+        <div style={{fontSize:11,color:"#6b7280",marginBottom:10}}>Export transactions from your bank as CSV. Format: Date, Description, Amount (deposits only)</div>
+        <input type="file" accept=".csv" onChange={e=>importBankCSV(e.target.files[0])}/>
+        {csvErr&&<div style={{fontSize:11,color:"#dc2626",marginTop:6}}>{csvErr}</div>}
+      </div>
+      {bankRows.length>0&&(
+        <div className="card" style={{overflow:"hidden"}}>
+          <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#6b7280"}}>{bankRows.length} TRANSACTIONS · {matched.length} MATCHED · {unmatched.length} UNMATCHED</div>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                {["Bank Date","Description","Amount","Match in System","Status"].map(h=>(
+                  <th key={h} style={{padding:"8px 12px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {bankRows.map((r,i)=>{
+                  const sysMatch=r.matched?paymentsLog.find(p=>p.id===r.matched):null;
+                  return(
+                    <tr key={i} style={{borderBottom:"1px solid #f3f4f6",background:sysMatch?"#f0fdf4":"#fef2f2"}}>
+                      <td style={{padding:"8px 12px",fontSize:11,color:"#6b7280"}}>{r.date}</td>
+                      <td style={{padding:"8px 12px",fontSize:11,color:"#374151",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.desc}</td>
+                      <td style={{padding:"8px 12px",fontWeight:700,color:"#059669"}}>{fmt(r.amount)}</td>
+                      <td style={{padding:"8px 12px",fontSize:11}}>
+                        {sysMatch
+                          ?<span style={{color:"#059669",fontWeight:600}}>{sysMatch.id} · {getC(sysMatch.cust_id)?.name||"?"} · {sysMatch.method}</span>
+                          :<select onChange={e=>setBankRows(prev=>prev.map((x,xi)=>xi===i?{...x,matched:e.target.value||null}:x))}
+                            style={{fontSize:11,border:"1px solid #e5e7eb",borderRadius:5,padding:"4px 8px",width:"100%"}}>
+                            <option value="">— Select match —</option>
+                            {paymentsLog.filter(p=>Math.abs(p.amount-r.amount)<5).map(p=>(
+                              <option key={p.id} value={p.id}>{p.id} · {getC(p.cust_id)?.name} · {fmt(p.amount)}</option>
+                            ))}
+                          </select>
+                        }
+                      </td>
+                      <td style={{padding:"8px 12px"}}>{sysMatch?<span className="bdg bg2">✓ MATCHED</span>:<span className="bdg br2">UNMATCHED</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PromotionsTab({promotions,setPromotions,products,customers,supabase,showToast,showConfirm,fmt}){
+  const uid6=()=>Math.random().toString(36).slice(2,8).toUpperCase();
+  const[form,setForm]=useState({code:"",type:"percent",value:"",min_order:"",product_id:"",applies_to:"all",expiry:"",active:true,description:""});
+  const[saving,setSaving]=useState(false);
+  const[showForm,setShowForm]=useState(false);
+
+  const savePromo=async()=>{
+    if(!form.code.trim()||!form.value||parseFloat(form.value)<=0)return showToast("Code and discount value required","error");
+    setSaving(true);
+    const rec={id:"PROMO-"+uid6(),code:form.code.trim().toUpperCase(),type:form.type,value:parseFloat(form.value),min_order:parseFloat(form.min_order)||0,product_id:form.product_id||null,applies_to:form.applies_to,expiry:form.expiry||null,active:true,description:form.description,uses:0,created_at:new Date().toISOString()};
+    const{error}=await supabase.from("promotions").insert(rec);
+    if(error){showToast(error.message,"error");setSaving(false);return;}
+    setPromotions(prev=>[rec,...prev]);
+    setForm({code:"",type:"percent",value:"",min_order:"",product_id:"",applies_to:"all",expiry:"",active:true,description:""});
+    setShowForm(false);
+    showToast("✅ Promotion created");
+    setSaving(false);
+  };
+
+  const togglePromo=async(id,active)=>{
+    await supabase.from("promotions").update({active:!active}).eq("id",id);
+    setPromotions(prev=>prev.map(p=>p.id===id?{...p,active:!active}:p));
+    showToast(!active?"Promotion activated":"Promotion paused");
+  };
+
+  const deletePromo=id=>showConfirm("Delete this promotion?",async()=>{
+    await supabase.from("promotions").delete().eq("id",id);
+    setPromotions(prev=>prev.filter(p=>p.id!==id));
+    showToast("Promotion deleted");
+  });
+
+  const discountLabel=p=>p.type==="percent"?`${p.value}% off`:p.type==="fixed"?`${fmt(p.value)} off`:p.type==="bogo"?"Buy 1 Get 1":p.type==="free_shipping"?"Free Delivery":`${p.value} off`;
+
+  return(
+    <div className="fu">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22}}>🏷️ Promotions & Discounts</div>
+          <div style={{fontSize:12,color:"#9ca3af"}}>Promo codes, volume discounts, and time-limited offers</div>
+        </div>
+        <button className="btn ba" onClick={()=>setShowForm(s=>!s)}>+ New Promotion</button>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
+        {[{l:"Total Promos",v:promotions.length,c:"#7c3aed"},{l:"Active",v:promotions.filter(p=>p.active).length,c:"#059669"},{l:"Total Uses",v:promotions.reduce((a,p)=>a+(p.uses||0),0),c:"#0ea5e9"},{l:"Expired",v:promotions.filter(p=>p.expiry&&new Date(p.expiry)<new Date()).length,c:"#9ca3af"}].map(k=>(
+          <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>
+        ))}
+      </div>
+
+      {showForm&&<div className="card" style={{padding:20,marginBottom:16,borderTop:"3px solid #7c3aed"}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:14}}>🏷️ New Promotion</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+          <div><label>Promo Code *</label><input placeholder="e.g. SAVE10" value={form.code} onChange={e=>setForm(f=>({...f,code:e.target.value.toUpperCase()}))}/></div>
+          <div><label>Discount Type</label>
+            <select value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
+              <option value="percent">% Percentage off</option>
+              <option value="fixed">$ Fixed amount off</option>
+              <option value="bogo">Buy 1 Get 1 Free</option>
+              <option value="free_shipping">Free Delivery</option>
+            </select>
+          </div>
+          {form.type!=="bogo"&&form.type!=="free_shipping"&&<div><label>{form.type==="percent"?"Discount %":"Discount $"} *</label><input type="number" min="0" placeholder={form.type==="percent"?"10":"5.00"} value={form.value} onChange={e=>setForm(f=>({...f,value:e.target.value}))}/></div>}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
+          <div><label>Min Order ($)</label><input type="number" min="0" placeholder="0 = no minimum" value={form.min_order} onChange={e=>setForm(f=>({...f,min_order:e.target.value}))}/></div>
+          <div><label>Applies To</label>
+            <select value={form.applies_to} onChange={e=>setForm(f=>({...f,applies_to:e.target.value}))}>
+              <option value="all">All Products</option>
+              <option value="product">Specific Product</option>
+            </select>
+          </div>
+          {form.applies_to==="product"&&<div><label>Product</label>
+            <select value={form.product_id} onChange={e=>setForm(f=>({...f,product_id:e.target.value}))}>
+              <option value="">— Select —</option>
+              {products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>}
+          <div><label>Expiry Date</label><input type="date" value={form.expiry} onChange={e=>setForm(f=>({...f,expiry:e.target.value}))}/></div>
+        </div>
+        <div style={{marginBottom:12}}><label>Description / Internal Note</label><input placeholder="e.g. Summer promotion for loyal customers" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button className="btn bgh" onClick={()=>setShowForm(false)}>Cancel</button>
+          <button className="btn ba" onClick={savePromo} disabled={saving}>{saving?"Saving…":"💾 Save Promotion"}</button>
+        </div>
+      </div>}
+
+      {promotions.length===0&&!showForm
+        ?<div className="card" style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+            <div style={{fontSize:36,marginBottom:8}}>🏷️</div>
+            <div style={{fontWeight:600,fontSize:14}}>No promotions yet</div>
+            <div style={{fontSize:12}}>Create a promo code or discount to apply at checkout</div>
+          </div>
+        :<div className="card" style={{overflow:"hidden"}}>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                {["Code","Type","Discount","Min Order","Applies To","Expiry","Uses","Status","Actions"].map(h=>(
+                  <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {promotions.map(p=>{
+                  const expired=p.expiry&&new Date(p.expiry)<new Date();
+                  const prod=products.find(x=>x.id===p.product_id);
+                  return(
+                    <tr key={p.id} style={{borderBottom:"1px solid #f3f4f6",background:expired?"#fafafa":"#fff",opacity:expired||!p.active?0.7:1}}>
+                      <td style={{padding:"9px 13px"}}><span style={{fontFamily:"monospace",fontWeight:700,fontSize:13,background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:4}}>{p.code}</span></td>
+                      <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280",textTransform:"capitalize"}}>{p.type.replace("_"," ")}</td>
+                      <td style={{padding:"9px 13px",fontWeight:700,color:"#059669"}}>{discountLabel(p)}</td>
+                      <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{p.min_order>0?fmt(p.min_order):"—"}</td>
+                      <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{p.applies_to==="product"&&prod?prod.name:"All products"}</td>
+                      <td style={{padding:"9px 13px",fontSize:11,color:expired?"#dc2626":"#6b7280"}}>{p.expiry||"—"}{expired&&<span className="bdg br2" style={{marginLeft:4,fontSize:9}}>EXP</span>}</td>
+                      <td style={{padding:"9px 13px",fontSize:12,fontWeight:600,color:"#7c3aed"}}>{p.uses||0}</td>
+                      <td style={{padding:"9px 13px"}}><span className={`bdg ${p.active&&!expired?"bg2":"bgr"}`}>{p.active&&!expired?"ACTIVE":"INACTIVE"}</span></td>
+                      <td style={{padding:"9px 13px"}}>
+                        <div style={{display:"flex",gap:5}}>
+                          {!expired&&<button onClick={()=>togglePromo(p.id,p.active)} style={{background:p.active?"#fff7ed":"#f0fdf4",border:`1px solid ${p.active?"#fed7aa":"#a7f3d0"}`,borderRadius:6,padding:"3px 8px",fontSize:10,color:p.active?"#c2410c":"#065f46",cursor:"pointer",fontWeight:700}}>{p.active?"Pause":"Activate"}</button>}
+                          <button onClick={()=>deletePromo(p.id)} style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"3px 8px",fontSize:10,color:"#dc2626",cursor:"pointer",fontWeight:700}}>🗑</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
     </div>
   );
 }
@@ -2905,6 +3182,8 @@ export default function App(){
   const[creditMemos,setCreditMemos]=useState([]);
   const[auditLog,setAuditLog]=useState([]);
   const[recurringOrders,setRecurringOrders]=useState([]);
+  const[promotions,setPromotions]=useState([]);
+  const[warehouses,setWarehouses]=useState([{id:"main",name:"Main Warehouse",location:""}]);
   const[paymentsLog,setPaymentsLog]=useState([]);
   const[walkinRegs,setWalkinRegs]=useState([]);
   const[driverProfiles,setDriverProfiles]=useState([]);
@@ -3254,7 +3533,7 @@ export default function App(){
   const loadAll=useCallback(async()=>{
     setLoading(true);
     try{
-      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR,wiR,cmR,alR,rrR]=await Promise.all([
+      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR,wiR,cmR,alR,rrR,proR]=await Promise.all([
         supabase.from("company").select("*").single(),
         supabase.from("products").select("*").order("name"),
         supabase.from("trucks").select("*").order("driver"),
@@ -3270,6 +3549,7 @@ export default function App(){
         supabase.from("credit_memos").select("*").order("created_at",{ascending:false}),
         supabase.from("audit_log").select("*").order("created_at",{ascending:false}).limit(500),
         supabase.from("recurring_orders").select("*").order("created_at",{ascending:false}),
+        supabase.from("promotions").select("*").order("created_at",{ascending:false}),
       ]);
       if(coR.data){setCo(coR.data);setCoEdit(coR.data);}
       if(prR.data)setProducts(prR.data);
@@ -3286,6 +3566,7 @@ export default function App(){
       if(cmR.data)setCreditMemos(cmR.data);
       if(alR.data)setAuditLog(alR.data);
       if(rrR.data)setRecurringOrders(rrR.data);
+      if(proR.data)setPromotions(proR.data);
       // Load truck reset requests (graceful fallback if table doesn't exist yet)
       try{
         const{data:rr}=await supabase.from("truck_resets").select("*").order("created_at",{ascending:false});
@@ -3300,7 +3581,46 @@ export default function App(){
     setLoading(false);
   },[profile]);
 
-  // Audit log helper — call after any significant action
+  // Email helper — uses Resend API via company settings
+  const sendEmail=async(to,subject,html)=>{
+    if(!co?.resend_api_key||!co?.from_email)return{ok:false,err:"Email not configured"};
+    if(!to||!to.includes("@"))return{ok:false,err:"No valid email address"};
+    try{
+      const res=await fetch("https://api.resend.com/emails",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${co.resend_api_key}`},
+        body:JSON.stringify({from:co.from_email,to,subject,html}),
+      });
+      const data=await res.json();
+      if(!res.ok)return{ok:false,err:data.message||"Send failed"};
+      return{ok:true};
+    }catch(e){return{ok:false,err:e.message};}
+  };
+
+  // Build invoice email HTML
+  const buildInvoiceEmail=(sale,cust)=>{
+    const items=(sale.items||[]).map(it=>{const p=getP(it.pid);return`<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">${p?.name||it.pid}</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;text-align:center">${it.qty}</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;text-align:right">$${((p?.price||0)*it.qty).toFixed(2)}</td></tr>`;}).join("");
+    return`<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;color:#212121">
+      <div style="background:#0a1628;padding:20px;border-radius:8px 8px 0 0;text-align:center">
+        <div style="color:#fff;font-size:22px;font-weight:700">${co?.name||"Your Supplier"}</div>
+        <div style="color:#94a3b8;font-size:12px;margin-top:4px">Invoice ${sale.id} · ${sale.date}</div>
+      </div>
+      <div style="border:1px solid #e5e7eb;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+        <p>Hi <strong>${cust?.name||"Customer"}</strong>,</p>
+        <p>Please find your invoice details below. Payment is due upon delivery.</p>
+        <table style="width:100%;border-collapse:collapse;margin:16px 0">
+          <thead><tr style="background:#f9fafb"><th style="padding:8px 10px;text-align:left;font-size:12px">Product</th><th style="padding:8px 10px;text-align:center;font-size:12px">Qty</th><th style="padding:8px 10px;text-align:right;font-size:12px">Amount</th></tr></thead>
+          <tbody>${items}</tbody>
+        </table>
+        <div style="border-top:2px solid #0a1628;padding-top:12px;display:flex;justify-content:space-between">
+          <strong>Total Due</strong><strong style="color:#0a1628;font-size:18px">$${(calcSaleGrandTotal(sale)).toFixed(2)}</strong>
+        </div>
+        <p style="margin-top:20px;font-size:12px;color:#6b7280">Questions? Contact us at ${co?.phone||""} · ${co?.email||""}</p>
+      </div>
+    </body></html>`;
+  };
+
+  // Logaudit helper already defined above
   const logAudit=async(action,entity,detail="")=>{
     try{
       const rec={id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:session?.user?.email||"unknown",action,entity,detail,created_at:new Date().toISOString()};
@@ -3843,6 +4163,14 @@ export default function App(){
       await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
       setSales(prev=>[ns,...prev]);setPayments(prev=>[...prev,{sale_id:ns.id,status:"unpaid"}]);
       showToast("Sale recorded");setModal(null);setTimeout(()=>{setViewSale(ns);setModal("invoice");},80);
+      // Auto-email invoice if enabled
+      if(co?.email_invoices&&co?.resend_api_key&&co?.from_email){
+        const cust=getC(ns.cust_id);
+        if(cust?.email?.includes("@")){
+          sendEmail(cust.email,`Invoice ${ns.id} from ${co?.name||"Your Supplier"}`,buildInvoiceEmail(ns,cust))
+            .then(r=>r.ok?showToast(`✅ Invoice emailed to ${cust.email}`):null);
+        }
+      }
     }catch(e){showToast(e.message,"error");}
     setSaving(false);
   };
@@ -4169,6 +4497,7 @@ export default function App(){
     ...(isAdmin?[{id:"purchaseorders",label:"Purchase Orders",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:13}}>🛒</span>}]:[]),
     {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
     ...(isAdmin?[{id:"recurring",label:"Recurring Orders",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>🔁</span>}]:[]),
+    ...(isAdmin?[{id:"promotions",label:"Promotions",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>🏷️</span>}]:[]),
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
     ...(isAdmin?[{id:"creditmemos",label:"Credit Memos",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>📝</span>}]:[]),
     {id:"taxinvoices",label:"Tax Invoices",icon:ic.inv},
@@ -4671,6 +5000,17 @@ export default function App(){
             fmt={fmt}
           />}
 
+          {tab==="promotions"&&isAdmin&&<PromotionsTab
+            promotions={promotions}
+            setPromotions={setPromotions}
+            products={products}
+            customers={customers}
+            supabase={supabase}
+            showToast={showToast}
+            showConfirm={showConfirm}
+            fmt={fmt}
+          />}
+
           {/* ══ ORDERS ══ */}
           {tab==="orders"&&<div className="fu">
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
@@ -5036,6 +5376,34 @@ export default function App(){
             <div style={{display:"flex",gap:7,marginBottom:14,flexWrap:"wrap"}}>
               {["all","unpaid","paid"].map(f=><button key={f} className={`btn ${arFilter===f?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>setArFilter(f)}>{f}</button>)}
               <button className="btn bpr" style={{marginLeft:"auto"}} onClick={exportAR}>{ic.dl} Export CSV</button>
+              {co?.email_reminders&&co?.resend_api_key&&(
+                <button className="btn bb" style={{fontSize:11}} onClick={async()=>{
+                  const now=new Date();
+                  const unpaid=visSales.filter(s=>pmtFor(s.id)?.status!=="paid");
+                  let sent=0,skipped=0;
+                  for(const s of unpaid){
+                    const cust=getC(s.cust_id);
+                    if(!cust?.email?.includes("@")){skipped++;continue;}
+                    const days=Math.floor((now-new Date(s.created_at||s.date))/(1000*60*60*24));
+                    if(days<30){skipped++;continue;}
+                    const label=days>=90?"🚨 90+ days":days>=60?"⚠️ 60 days":"📋 30 days";
+                    const html=`<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px">
+                      <div style="background:#dc2626;padding:16px 20px;border-radius:8px 8px 0 0;color:#fff">
+                        <div style="font-size:18px;font-weight:700">Payment Reminder — ${label} Overdue</div>
+                      </div>
+                      <div style="border:1px solid #e5e7eb;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+                        <p>Hi <strong>${cust.name}</strong>,</p>
+                        <p>This is a friendly reminder that invoice <strong>${s.id}</strong> dated <strong>${s.date}</strong> for <strong>$${calcSaleGrandTotal(s).toFixed(2)}</strong> is now <strong>${days} days overdue</strong>.</p>
+                        <p>Please arrange payment at your earliest convenience. Contact us at ${co?.phone||""} or ${co?.email||""} if you have any questions.</p>
+                        <p style="color:#6b7280;font-size:12px">— ${co?.name||"Your Supplier"}</p>
+                      </div></body></html>`;
+                    const r=await sendEmail(cust.email,`Payment Reminder — Invoice ${s.id} (${days} days overdue)`,html);
+                    if(r.ok)sent++;else skipped++;
+                  }
+                  showToast(`✅ Sent ${sent} reminder${sent!==1?"s":""}${skipped>0?` · ${skipped} skipped (no email)`:""}`);}}>
+                  ✉️ Send Overdue Reminders
+                </button>
+              )}
             </div>
             <div className="card">
               {visSales.length===0?<Empty icon="📋" msg="NO TRANSACTIONS"/>:(()=>{
@@ -5071,8 +5439,8 @@ export default function App(){
               <button className="btn ba" onClick={()=>setPmModal(true)}>💳 Record Payment</button>
               <button className="btn bpr" onClick={exportPayments}>{ic.dl} Export CSV</button>
               <div style={{marginLeft:"auto",display:"flex",gap:6}}>
-                {["log","unpaid"].map(t=>(
-                  <button key={t} className={`btn ${pmTab===t?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>setPmTab(t)}>{t==="log"?"All Payments":"Unpaid Invoices"}</button>
+                {["log","unpaid","reconcile"].map(t=>(
+                  <button key={t} className={`btn ${pmTab===t?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>setPmTab(t)}>{t==="log"?"All Payments":t==="unpaid"?"Unpaid Invoices":"🏦 Bank Reconcile"}</button>
                 ))}
               </div>
             </div>
@@ -5145,6 +5513,10 @@ export default function App(){
                 </table></div>
               )}
             </div>}
+
+            {/* Bank Reconciliation Tab */}
+            {pmTab==="reconcile"&&<BankReconcile paymentsLog={paymentsLog} customers={customers} getC={getC} fmt={fmt}/>}
+
           </div>}
 
           {/* ── PAYMENT MODAL ── */}
@@ -6287,6 +6659,28 @@ export default function App(){
                   {[{l:"Company Name",k:"name"},{l:"Address",k:"address"},{l:"Phone",k:"phone"},{l:"Email",k:"email"},{l:`Default Tax Rate (%)`,k:"tax_rate"},{l:"Stripe Payment Link (for driver card QR)",k:"stripe_payment_link"}].map(f=>(
                     <div key={f.k}><label>{f.l}</label><input value={coEdit[f.k]||""} onChange={e=>setCoEdit(prev=>({...prev,[f.k]:e.target.value}))}/></div>
                   ))}
+                  <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"#0369a1",marginBottom:10}}>✉️ Email Notifications (Resend API)</div>
+                    <div style={{fontSize:11,color:"#6b7280",marginBottom:10}}>
+                      Get a free API key at <a href="https://resend.com" target="_blank" rel="noreferrer" style={{color:"#0369a1"}}>resend.com</a> — 100 emails/day free. Used for invoice emails + overdue reminders.
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      <div><label>Resend API Key</label><input type="password" placeholder="re_xxxxxxxxxxxx" value={coEdit.resend_api_key||""} onChange={e=>setCoEdit(prev=>({...prev,resend_api_key:e.target.value}))}/></div>
+                      <div><label>From Email (must be verified in Resend)</label><input type="email" placeholder="invoices@yourcompany.com" value={coEdit.from_email||""} onChange={e=>setCoEdit(prev=>({...prev,from_email:e.target.value}))}/></div>
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        <label style={{margin:0,fontWeight:500,fontSize:12}}>
+                          <input type="checkbox" checked={!!coEdit.email_invoices} onChange={e=>setCoEdit(prev=>({...prev,email_invoices:e.target.checked}))} style={{marginRight:6}}/>
+                          Auto-email invoice to customer after every sale
+                        </label>
+                      </div>
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        <label style={{margin:0,fontWeight:500,fontSize:12}}>
+                          <input type="checkbox" checked={!!coEdit.email_reminders} onChange={e=>setCoEdit(prev=>({...prev,email_reminders:e.target.checked}))} style={{marginRight:6}}/>
+                          Send overdue payment reminders (30 / 60 / 90 days)
+                        </label>
+                      </div>
+                    </div>
+                  </div>
 
                   {/* Tax Enable/Disable Toggle */}
                   <div style={{background:co?.tax_enabled?"#f0fdf4":"#fef2f2",border:`1px solid ${co?.tax_enabled?"#a7f3d0":"#fecaca"}`,borderRadius:10,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -6365,8 +6759,21 @@ export default function App(){
                   </label>
                 </div>
               </div>
+              {/* Warehouse / Storage Locations */}
               <div className="card" style={{padding:22,marginBottom:14}}>
-                <div className="sh">Order Portal Link</div>
+                <div className="sh">🏢 Warehouse / Storage Locations</div>
+                <div style={{fontSize:12,color:"#6b7280",marginBottom:12}}>Define storage locations for multi-warehouse tracking. Selected during restock to track where inventory comes from.</div>
+                {warehouses.map((w,i)=>(
+                  <div key={w.id} style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,marginBottom:8,alignItems:"center"}}>
+                    <input placeholder="Location name" value={w.name} onChange={e=>setWarehouses(prev=>prev.map((x,xi)=>xi===i?{...x,name:e.target.value}:x))}/>
+                    <input placeholder="Address (optional)" value={w.location} onChange={e=>setWarehouses(prev=>prev.map((x,xi)=>xi===i?{...x,location:e.target.value}:x))}/>
+                    {i>0?<button onClick={()=>setWarehouses(prev=>prev.filter((_,xi)=>xi!==i))} style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",color:"#dc2626",cursor:"pointer",fontSize:12,fontWeight:700}}>✕</button>:<div/>}
+                  </div>
+                ))}
+                <button className="btn bb" onClick={()=>setWarehouses(prev=>[...prev,{id:`wh-${Date.now()}`,name:"",location:""}])}>+ Add Location</button>
+              </div>
+
+              {/* Order Portal Link */}
                 <div style={{fontSize:12,color:"#6b7280",marginBottom:10}}>Share this link with your gas station customers so they can place orders:</div>
                 <div style={{background:"#f9fafb",border:"1px solid #1a2e40",borderRadius:8,padding:"11px 14px",fontSize:13,color:"#059669",fontFamily:"monospace",wordBreak:"break-all"}}>
                   {window.location.origin+"/order"}
@@ -6740,6 +7147,11 @@ export default function App(){
         <div style={{display:"flex",flexDirection:"column",gap:11}}>
           <div><label>Product</label><select value={rsPid} onChange={e=>setRsPid(e.target.value)}>{products.map(p=><option key={p.id} value={p.id}>{p.name} — Stock: {p.shelf}</option>)}</select></div>
           <div><label>Quantity to Add</label><input type="number" min="1" placeholder="0" value={rsQty} onChange={e=>setRsQty(e.target.value)}/></div>
+          <div><label>Source Location</label>
+            <select>
+              {warehouses.map(w=><option key={w.id} value={w.id}>{w.name}{w.location?` — ${w.location}`:""}</option>)}
+            </select>
+          </div>
           {rsPid&&rsQty>0&&<div style={{background:"#f9fafb",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#6b7280"}}>New stock: <span style={{color:"#059669",fontWeight:700}}>{(products.find(p=>p.id===rsPid)?.shelf||0)+parseInt(rsQty)}</span></div>}
           <Divider/>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
@@ -7060,6 +7472,24 @@ export default function App(){
           <span className={`bdg ${pmtFor(viewSale.id)?.status==="paid"?"bg2":"br2"}`}>{pmtFor(viewSale.id)?.status==="paid"?"✓ PAID":"⏳ UNPAID"}</span>
           {pmtFor(viewSale.id)?.status!=="paid"?<button className="btn bg" onClick={()=>markPaid(viewSale.id)}>{ic.chk} Mark Paid</button>:<button className="btn bgh" style={{fontSize:11}} onClick={()=>markUnpaid(viewSale.id)}>Mark Unpaid</button>}
           {pmtFor(viewSale.id)?.status!=="paid"&&<button className="btn bp" style={{fontSize:11,padding:"7px 12px"}} onClick={()=>{setModal(null);setTimeout(()=>setStripeModal({sale:viewSale,customer:getC(viewSale.cust_id),driver:getT(viewSale.truck_id)?.driver}),100);}}>💳 Charge Card</button>}
+          {(()=>{
+            const cust=getC(viewSale.cust_id);
+            const hasEmail=cust?.email&&cust.email.includes("@");
+            const hasConfig=co?.resend_api_key&&co?.from_email;
+            return(
+              <button className="btn bb" style={{fontSize:11,padding:"7px 12px"}}
+                title={!hasConfig?"Configure email in Settings first":!hasEmail?"Customer has no email address":"Send invoice by email"}
+                onClick={async()=>{
+                  if(!hasConfig)return showToast("Configure Resend API key in Settings first","error");
+                  if(!hasEmail)return showToast("Customer has no email address","error");
+                  const result=await sendEmail(cust.email,`Invoice ${viewSale.id} from ${co?.name||"Your Supplier"}`,buildInvoiceEmail(viewSale,cust));
+                  if(result.ok)showToast(`✅ Invoice emailed to ${cust.email}`);
+                  else showToast(`Email failed: ${result.err}`,"error");
+                }}>
+                ✉️ Email Invoice
+              </button>
+            );
+          })()}
           <div style={{marginLeft:"auto"}}><button className="btn bpr" onClick={()=>window.print()}>{ic.prt} Print / Save PDF</button></div>
         </div>
         <InvoiceDoc sale={viewSale} products={products} customers={customers} trucks={trucks} co={co} paid={pmtFor(viewSale.id)?.status==="paid"} stateTaxes={stateTaxes}/>

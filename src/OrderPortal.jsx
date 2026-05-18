@@ -1735,6 +1735,13 @@ export default function OrderPortal() {
   const [isExisting,setIsExisting]= useState(false);
   const [isDriver,  setIsDriver]  = useState(false);
   const [isWalkIn,       setIsWalkIn]       = useState(false);
+  const [isCustPortal,   setIsCustPortal]   = useState(false);
+  const [custPortalUser, setCustPortalUser] = useState(null); // logged-in customer
+  const [custPortalLoading,setCustPortalLoading]=useState(false);
+  const [custPortalError,  setCustPortalError  ]=useState("");
+  const [custPortalPhone,  setCustPortalPhone  ]=useState("");
+  const [custPortalName,   setCustPortalName   ]=useState("");
+  const [custPortalData,   setCustPortalData   ]=useState(null); // {invoices, payments}
   const [walkInVerified, setWalkInVerified] = useState(false);
   const [walkInCust,     setWalkInCust]     = useState(null);
   const [walkInSearch,   setWalkInSearch]   = useState("");
@@ -1913,8 +1920,32 @@ export default function OrderPortal() {
   const subtotal = useMemo(()=>orderItems.reduce((a,i)=>a+getEffectivePrice(selCust,products.find(p=>p.id===i.pid))*i.qty,0),[orderItems,products,selCust]);
   const tax = parseFloat((orderItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+getEffectivePrice(selCust,p)*i.qty:a;},0)*taxRate/100).toFixed(2));
   const total = subtotal+tax;
-  const cardSurcharge = payMethod==="card" ? parseFloat((total*CARD_FEE/100).toFixed(2)) : 0;
-  const grandTotal = parseFloat((total+cardSurcharge).toFixed(2));
+  const [promoCode,setPromoCode]=useState("");
+  const [promoApplied,setPromoApplied]=useState(null); // {code,discount,label}
+  const [promoError,setPromoError]=useState("");
+  const applyPromo=async()=>{
+    if(!promoCode.trim())return;
+    setPromoError("");
+    try{
+      const{data,error}=await supabase.from("promotions").select("*").eq("code",promoCode.trim().toUpperCase()).eq("active",true).single();
+      if(error||!data){setPromoError("Invalid or expired promo code");return;}
+      if(data.expiry&&new Date(data.expiry)<new Date()){setPromoError("This promo code has expired");return;}
+      if(data.min_order>0&&total<data.min_order){setPromoError(`Minimum order of $${data.min_order.toFixed(2)} required`);return;}
+      let discount=0;
+      if(data.type==="percent")discount=parseFloat((total*data.value/100).toFixed(2));
+      else if(data.type==="fixed")discount=Math.min(data.value,total);
+      else if(data.type==="bogo"){
+        const maxItem=orderItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);const pr=getEffectivePrice(selCust,p)||0;return pr>a?pr:a;},0);
+        discount=maxItem;
+      }
+      setPromoApplied({code:data.code,discount,label:data.type==="percent"?`${data.value}% off`:data.type==="fixed"?`$${data.value} off`:data.type==="bogo"?"Buy 1 Get 1":"Discount"});
+      // Increment uses counter
+      supabase.from("promotions").update({uses:(data.uses||0)+1}).eq("id",data.id).then(()=>{});
+    }catch(e){setPromoError("Could not apply promo code");}
+  };
+  const promoDiscount=promoApplied?.discount||0;
+  const cardSurcharge = payMethod==="card" ? parseFloat(((total-promoDiscount)*CARD_FEE/100).toFixed(2)) : 0;
+  const grandTotal = parseFloat((total-promoDiscount+cardSurcharge).toFixed(2));
 
   const setQty=(pid,val,max)=>setQuantities(prev=>({...prev,[pid]:Math.min(max,Math.max(0,parseInt(val)||0))}));
 
@@ -2396,10 +2427,10 @@ export default function OrderPortal() {
           </div>
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,maxWidth:900,margin:"0 auto 40px"}} className="grid2">
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:16,maxWidth:900,margin:"0 auto 40px"}} className="grid2">
           {/* Existing Customer */}
           <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb"}}
-            onClick={()=>{setIsExisting(true);setIsNew(false);setIsDriver(false);setIsWalkIn(false);}}
+            onClick={()=>{setIsExisting(true);setIsNew(false);setIsDriver(false);setIsWalkIn(false);setIsCustPortal(false);}}
             onMouseEnter={e=>{e.currentTarget.style.borderColor="#0a1628";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #0a162820";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
             <div style={{fontSize:36,marginBottom:12}}>💎</div>
@@ -2409,15 +2440,26 @@ export default function OrderPortal() {
             <div style={{marginTop:10,fontSize:12,color:"#9ca3af"}}>
               New customer?{" "}
               <span style={{color:"#f59e0b",fontWeight:600,cursor:"pointer",textDecoration:"underline"}}
-                onClick={e=>{e.stopPropagation();setIsNew(true);setIsExisting(false);setIsDriver(false);setIsWalkIn(false);}}>
+                onClick={e=>{e.stopPropagation();setIsNew(true);setIsExisting(false);setIsDriver(false);setIsWalkIn(false);setIsCustPortal(false);}}>
                 Sign up →
               </span>
             </div>
           </div>
 
+          {/* Customer History Portal */}
+          <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb",background:"linear-gradient(135deg,#fff,#fefce8)"}}
+            onClick={()=>{setIsCustPortal(true);setIsExisting(false);setIsNew(false);setIsDriver(false);setIsWalkIn(false);}}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor="#f59e0b";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #f59e0b20";}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
+            <div style={{fontSize:36,marginBottom:12}}>📋</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,color:"#0a1628",marginBottom:8}}>My Account</div>
+            <div style={{fontSize:13,color:"#6b7280",lineHeight:1.6}}>View your invoices, payment history, and outstanding balance.</div>
+            <div style={{marginTop:16,color:"#f59e0b",fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:6}}>View my history →</div>
+          </div>
+
           {/* Walk-in */}
           <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb",background:"linear-gradient(135deg,#fff,#f5f3ff)"}}
-            onClick={()=>{setIsWalkIn(true);setIsNew(false);setIsDriver(false);setIsExisting(false);}}
+            onClick={()=>{setIsWalkIn(true);setIsNew(false);setIsDriver(false);setIsExisting(false);setIsCustPortal(false);}}
             onMouseEnter={e=>{e.currentTarget.style.borderColor="#7c3aed";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #7c3aed20";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
             <div style={{fontSize:36,marginBottom:12}}>🏪</div>
@@ -2428,7 +2470,7 @@ export default function OrderPortal() {
 
           {/* Driver */}
           <div className="card" style={{padding:28,cursor:"pointer",transition:"all .2s",border:"2px solid #e5e7eb",background:"linear-gradient(135deg,#fff,#f0f9ff)"}}
-            onClick={()=>{setIsDriver(true);setIsNew(false);setIsWalkIn(false);setIsExisting(false);}}
+            onClick={()=>{setIsDriver(true);setIsNew(false);setIsWalkIn(false);setIsExisting(false);setIsCustPortal(false);}}
             onMouseEnter={e=>{e.currentTarget.style.borderColor="#0ea5e9";e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 8px 30px #0ea5e920";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
             <div style={{fontSize:36,marginBottom:12}}>🚚</div>
@@ -2438,6 +2480,78 @@ export default function OrderPortal() {
           </div>
         </div>
         </>}
+
+        {/* ── CUSTOMER HISTORY PORTAL ── */}
+        {isCustPortal&&<div className="fu" style={{maxWidth:680,margin:"0 auto"}}>
+          <button onClick={()=>setIsCustPortal(false)} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:13,marginBottom:16,display:"flex",alignItems:"center",gap:4}}>← Back</button>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0a1628",marginBottom:4}}>📋 My Account</div>
+          <div style={{fontSize:13,color:"#6b7280",marginBottom:20}}>View your invoices and payment history</div>
+          {!custPortalUser
+            ?<div className="card" style={{padding:24}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,marginBottom:14}}>Verify Your Identity</div>
+                <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
+                  <div><label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>Business Name</label>
+                    <input placeholder="Enter your business name" value={custPortalName} onChange={e=>setCustPortalName(e.target.value)}
+                      style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/></div>
+                  <div><label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>Phone Number</label>
+                    <input placeholder="Enter your phone number" value={custPortalPhone} onChange={e=>setCustPortalPhone(e.target.value)}
+                      style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/></div>
+                </div>
+                {custPortalError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#dc2626",marginBottom:10}}>{custPortalError}</div>}
+                <button disabled={custPortalLoading} onClick={async()=>{
+                  setCustPortalError("");setCustPortalLoading(true);
+                  try{
+                    const norm=p=>p.replace(/[\s\-\(\)\+\.]/g,"");
+                    const name=custPortalName.trim().toLowerCase();
+                    const phone=norm(custPortalPhone);
+                    const match=customers.find(c=>{
+                      const nm=c.name.toLowerCase();
+                      const ph=norm(c.phone||"");
+                      return(nm.includes(name)||name.includes(nm))&&(ph===phone||ph.endsWith(phone.slice(-7)));
+                    });
+                    if(!match){setCustPortalError("No account found. Check your business name and phone number.");setCustPortalLoading(false);return;}
+                    // Load invoices
+                    const{data:invs}=await supabase.from("sales").select("*").eq("cust_id",match.id).order("created_at",{ascending:false});
+                    const{data:pmts}=await supabase.from("payments").select("*").in("sale_id",(invs||[]).map(s=>s.id));
+                    setCustPortalUser(match);
+                    setCustPortalData({invoices:invs||[],payments:pmts||[]});
+                  }catch(e){setCustPortalError(e.message);}
+                  setCustPortalLoading(false);
+                }} style={{width:"100%",background:"#0a1628",color:"#fff",border:"none",borderRadius:9,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  {custPortalLoading?"Checking…":"View My Account →"}
+                </button>
+              </div>
+            :<div>
+                <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:10,padding:"14px 18px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:15,color:"#065f46"}}>{custPortalUser.name}</div>
+                    <div style={{fontSize:12,color:"#047857",marginTop:2}}>{custPortalData.invoices.length} invoices · Balance: <strong>${custPortalData.invoices.filter(s=>!custPortalData.payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0),0).toFixed(2)}</strong></div>
+                  </div>
+                  <button onClick={()=>{setCustPortalUser(null);setCustPortalData(null);setCustPortalName("");setCustPortalPhone("");}} style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:6,padding:"6px 12px",fontSize:11,color:"#065f46",cursor:"pointer",fontWeight:700}}>Sign Out</button>
+                </div>
+                <div className="card" style={{overflow:"hidden"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                      {["Invoice","Date","Total","Status"].map(h=><th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {custPortalData.invoices.map(s=>{
+                        const paid=custPortalData.payments.find(p=>p.sale_id===s.id&&p.status==="paid");
+                        return(
+                          <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6"}}>
+                            <td style={{padding:"9px 13px",fontWeight:700,color:"#7c3aed",fontSize:12}}>{s.id}</td>
+                            <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{s.date}</td>
+                            <td style={{padding:"9px 13px",fontWeight:700,color:"#059669"}}>${parseFloat(s.total||0).toFixed(2)}</td>
+                            <td style={{padding:"9px 13px"}}><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:5,background:paid?"#f0fdf4":"#fef2f2",color:paid?"#065f46":"#dc2626"}}>{paid?"✓ PAID":"UNPAID"}</span></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+          }
+        </div>}
 
         {/* ── DRIVER: login + dashboard ── */}
         {isDriver&&<div className="fu">
@@ -3461,6 +3575,26 @@ export default function OrderPortal() {
                   <span style={{fontSize:12,color:k.l.includes("Balance")?"#fca5a5":"#9ca3af"}}>{k.v}</span>
                 </div>
               ))}
+              {/* Promo code */}
+              <div style={{padding:"10px 0",borderBottom:"1px solid #ffffff10"}}>
+                {promoApplied
+                  ?<div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:12,color:"#10b981",fontWeight:700}}>🏷️ {promoApplied.code} ({promoApplied.label})</span>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <span style={{fontSize:12,color:"#10b981",fontWeight:700}}>−{fmt(promoApplied.discount)}</span>
+                      <button onClick={()=>setPromoApplied(null)} style={{background:"transparent",border:"1px solid #374151",borderRadius:4,padding:"2px 6px",fontSize:10,color:"#6b7280",cursor:"pointer"}}>Remove</button>
+                    </div>
+                  </div>
+                  :<div>
+                    <div style={{display:"flex",gap:6}}>
+                      <input value={promoCode} onChange={e=>setPromoCode(e.target.value.toUpperCase())} placeholder="Promo code"
+                        style={{flex:1,background:"#0d1f3a",border:"1.5px solid #1e3a5f",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#fff",fontFamily:"'Inter',sans-serif"}}/>
+                      <button onClick={applyPromo} style={{background:"#f59e0b",color:"#0a0e18",border:"none",borderRadius:7,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Apply</button>
+                    </div>
+                    {promoError&&<div style={{fontSize:11,color:"#f87171",marginTop:4}}>{promoError}</div>}
+                  </div>
+                }
+              </div>
               {payMethod==="card"&&<div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #ffffff10"}}>
                 <span style={{fontSize:12,color:"#a78bfa"}}>Card surcharge ({CARD_FEE}%)</span>
                 <span style={{fontSize:12,color:"#a78bfa"}}>+{fmt(cardSurcharge)}</span>
