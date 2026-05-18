@@ -633,21 +633,15 @@ function DriverTruckAssignment({supabase, trucks, showToast}){
   const[saving,setSaving]=useState({});
 
   useEffect(()=>{
-    // Load driver profiles with email from driver_profiles view
-    supabase
-      .from("driver_profiles")
-      .select("id, email, truck_id")
+    // Query profiles table directly - driver_profiles view may not exist
+    supabase.from("profiles").select("id,email,truck_id,role").eq("role","driver")
       .then(({data,error})=>{
-        if(error||!data){
-          // Fallback: load from profiles table
-          supabase.from("profiles").select("id,truck_id").eq("role","driver")
-            .then(({data:pd})=>{
-              setProfiles((pd||[]).map(p=>({...p,email:p.id})));
-              setLoading(false);
-            });
-          return;
+        if(!error&&data) setProfiles(data);
+        else{
+          // Final fallback: try without role filter in case column differs
+          supabase.from("profiles").select("id,email,truck_id")
+            .then(({data:d2})=>setProfiles(d2||[]));
         }
-        setProfiles(data);
         setLoading(false);
       });
   },[]);
@@ -674,7 +668,7 @@ function DriverTruckAssignment({supabase, trucks, showToast}){
           <div key={p.id} style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8,padding:"12px 14px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:120}}>
               <div style={{fontWeight:600,fontSize:13,color:"#212121"}}>👤 Driver</div>
-              <div style={{fontSize:11,color:"#9ca3af",fontFamily:"monospace"}}>{p.id.slice(0,8)}...</div>
+              <div style={{fontSize:11,color:"#6b7280"}}>{p.email||p.id.slice(0,8)+"..."}</div>
             </div>
             <div style={{flex:2,minWidth:200}}>
               <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:4}}>ASSIGNED TRUCK</label>
@@ -1965,7 +1959,7 @@ export default function App(){
       }catch{setTruckResets([]);}
       // Load driver profiles - graceful fallback if lat/lng/last_seen don't exist yet
       try{
-        const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id,lat,lng,last_seen").eq("role","driver");
+        const{data:dpData}=await supabase.from("profiles").select("id,role,truck_id,lat,lng,last_seen,email").eq("role","driver");
         if(dpData)setDriverProfiles(dpData);
       }catch{
         // Columns may not exist yet - load without location fields
