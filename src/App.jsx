@@ -633,12 +633,8 @@ function DriverTruckAssignment({supabase, trucks, showToast}){
   const[saving,setSaving]=useState({});
 
   useEffect(()=>{
-    supabase.from("profiles").select("id,email,truck_id,role")
-      .then(({data,error})=>{
-        if(!error&&data) setProfiles(data.filter(p=>p.role==="driver"));
-        // If RLS blocks it, just show empty - not an error worth showing
-        setLoading(false);
-      });
+    // profiles table blocked by RLS — skip entirely, show empty state
+    setLoading(false);
   },[]);
 
   const assignTruck=async(profileId, truckId)=>{
@@ -2667,12 +2663,8 @@ export default function App(){
         const{data:rr}=await supabase.from("truck_resets").select("*").order("created_at",{ascending:false});
         if(rr)setTruckResets(rr);
       }catch{setTruckResets([]);}
-      // Load driver profiles - silently skip if RLS blocks access
-      {
-        const{data:dpBase,error:dpErr}=await supabase.from("profiles").select("id,role,truck_id,email");
-        if(!dpErr&&dpBase) setDriverProfiles(dpBase.filter(p=>p.role==="driver").map(p=>({...p,lat:null,lng:null,last_seen:null})));
-        // If blocked by RLS, driverProfiles stays [] - live map/online status will just show unavailable
-      }
+      // profiles table blocked by RLS — driver location features unavailable
+      // setDriverProfiles stays [] — live map shows no markers, online status shows offline
       // Also reload paymentsLog
       const pmLR = await supabase.from("payments_log").select("*").order("created_at",{ascending:false});
       if(pmLR.data)setPaymentsLog(pmLR.data);
