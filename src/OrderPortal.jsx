@@ -2448,33 +2448,132 @@ export default function OrderPortal() {
                     );
                   })()}
 
-                  {driverData.customers.map(c=>{
+                  {(()=>{
+                    const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+                    const todayIdx=new Date().getDay(); // 0=Sun...6=Sat
+
+                    // Parse schedule from customer notes
+                    const getSchedule=c=>{
+                      try{
+                        const m=(c.notes||"").match(/SCHEDULE:({.*?})/);
+                        return m?JSON.parse(m[1]):{day:-1,order:99};
+                      }catch{return{day:-1,order:99};}
+                    };
+
+                    // Save schedule back to notes
+                    const saveSchedule=async(c,day,order)=>{
+                      const baseNotes=(c.notes||"").replace(/SCHEDULE:\{[^}]*\}/g,"").trim();
+                      const newNotes=baseNotes+(baseNotes?"\n":"")+"SCHEDULE:"+JSON.stringify({day:parseInt(day),order:parseInt(order)||99});
+                      const{error}=await supabase.from("customers").update({notes:newNotes}).eq("id",c.id);
+                      if(!error){
+                        setDriverData(prev=>({...prev,customers:prev.customers.map(x=>x.id===c.id?{...x,notes:newNotes}:x)}));
+                      }
+                    };
+
+                    // Sort: today's customers first by order, then other days, then unscheduled
+                    const sorted=[...driverData.customers].sort((a,b)=>{
+                      const sa=getSchedule(a), sb=getSchedule(b);
+                      const aTod=sa.day===todayIdx, bTod=sb.day===todayIdx;
+                      if(aTod&&!bTod) return -1;
+                      if(!aTod&&bTod) return 1;
+                      if(aTod&&bTod) return (sa.order||99)-(sb.order||99);
+                      // Both not today — sort by day proximity, then order
+                      if(sa.day!==-1&&sb.day===-1) return -1;
+                      if(sa.day===-1&&sb.day!==-1) return 1;
+                      if(sa.day!==-1&&sb.day!==-1){
+                        // Next occurrence of each day from today
+                        const nextA=(sa.day-todayIdx+7)%7||7;
+                        const nextB=(sb.day-todayIdx+7)%7||7;
+                        if(nextA!==nextB) return nextA-nextB;
+                        return (sa.order||99)-(sb.order||99);
+                      }
+                      return 0;
+                    });
+
                     const navToAddr=addr=>{
                       if(!addr) return;
                       const enc=encodeURIComponent(addr);
                       const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
                       window.open(isIOS?`maps://maps.apple.com/?q=${enc}`:`https://www.google.com/maps/search/?api=1&query=${enc}`,"_blank");
                     };
-                    return(
-                    <div key={c.id} style={{padding:"12px 16px",borderBottom:"1px solid #f9fafb",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontWeight:600,fontSize:13}}>{c.name}</div>
-                        {c.address&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📍 {c.address}</div>}
-                        {c.phone&&<div style={{fontSize:11,color:"#9ca3af"}}>📞 {c.phone}</div>}
-                      </div>
-                      <div style={{display:"flex",gap:6,flexShrink:0}}>
-                        {c.address&&<button onClick={()=>navToAddr(c.address)}
-                          style={{background:"#f0f9ff",color:"#0ea5e9",border:"1.5px solid #bae6fd",borderRadius:7,padding:"6px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
-                          🗺 Navigate
-                        </button>}
-                        <button onClick={()=>{setDriverSaleCust(c.id);setDriverTab("sell");}}
-                          style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:7,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-                          Sell →
-                        </button>
-                      </div>
-                    </div>
-                    );
-                  })}
+
+                    // Track which customer has schedule editor open
+                    let prevDayLabel="";
+
+                    return sorted.map((c,idx)=>{
+                      const sch=getSchedule(c);
+                      const isToday=sch.day===todayIdx;
+                      const hasDay=sch.day>=0;
+
+                      // Day divider label
+                      const dayLabel=isToday?"Today"
+                        :hasDay?DAYS[sch.day]
+                        :"Unscheduled";
+                      const showDivider=dayLabel!==prevDayLabel;
+                      prevDayLabel=dayLabel;
+
+                      return(
+                        <div key={c.id}>
+                          {showDivider&&<div style={{padding:"6px 16px",background:isToday?"#f0fdf4":hasDay?"#f8fafc":"#fafafa",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:10,fontWeight:800,letterSpacing:".08em",color:isToday?"#059669":hasDay?"#0ea5e9":"#9ca3af"}}>
+                              {isToday?"📅 TODAY":""}
+                              {!isToday&&hasDay?"📅 "+dayLabel.toUpperCase():""}
+                              {!hasDay?"— UNSCHEDULED —":""}
+                            </span>
+                            {isToday&&<span style={{fontSize:9,background:"#dcfce7",color:"#065f46",borderRadius:4,padding:"1px 6px",fontWeight:700}}>VISIT DAY</span>}
+                          </div>}
+
+                          <div style={{padding:"12px 16px",borderBottom:"1px solid #f9fafb",background:isToday?"#f0fdf4":"#fff",transition:"background .15s"}}>
+                            {/* Customer info row */}
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                                  {hasDay&&<span style={{fontSize:10,fontWeight:800,color:isToday?"#059669":"#0ea5e9",background:isToday?"#dcfce7":"#e0f2fe",borderRadius:4,padding:"1px 6px",flexShrink:0}}>
+                                    {isToday?"Today":"Next: "+DAYS[sch.day]}{sch.order<99?" #"+sch.order:""}
+                                  </span>}
+                                  <span style={{fontWeight:600,fontSize:13}}>{c.name}</span>
+                                </div>
+                                {c.address&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📍 {c.address}</div>}
+                                {c.phone&&<div style={{fontSize:11,color:"#9ca3af"}}>📞 {c.phone}</div>}
+                              </div>
+                              <div style={{display:"flex",gap:5,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                                {c.address&&<button onClick={()=>navToAddr(c.address)}
+                                  style={{background:"#f0f9ff",color:"#0ea5e9",border:"1.5px solid #bae6fd",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                                  🗺
+                                </button>}
+                                <button onClick={()=>{setDriverSaleCust(c.id);setDriverTab("sell");}}
+                                  style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:7,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                                  Sell
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Schedule editor - inline */}
+                            <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                              <span style={{fontSize:10,color:"#9ca3af",flexShrink:0}}>Visit day:</span>
+                              <select
+                                value={sch.day}
+                                onChange={e=>saveSchedule(c,e.target.value,sch.order)}
+                                style={{fontSize:10,border:"1px solid #e5e7eb",borderRadius:5,padding:"2px 4px",background:"#fff",color:"#374151",cursor:"pointer"}}>
+                                <option value={-1}>— none —</option>
+                                {DAYS.map((d,i)=><option key={i} value={i}>{d}{i===todayIdx?" (Today)":""}</option>)}
+                              </select>
+                              {hasDay&&<>
+                                <span style={{fontSize:10,color:"#9ca3af",flexShrink:0}}>Order:</span>
+                                <select
+                                  value={sch.order>=99?"":`${sch.order}`}
+                                  onChange={e=>saveSchedule(c,sch.day,e.target.value||99)}
+                                  style={{fontSize:10,border:"1px solid #e5e7eb",borderRadius:5,padding:"2px 4px",background:"#fff",color:"#374151",cursor:"pointer",width:52}}>
+                                  <option value="">—</option>
+                                  {[1,2,3,4,5,6,7,8,9,10].map(n=><option key={n} value={n}>{n}</option>)}
+                                </select>
+                              </>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </div>}
 
