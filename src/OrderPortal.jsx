@@ -2361,7 +2361,7 @@ export default function OrderPortal() {
 
   // Send invoice email
   const sendInvoiceEmail = async (sale, cust) => {
-    if(!cust?.email) return setMsg({t:"error",m:"Customer has no email address on file"});
+    if(!cust?.email) { alert("Customer has no email address on file"); return; }
     try{
       const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
       const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -2377,30 +2377,50 @@ export default function OrderPortal() {
         return isTaxableProd({cat:i.cat,name:i.name})?a+i.price*i.qty:a;
       },0)*stateRate/100).toFixed(2));
       const prevBalance = parseFloat(sale.previous_balance||0);
-      const prevInvoiceIds = sale.previous_invoice_ids||"";
       const gt = sub+tax+prevBalance;
-      await fetch(`${SUPABASE_URL}/functions/v1/send-invoice-email`,{
+      // Use new send-email edge function (Gmail SMTP)
+      const{data:{session}}=await supabase.auth.getSession();
+      const res=await fetch(`${SUPABASE_URL}/functions/v1/send-email`,{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":`Bearer ${SUPABASE_ANON_KEY}`,"apikey":SUPABASE_ANON_KEY},
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${session?.access_token}`},
         body:JSON.stringify({
           to: cust.email,
-          invoiceId: sale.id,
-          customerName: cust.name,
-          driverName: driverData?.truck?.driver||"",
-          date: sale.date,
-          items, subtotal:sub, tax, taxRate, grandTotal:gt,
-          previousBalance: prevBalance,
-          previousInvoiceIds: prevInvoiceIds,
-          companyName: co?.name, companyEmail: co?.email,
-          companyPhone: co?.phone, companyAddress: co?.address,
-          paidStatus: "unpaid",
+          subject: `Invoice ${sale.id} from ${co?.name||"Your Supplier"}`,
+          html: `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;color:#212121">
+            <div style="background:#0a1628;padding:20px;border-radius:8px 8px 0 0;text-align:center">
+              <div style="color:#fff;font-size:22px;font-weight:700">${co?.name||"Your Supplier"}</div>
+              <div style="color:#94a3b8;font-size:12px;margin-top:4px">Invoice ${sale.id} · ${sale.date}</div>
+            </div>
+            <div style="border:1px solid #e5e7eb;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+              <p>Hi <strong>${cust.name}</strong>,</p>
+              <p>Please find your invoice details below.</p>
+              <table style="width:100%;border-collapse:collapse;margin:16px 0">
+                <thead><tr style="background:#f9fafb"><th style="padding:8px;text-align:left;font-size:12px">Product</th><th style="padding:8px;text-align:center;font-size:12px">Qty</th><th style="padding:8px;text-align:right;font-size:12px">Amount</th></tr></thead>
+                <tbody>${items.map(i=>`<tr><td style="padding:6px 8px;border-bottom:1px solid #e5e7eb">${i.name}</td><td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center">${i.qty}</td><td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right">$${(i.price*i.qty).toFixed(2)}</td></tr>`).join("")}</tbody>
+              </table>
+              ${prevBalance>0?`<p>Previous balance: <strong>$${prevBalance.toFixed(2)}</strong></p>`:""}
+              <div style="border-top:2px solid #0a1628;padding-top:12px;display:flex;justify-content:space-between">
+                <strong>Total Due</strong><strong style="color:#0a1628;font-size:18px">$${gt.toFixed(2)}</strong>
+              </div>
+              <p style="margin-top:16px;font-size:12px;color:#6b7280">Contact: ${co?.phone||""} · ${co?.email||""}</p>
+            </div>
+          </body></html>`,
+          gmail_user: co?.gmail_user,
+          gmail_app_password: co?.gmail_app_password,
+          from_name: co?.name||"VitalWaveOne",
+          from_email: co?.from_email||co?.gmail_user,
         }),
       });
-      await supabase.from("sales").update({email_sent:true,email_sent_at:new Date().toISOString()}).eq("id",sale.id);
-      setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,email_sent:true}:s)}));
-      setMsg({t:"success",m:`[OK] Invoice emailed to ${cust.email}`});
+      if(res.ok){
+        await supabase.from("sales").update({email_sent:true,email_sent_at:new Date().toISOString()}).eq("id",sale.id);
+        setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,email_sent:true}:s)}));
+        alert(`✅ Invoice emailed to ${cust.email}`);
+      }else{
+        const d=await res.json();
+        alert("Email failed: "+(d.error||"unknown error"));
+      }
     }catch(e){
-      setMsg({t:"error",m:"Email error: "+e.message});
+      alert("Email error: "+e.message);
     }
   };
   const loadStripeIntent = async () => {
