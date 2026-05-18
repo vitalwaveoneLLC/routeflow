@@ -6774,6 +6774,8 @@ export default function App(){
               </div>
 
               {/* Order Portal Link */}
+              <div className="card" style={{padding:22,marginBottom:14}}>
+                <div className="sh">Order Portal Link</div>
                 <div style={{fontSize:12,color:"#6b7280",marginBottom:10}}>Share this link with your gas station customers so they can place orders:</div>
                 <div style={{background:"#f9fafb",border:"1px solid #1a2e40",borderRadius:8,padding:"11px 14px",fontSize:13,color:"#059669",fontFamily:"monospace",wordBreak:"break-all"}}>
                   {window.location.origin+"/order"}
@@ -6802,7 +6804,7 @@ export default function App(){
                       <div style={{fontWeight:700,fontSize:13,color:"#c2410c"}}>Reset Invoice Number to #1</div>
                       <div style={{fontSize:11,color:"#9a3412",marginTop:3}}>Next invoice will be INV-0001. All existing invoices are kept. Use this when starting a new billing period.</div>
                     </div>
-                    <button onClick={()=>showConfirm("Reset invoice counter to #1?\n\nAll existing invoices are kept — only the numbering sequence resets. Next invoice created will be INV-0001.",async()=>{
+                    <button onClick={()=>showConfirm("Reset invoice counter to #1? All existing invoices are kept — only the numbering sequence resets. Next invoice created will be INV-0001.",async()=>{
                       try{
                         await supabase.rpc("reset_invoice_sequence");
                         showToast("Invoice counter reset to #1 — next invoice will be INV-0001");
