@@ -3821,29 +3821,42 @@ export default function App(){
   };
 
   // Send SMS/WhatsApp via Twilio
-  const sendSMS=async(to,body)=>{
-    if(!co?.twilio_sid||!co?.twilio_token||!co?.twilio_from)return{ok:false,err:"Twilio not configured — add credentials in Settings"};
-    const phone=(to||"").replace(/[^0-9+]/g,"");
+  // Send WhatsApp invoice via Meta Cloud API (free utility template)
+  const sendSMS=async(to,body,saleId)=>{
+    if(!co?.meta_phone_id||!co?.meta_token)return{ok:false,err:"WhatsApp not configured — add credentials in Settings"};
+    const phone=(to||"").replace(/[^0-9]/g,"");
     if(phone.length<10)return{ok:false,err:"No valid phone number"};
-    const toNum=co.twilio_from?.startsWith("whatsapp:")?`whatsapp:${phone.startsWith("+")?phone:"+1"+phone}`:phone.startsWith("+")?phone:"+1"+phone;
+    const e164=phone.startsWith("1")&&phone.length===11?phone:"1"+phone;
     try{
       const{data:{session:s}}=await supabase.auth.getSession();
-      const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-sms`,{
+      const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`,{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
-        body:JSON.stringify({to:toNum,body,from:co.twilio_from,account_sid:co.twilio_sid,auth_token:co.twilio_token}),
+        body:JSON.stringify({
+          to:e164,
+          phone_number_id:co.meta_phone_id,
+          access_token:co.meta_token,
+          template_name:co.meta_template||"invoice_notification",
+          params:body.split("\n").filter(Boolean),
+        }),
       });
       const d=await res.json();
-      if(!res.ok)return{ok:false,err:d.error||"SMS send failed"};
+      if(!res.ok)return{ok:false,err:d.error||"WhatsApp send failed"};
       return{ok:true};
     }catch(e){return{ok:false,err:e.message};}
   };
 
-  // Build short SMS body for a new invoice
+  // Build WhatsApp template params — matches Meta approved template variables
+  // Template: "Hi {{1}}, invoice {{2}} for ${{3}} is ready. View: {{4}}"
   const buildSMSInvoice=(sale,cust)=>{
     const gt=calcSaleGrandTotal(sale);
     const portalUrl=window.location.origin;
-    return `Hi ${cust?.name||""},\nInvoice ${sale.id} from ${co?.name||"Your Supplier"}: $${gt.toFixed(2)} due on delivery.\nView: ${portalUrl}/?invoice=${sale.id}\n- ${co?.phone||""}`;
+    return [
+      cust?.name||"Customer",
+      sale.id,
+      gt.toFixed(2),
+      `${portalUrl}/?invoice=${sale.id}`,
+    ].join("\n");
   };
 
   // Logaudit helper already defined above
@@ -4488,7 +4501,7 @@ export default function App(){
         }
       }
       // Auto-SMS invoice if enabled
-      if(co?.sms_invoices&&co?.twilio_sid&&co?.twilio_token&&co?.twilio_from){
+      if(co?.sms_invoices&&co?.meta_phone_id&&co?.meta_token){
         const cust=getC(ns.cust_id);
         if(cust?.phone){
           sendSMS(cust.phone,buildSMSInvoice(ns,cust))
@@ -4730,7 +4743,7 @@ export default function App(){
           setSales(prev=>[ns,...prev]);
           setPayments(prev=>[...prev,{sale_id:ns.id,status:pmtStatus}]);
           // Auto-SMS on order approval
-          if(co?.sms_invoices&&co?.twilio_sid&&co?.twilio_token&&co?.twilio_from){
+          if(co?.sms_invoices&&co?.meta_phone_id&&co?.meta_token){
             const c=customers.find(x=>x.id===ns.cust_id);
             if(c?.phone) sendSMS(c.phone,buildSMSInvoice(ns,c)).catch(()=>{});
           }
@@ -7047,28 +7060,36 @@ export default function App(){
                     </div>
                   </div>
 
-                  {/* SMS / WhatsApp Notifications (Twilio) */}
+                  {/* WhatsApp Notifications — Meta Cloud API (free) */}
                   <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"14px 16px"}}>
-                    <div style={{fontWeight:700,fontSize:13,color:"#0369a1",marginBottom:10}}>📱 SMS / WhatsApp Notifications (Twilio)</div>
-                    <div style={{fontSize:11,color:"#6b7280",marginBottom:10,lineHeight:1.6}}>
-                      Send invoice links via SMS or WhatsApp after every sale. Free trial available at <a href="https://twilio.com" target="_blank" rel="noreferrer" style={{color:"#0369a1"}}>twilio.com</a>.<br/>
-                      Use a Twilio <strong>WhatsApp sandbox</strong> number (free) or upgrade to a real number for SMS.
+                    <div style={{fontWeight:700,fontSize:13,color:"#0369a1",marginBottom:6}}>💬 WhatsApp Invoice Notifications (Free)</div>
+                    <div style={{fontSize:11,color:"#6b7280",marginBottom:10,lineHeight:1.7}}>
+                      Sends invoice links to customers via WhatsApp after every sale using the <strong>Meta Cloud API</strong> — free for utility messages.
+                      First 1,000 conversations/month are free. Get credentials at <a href="https://developers.facebook.com" target="_blank" rel="noreferrer" style={{color:"#0369a1"}}>developers.facebook.com</a> → Your App → WhatsApp → API Setup.
                     </div>
                     <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                      <div><label>Twilio Account SID</label><input type="password" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" value={coEdit.twilio_sid||""} onChange={e=>setCoEdit(prev=>({...prev,twilio_sid:e.target.value.trim()}))}/></div>
-                      <div><label>Twilio Auth Token</label><input type="password" placeholder="your_auth_token" value={coEdit.twilio_token||""} onChange={e=>setCoEdit(prev=>({...prev,twilio_token:e.target.value.trim()}))}/></div>
-                      <div><label>Twilio From Number (SMS: +1xxxxxxxxxx · WhatsApp: whatsapp:+14155238886)</label><input placeholder="whatsapp:+14155238886" value={coEdit.twilio_from||""} onChange={e=>setCoEdit(prev=>({...prev,twilio_from:e.target.value.trim()}))}/></div>
-                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                        <label style={{margin:0,fontWeight:500,fontSize:12,display:"flex",alignItems:"center",gap:6}}>
-                          <input type="checkbox" checked={!!coEdit.sms_invoices} onChange={e=>setCoEdit(prev=>({...prev,sms_invoices:e.target.checked}))} style={{marginRight:2}}/>
-                          Auto-send invoice link to customer after every sale
-                        </label>
+                      <div><label>Phone Number ID <span style={{fontWeight:400,color:"#9ca3af"}}>(from WhatsApp API Setup page)</span></label>
+                        <input type="password" placeholder="123456789012345" value={coEdit.meta_phone_id||""} onChange={e=>setCoEdit(prev=>({...prev,meta_phone_id:e.target.value.trim()}))}/>
                       </div>
-                      {coEdit.twilio_sid&&coEdit.twilio_token&&coEdit.twilio_from&&(
+                      <div><label>Access Token <span style={{fontWeight:400,color:"#9ca3af"}}>(Permanent token from System User)</span></label>
+                        <input type="password" placeholder="EAAxxxxxxxxxxxxxxxx..." value={coEdit.meta_token||""} onChange={e=>setCoEdit(prev=>({...prev,meta_token:e.target.value.trim()}))}/>
+                      </div>
+                      <div><label>Template Name <span style={{fontWeight:400,color:"#9ca3af"}}>(approved template, default: invoice_notification)</span></label>
+                        <input placeholder="invoice_notification" value={coEdit.meta_template||""} onChange={e=>setCoEdit(prev=>({...prev,meta_template:e.target.value.trim()}))}/>
+                      </div>
+                      <label style={{margin:0,fontWeight:500,fontSize:12,display:"flex",alignItems:"center",gap:6}}>
+                        <input type="checkbox" checked={!!coEdit.sms_invoices} onChange={e=>setCoEdit(prev=>({...prev,sms_invoices:e.target.checked}))} style={{marginRight:2}}/>
+                        Auto-send WhatsApp invoice to customer after every sale
+                      </label>
+                      {coEdit.meta_phone_id&&coEdit.meta_token&&(
                         <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,padding:"8px 12px",fontSize:11,color:"#065f46"}}>
-                          ✅ Configured — messages will send from <strong>{coEdit.twilio_from}</strong>
+                          ✅ Configured — WhatsApp messages will send via Meta Cloud API (free utility tier)
                         </div>
                       )}
+                      <div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:7,padding:"8px 12px",fontSize:11,color:"#92400e",lineHeight:1.6}}>
+                        <strong>Template required:</strong> Submit an approved template in Meta Business Manager named <code>invoice_notification</code> with 4 variables:<br/>
+                        <em>"Hi {"{{1}}"}, invoice {"{{2}}"} for ${"{{3}}"} is ready. View: {"{{4}}"}"</em>
+                      </div>
                     </div>
                   </div>
 

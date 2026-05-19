@@ -817,19 +817,26 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const [sigDrawing, setSigDrawing] = useState(false);
 
   // Send SMS via Twilio (uses co settings passed as prop)
-  const sendDriverSMS=async(to,body)=>{
-    if(!co?.twilio_sid||!co?.twilio_token||!co?.twilio_from)return;
-    const phone=(to||"").replace(/[^0-9+]/g,"");
+  // Send WhatsApp invoice via Meta Cloud API (free utility template)
+  const sendDriverSMS=async(to,params)=>{
+    if(!co?.meta_phone_id||!co?.meta_token)return;
+    const phone=(to||"").replace(/[^0-9]/g,"");
     if(phone.length<10)return;
-    const toNum=co.twilio_from?.startsWith("whatsapp:")?`whatsapp:${phone.startsWith("+")?phone:"+1"+phone}`:phone.startsWith("+")?phone:"+1"+phone;
+    const e164=phone.startsWith("1")&&phone.length===11?phone:"1"+phone;
     try{
       const{data:{session:s}}=await supabase.auth.getSession();
-      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-sms`,{
+      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`,{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
-        body:JSON.stringify({to:toNum,body,from:co.twilio_from,account_sid:co.twilio_sid,auth_token:co.twilio_token}),
+        body:JSON.stringify({
+          to:e164,
+          phone_number_id:co.meta_phone_id,
+          access_token:co.meta_token,
+          template_name:co.meta_template||"invoice_notification",
+          params:Array.isArray(params)?params:params.split("\n").filter(Boolean),
+        }),
       });
-    }catch{}// silent — SMS failures should never block the sale
+    }catch{}// silent — WhatsApp failures never block the sale
   };
   const [selCust, setSelCust] = useState(initCust||"");
   const [items, setItems] = useState({});
@@ -1014,7 +1021,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       setShowPayment(true);
       setItems({});
       // Auto-SMS invoice if enabled
-      if(co?.sms_invoices&&co?.twilio_sid){
+      if(co?.sms_invoices&&co?.meta_phone_id&&co?.meta_token){
         const smsCust=driverData.customers.find(c=>c.id===selCust);
         if(smsCust?.phone){
           const smsSt=driverData.stateTaxes?.find(s=>s.id===(ns.state||""));
@@ -1023,8 +1030,9 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           const smsTax=parseFloat((smsTaxable*smsRate/100).toFixed(2));
           const smsGt=(ns.total+smsTax+parseFloat(ns.previous_balance||0)).toFixed(2);
           const smsPortal=window.location.origin;
-          const smsBody=`Hi ${smsCust.name},\nInvoice ${ns.id} from ${co?.name||"Your Supplier"}: $${smsGt} due on delivery.\nView: ${smsPortal}\n- ${co?.phone||""}`;
-          sendDriverSMS(smsCust.phone,smsBody);
+          // Template params: {{1}}=name {{2}}=invoiceId {{3}}=amount {{4}}=link
+          const smsParams=[smsCust.name,ns.id,smsGt,`${smsPortal}/?invoice=${ns.id}`];
+          sendDriverSMS(smsCust.phone,smsParams);
         }
       }
       setSelCust("");
