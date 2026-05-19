@@ -199,7 +199,8 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
     const p=products.find(x=>x.id===i.pid);
     return isTaxableProd(p)?a+getEffectivePrice(cust,p)*i.qty:a;
   },0)*stateRate/100).toFixed(2));
-  const gt = sub+tax;
+  const penalty = parseFloat(sale.check_penalty_applied||0);
+  const gt = sub+tax+penalty;
   return(
     <div style={{fontFamily:"'Inter',sans-serif"}}>
       <div style={{background:"#7c3aed",padding:"16px 20px",borderRadius:"8px 8px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -217,7 +218,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
         </table>
         <div style={{display:"flex",justifyContent:"flex-end"}}>
           <div style={{width:220}}>
-            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null,parseFloat(sale.previous_balance||0)>0?[`[!]️ Prev. Balance (${sale.previous_invoice_ids||""})`,`$${parseFloat(sale.previous_balance||0).toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6",background:l.includes("Prev")?"#fef2f2":"transparent",margin:l.includes("Prev")?"0 -4px":0,padding:l.includes("Prev")?"5px 4px":"5px 0"}}><span style={{fontSize:12,color:l.includes("Prev")?"#dc2626":"#6b7280",fontWeight:l.includes("Prev")?700:400}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":l.includes("Prev")?"#dc2626":"#212121",fontWeight:l.includes("Prev")?700:400}}>{v}</span></div>)}
+            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null,parseFloat(sale.previous_balance||0)>0?[`[!]️ Prev. Balance (${sale.previous_invoice_ids||""})`,`$${parseFloat(sale.previous_balance||0).toFixed(2)}`]:null,penalty>0?["🚨 Returned Check Penalty",`$${penalty.toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6",background:l.includes("Prev")||l.includes("Penalty")?"#fef2f2":"transparent",margin:l.includes("Prev")||l.includes("Penalty")?"0 -4px":0,padding:l.includes("Prev")||l.includes("Penalty")?"5px 4px":"5px 0"}}><span style={{fontSize:12,color:l.includes("Prev")||l.includes("Penalty")?"#dc2626":"#6b7280",fontWeight:l.includes("Prev")||l.includes("Penalty")?700:400}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":l.includes("Prev")||l.includes("Penalty")?"#dc2626":"#212121",fontWeight:l.includes("Prev")||l.includes("Penalty")?700:400}}>{v}</span></div>)}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL DUE</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${(gt+parseFloat(sale.previous_balance||0)).toFixed(2)}</span></div>
           </div>
         </div>
@@ -2066,7 +2067,9 @@ export default function OrderPortal() {
   const promoDiscount=promoApplied?.discount||0;
   const custRcFlag=(selCust?.notes||"").includes("RETURNED_CHECK:1");
   const custRcFee=parseFloat(co?.check_penalty||50);
-  const custCheckPenalty=custRcFlag&&payMethod==="delivery"?custRcFee:0; // penalty applies on delivery (check)
+  // Penalty always applied for flagged customers on delivery — driver handles actual collection
+  // For card payments no penalty since check isn't used
+  const custCheckPenalty=custRcFlag&&payMethod!=="card"?custRcFee:0;
   const cardSurcharge = payMethod==="card" ? parseFloat(((total-promoDiscount)*CARD_FEE/100).toFixed(2)) : 0;
   const grandTotal = parseFloat((total-promoDiscount+cardSurcharge+custCheckPenalty).toFixed(2));
 
@@ -3650,7 +3653,7 @@ export default function OrderPortal() {
                   <div style={{fontWeight:800,fontSize:14,color:"#dc2626",marginBottom:4}}>RETURNED CHECK ON FILE</div>
                   <div style={{fontSize:13,color:"#f87171",lineHeight:1.6}}>
                     Your account has a returned check. A <strong style={{color:"#fbbf24"}}>${custRcFee} penalty fee</strong> has been added to your order total.
-                    We recommend paying by <strong style={{color:"#fbbf24"}}>Card</strong> to avoid additional fees.
+                    Pay by <strong style={{color:"#fbbf24"}}>Card</strong> to waive this fee.
                   </div>
                 </div>
               </div>
@@ -3739,7 +3742,7 @@ export default function OrderPortal() {
                 <div style={{fontSize:11,color:"#4b6080",letterSpacing:".08em",marginBottom:10}}>HOW WOULD YOU LIKE TO PAY?</div>
                 {custRcFlag&&(
                   <div style={{background:"#1a0000",border:"1px solid #dc2626",borderRadius:8,padding:"8px 12px",marginBottom:8,fontSize:11,color:"#f87171",fontWeight:600}}>
-                    🚨 Returned check on file — <strong style={{color:"#fbbf24"}}>${custRcFee} penalty</strong> added to delivery payment total.
+                    🚨 Returned check on file — <strong style={{color:"#fbbf24"}}>${custRcFee} penalty</strong> included in total. Pay by Card to waive.
                   </div>
                 )}
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
