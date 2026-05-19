@@ -4619,32 +4619,7 @@ export default function App(){
             ))}
           </div>
           <div style={{padding:"8px 8px 14px",overflowY:"auto",flex:1}}>
-            <div style={{height:1,background:"#d1d5db",marginBottom:8}}/>
 
-            {/* Tax On/Off Toggle in sidebar */}
-            {isAdmin&&<div style={{marginBottom:10,padding:"8px 10px",background:co?.tax_enabled?"#f0fdf4":"#fef2f2",borderRadius:8,border:`1px solid ${co?.tax_enabled?"#a7f3d0":"#fecaca"}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:10,fontWeight:700,color:co?.tax_enabled?"#059669":"#dc2626"}}>🏛 TAX {co?.tax_enabled?"ON":"OFF"}</div>
-                  <div style={{fontSize:9,color:"#9ca3af"}}>Tobacco/Nicotine only</div>
-                </div>
-                <button onClick={async()=>{
-                  const newVal=!co?.tax_enabled;
-                  await supabase.from("company").update({tax_enabled:newVal}).eq("id",co.id);
-                  setCo(prev=>({...prev,tax_enabled:newVal}));
-                  showToast(newVal?"Tax ENABLED":"Tax DISABLED");
-                }} style={{padding:"4px 10px",borderRadius:6,border:"none",background:co?.tax_enabled?"#dc2626":"#059669",color:"#fff",fontWeight:700,fontSize:9,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
-                  {co?.tax_enabled?"Disable":"Enable"}
-                </button>
-              </div>
-            </div>}
-
-
-            <div style={{height:1,background:"#d1d5db",marginBottom:8}}/>
-            <div style={{fontSize:9,color:"#9ca3af",letterSpacing:".1em",marginBottom:5,paddingLeft:3}}>{isAdmin?"COMPANY":"MY"} TOTALS</div>
-            {[{l:"Collected",v:fmt(collectedRevenue),c:"#059669"},{l:"Profit",v:fmt(collectedProfit),c:"#7c3aed"},{l:"AR Due",v:fmt(totalAR),c:"#dc2626"}].map(k=>(
-              <div key={k.l} style={{display:"flex",justifyContent:"space-between",padding:"2px 3px"}}><span style={{fontSize:10,color:"#9ca3af"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:k.c}}>{k.v}</span></div>
-            ))}
             <button className="btn bgh" style={{width:"100%",justifyContent:"center",marginTop:10,fontSize:11}} onClick={handleLogout}>{ic.logout} Sign Out</button>
           </div>
         </div>
