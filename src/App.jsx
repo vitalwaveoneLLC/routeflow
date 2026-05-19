@@ -569,7 +569,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
               <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#059669"}}>{fmt(gt)}</span>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",padding:"6px 8px",background:"#faf5ff",margin:"0 -8px"}}>
-              <span style={{fontSize:12,color:"#7c3aed"}}>💳 Card surcharge ({CARD_FEE}%)</span>
+              <span style={{fontSize:12,color:"#7c3aed"}}>💳 Card surcharge ({CARD_FEE_PCT}%)</span>
               <span style={{fontSize:12,color:"#7c3aed"}}>+{fmt(cardFeeAmt)}</span>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0"}}>
@@ -580,7 +580,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
           </div>
         </div>
         <div style={{marginTop:16,background:"#f9fafb",borderRadius:8,padding:"10px 14px",fontSize:11,color:"#6b7280",lineHeight:1.7}}>
-          <strong style={{color:"#212121"}}>Payment Methods:</strong> Cash · Check · Money Order · Zelle — <strong style={{color:"#059669"}}>No surcharge</strong> &nbsp;|&nbsp; Credit Card · Debit Card — <strong style={{color:"#7c3aed"}}>{CARD_FEE}% surcharge applies</strong>
+          <strong style={{color:"#212121"}}>Payment Methods:</strong> Cash · Check · Money Order · Zelle — <strong style={{color:"#059669"}}>No surcharge</strong> &nbsp;|&nbsp; Credit Card · Debit Card — <strong style={{color:"#7c3aed"}}>{CARD_FEE_PCT}% surcharge applies</strong>
         </div>
         <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between"}}><div style={{fontSize:10,color:"#9ca3af"}}>Thank you for your business · Payment due upon delivery</div><div style={{fontSize:10,color:"#9ca3af"}}>{co?.email}</div></div>
       </div>
