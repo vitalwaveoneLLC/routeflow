@@ -265,7 +265,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes
 
   const{invoices,payments}=acctData;
   const totalDue=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0)+calcInvTax(s)+parseFloat(s.previous_balance||0),0);
-  const totalPaid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0),0);
+  const totalPaid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0)+calcInvTax(s),0);
   const fmt=n=>`$${parseFloat(n||0).toFixed(2)}`;
 
   // Invoice detail view
@@ -453,6 +453,72 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes
       <button onClick={()=>setStep("custchoice")} style={{display:"block",width:"100%",marginTop:16,background:"#0a1628",color:"#fff",border:"none",borderRadius:9,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
         🛒 Place an Order
       </button>
+
+      {/* ── PORTFOLIO HEALTH DASHBOARD ── */}
+      {invoices.length>=2&&(()=>{
+        const paid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid"));
+        const totalSpent=paid.reduce((a,s)=>a+parseFloat(s.total||0),0);
+        const avgOrder=paid.length?totalSpent/paid.length:0;
+        // Product frequency map
+        const pidCount={};
+        invoices.forEach(s=>(s.items||[]).forEach(i=>{pidCount[i.pid]=(pidCount[i.pid]||0)+i.qty;}));
+        const topProducts=Object.entries(pidCount).sort((a,b)=>b[1]-a[1]).slice(0,3);
+        // 90-day spend trend
+        const now=Date.now();
+        const last90=paid.filter(s=>now-new Date(s.created_at||s.date)<90*86400000).reduce((a,s)=>a+parseFloat(s.total||0),0);
+        const prev90=paid.filter(s=>{const d=now-new Date(s.created_at||s.date);return d>=90*86400000&&d<180*86400000;}).reduce((a,s)=>a+parseFloat(s.total||0),0);
+        const trend=prev90>0?((last90-prev90)/prev90*100).toFixed(0):null;
+        // Monthly orders
+        const ordersByMonth={};
+        invoices.forEach(s=>{const d=new Date(s.created_at||s.date);if(!isNaN(d)){const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;ordersByMonth[k]=(ordersByMonth[k]||0)+1;}});
+        const months=Object.keys(ordersByMonth).sort().slice(-6);
+        return(
+          <div style={{marginTop:20}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,color:"#0a1628",marginBottom:12}}>📊 Your Account Health</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+              {[{l:"Total Spent",v:fmt(totalSpent),c:"#7c3aed"},{l:"Avg Order",v:fmt(avgOrder),c:"#059669"},{l:"90-Day Spend",v:fmt(last90),c:"#0a1628"}].map(k=>(
+                <div key={k.l} style={{background:"#f9fafb",borderRadius:10,padding:"12px",textAlign:"center",border:"1px solid #e5e7eb"}}>
+                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:18,color:k.c}}>{k.v}</div>
+                  <div style={{fontSize:10,color:"#9ca3af",letterSpacing:".07em",marginTop:2}}>{k.l}</div>
+                </div>
+              ))}
+            </div>
+            {trend!==null&&<div style={{background:parseFloat(trend)>=0?"#f0fdf4":"#fef2f2",border:`1px solid ${parseFloat(trend)>=0?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"8px 14px",marginBottom:14,fontSize:12,color:parseFloat(trend)>=0?"#065f46":"#dc2626",display:"flex",alignItems:"center",gap:8}}>
+              {parseFloat(trend)>=0?"📈":"📉"} Your spending is <strong>{parseFloat(trend)>=0?"+":""}{trend}%</strong> vs the previous 90 days
+            </div>}
+            {topProducts.length>0&&<div style={{marginBottom:14}}>
+              <div style={{fontSize:11,color:"#9ca3af",fontWeight:700,letterSpacing:".08em",marginBottom:8}}>YOUR TOP PRODUCTS</div>
+              {topProducts.map(([pid,qty])=>{
+                const name=products.find(p=>p.id===pid)?.name||pid;
+                const maxQty=topProducts[0][1];
+                return(
+                  <div key={pid} style={{marginBottom:6}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}><span style={{fontWeight:600}}>{name}</span><span style={{color:"#7c3aed"}}>{qty} units</span></div>
+                    <div style={{height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",background:"#7c3aed",borderRadius:3,width:`${(qty/maxQty*100).toFixed(0)}%`}}/></div>
+                  </div>
+                );
+              })}
+            </div>}
+            {months.length>=2&&<div>
+              <div style={{fontSize:11,color:"#9ca3af",fontWeight:700,letterSpacing:".08em",marginBottom:8}}>ORDER FREQUENCY (LAST 6 MONTHS)</div>
+              <div style={{display:"flex",gap:4,alignItems:"flex-end",height:50}}>
+                {months.map(m=>{
+                  const cnt=ordersByMonth[m]||0;
+                  const maxCnt=Math.max(...months.map(x=>ordersByMonth[x]||0));
+                  const pct=maxCnt>0?(cnt/maxCnt*100):0;
+                  return(
+                    <div key={m} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                      <div style={{fontSize:9,color:"#9ca3af"}}>{cnt}</div>
+                      <div style={{width:"100%",background:"#7c3aed",borderRadius:"2px 2px 0 0",height:`${pct}%`,minHeight:4,transition:"height .3s"}}/>
+                      <div style={{fontSize:8,color:"#9ca3af",textAlign:"center"}}>{m.slice(5)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -745,7 +811,25 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
 
 
 // -- DRIVER SELL TAB -----------------------------------------------------------
-function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust, payForm, setPayForm, paymentSaving, setPaymentSaving, collectPayment, createdSale, setCreatedSale, showPayment, setShowPayment}){
+function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust, payForm, setPayForm, paymentSaving, setPaymentSaving, collectPayment, createdSale, setCreatedSale, showPayment, setShowPayment, sigData=null, setSigData=()=>{}}){
+  const sigRef = React.useRef(null);
+  const [sigDrawing, setSigDrawing] = React.useState(false);
+
+  // Send SMS via Twilio (uses co settings passed as prop)
+  const sendDriverSMS=async(to,body)=>{
+    if(!co?.twilio_sid||!co?.twilio_token||!co?.twilio_from)return;
+    const phone=(to||"").replace(/[^0-9+]/g,"");
+    if(phone.length<10)return;
+    const toNum=co.twilio_from?.startsWith("whatsapp:")?`whatsapp:${phone.startsWith("+")?phone:"+1"+phone}`:phone.startsWith("+")?phone:"+1"+phone;
+    try{
+      const{data:{session:s}}=await supabase.auth.getSession();
+      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-sms`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
+        body:JSON.stringify({to:toNum,body,from:co.twilio_from,account_sid:co.twilio_sid,auth_token:co.twilio_token}),
+      });
+    }catch{}// silent — SMS failures should never block the sale
+  };
   const [selCust, setSelCust] = useState(initCust||"");
   const [items, setItems] = useState({});
   const [saving, setSaving] = useState(false);
@@ -928,6 +1012,18 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       setCreatedSale(ns);
       setShowPayment(true);
       setItems({});
+      // Auto-SMS invoice if enabled
+      if(co?.sms_invoices&&co?.twilio_sid){
+        const cust=driverData.customers.find(c=>c.id===selCust);
+        if(cust?.phone){
+          const gt=parseFloat((ns.total+(()=>{const st=driverData.stateTaxes?.find(s=>s.id===(ns.state||""));const r=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);const tx=(ns.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);return parseFloat((tx*r/100).toFixed(2));})())+parseFloat(ns.previous_balance||0)).toFixed(2));
+          const portal=window.location.origin;
+          sendDriverSMS(cust.phone,`Hi ${cust.name},
+Invoice ${ns.id} from ${co?.name||"Your Supplier"}: $${gt} due on delivery.
+View: ${portal}
+- ${co?.phone||""}`);
+        }
+      }
       setSelCust("");
       setFreshCustState("");
       if(setDriverSaleCust) setDriverSaleCust(null);
@@ -1057,6 +1153,27 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
             placeholder="Any notes..." style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
         </div>
 
+        {/* E-Signature */}
+        <div style={{marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <label style={{fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:".08em"}}>CUSTOMER SIGNATURE (optional)</label>
+            {sigData&&<button onClick={()=>{setSigData(null);const c=sigRef.current;if(c){const ctx=c.getContext("2d");ctx.clearRect(0,0,c.width,c.height);}}} style={{background:"transparent",border:"1px solid #e5e7eb",borderRadius:5,padding:"2px 8px",fontSize:10,color:"#6b7280",cursor:"pointer"}}>Clear</button>}
+          </div>
+          <div style={{border:`2px solid ${sigData?"#059669":"#e5e7eb"}`,borderRadius:10,background:"#fff",touchAction:"none",overflow:"hidden"}}>
+            <canvas ref={sigRef} width={360} height={90}
+              style={{display:"block",width:"100%",height:90,cursor:"crosshair"}}
+              onMouseDown={e=>{setSigDrawing(true);const c=sigRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");ctx.beginPath();ctx.moveTo((e.clientX-r.left)*(c.width/r.width),(e.clientY-r.top)*(c.height/r.height));}}
+              onMouseMove={e=>{if(!sigDrawing)return;const c=sigRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");ctx.strokeStyle="#0a1628";ctx.lineWidth=2;ctx.lineCap="round";ctx.lineTo((e.clientX-r.left)*(c.width/r.width),(e.clientY-r.top)*(c.height/r.height));ctx.stroke();}}
+              onMouseUp={()=>{setSigDrawing(false);setSigData(sigRef.current.toDataURL());}}
+              onTouchStart={e=>{e.preventDefault();setSigDrawing(true);const c=sigRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");const t=e.touches[0];ctx.beginPath();ctx.moveTo((t.clientX-r.left)*(c.width/r.width),(t.clientY-r.top)*(c.height/r.height));}}
+              onTouchMove={e=>{e.preventDefault();if(!sigDrawing)return;const c=sigRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");ctx.strokeStyle="#0a1628";ctx.lineWidth=2;ctx.lineCap="round";const t=e.touches[0];ctx.lineTo((t.clientX-r.left)*(c.width/r.width),(t.clientY-r.top)*(c.height/r.height));ctx.stroke();}}
+              onTouchEnd={()=>{setSigDrawing(false);setSigData(sigRef.current.toDataURL());}}
+            />
+          </div>
+          {sigData&&<div style={{fontSize:10,color:"#059669",marginTop:3}}>✓ Signature captured</div>}
+          {!sigData&&<div style={{fontSize:10,color:"#9ca3af",marginTop:3}}>Ask customer to sign above with finger or stylus</div>}
+        </div>
+
         {/* Action Buttons */}
         <div style={{display:"flex",gap:8}}>
           {payForm.method!=="card"&&<button onClick={()=>collectPayment(createdSale,payForm.method)} disabled={paymentSaving}
@@ -1127,6 +1244,23 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           <option value="">— Select customer —</option>
           {driverData.customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+
+        {/* Payment risk warning for driver */}
+        {selCustObj&&(()=>{
+          const cs=driverData.sales.filter(s=>s.cust_id===selCust);
+          const unpaid=cs.filter(s=>!s._paid);
+          const rc=(selCustObj.notes||"").includes("RETURNED_CHECK:1");
+          const maxAge=unpaid.length?Math.max(...unpaid.map(s=>Math.floor((Date.now()-new Date(s.created_at||s.date))/(86400000)))):0;
+          const pts=(unpaid.length>=3?3:unpaid.length>=1?1:0)+(maxAge>=90?4:maxAge>=60?3:maxAge>=30?1:0)+(rc?4:0);
+          const score=pts>=6?"red":pts>=3?"yellow":null;
+          if(!score)return null;
+          const cfg={yellow:{bg:"#fffbeb",border:"#fde68a",color:"#92400e",icon:"⚠️",label:"Collect carefully — watch balance"},red:{bg:"#fef2f2",border:"#fecaca",color:"#dc2626",icon:"🔴",label:"High risk — cash or Zelle only recommended"}};
+          const s=cfg[score];
+          const reasons=[unpaid.length>0&&`${unpaid.length} unpaid invoice${unpaid.length>1?"s":""}`,maxAge>=30&&`${maxAge}d overdue`,rc&&"Returned check on file"].filter(Boolean);
+          return<div style={{marginTop:8,background:s.bg,border:`1px solid ${s.border}`,borderRadius:8,padding:"8px 12px",fontSize:12,color:s.color}}>
+            {s.icon} <strong>{s.label}</strong> — {reasons.join(" · ")}
+          </div>;
+        })()}
 
         {/* New Customer Button */}
         <button onClick={()=>{setShowNewCust(!showNewCust);setNewCustMsg(null);}}
@@ -1214,6 +1348,29 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
             </div>
           </div>
         </div>}
+        {selCustObj&&(()=>{
+          const cs=driverData.sales.filter(s=>s.cust_id===selCust&&s.created_at).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+          if(cs.length<2)return null;
+          const pidMap={};
+          cs.forEach(s=>(s.items||[]).forEach(i=>{if(!pidMap[i.pid])pidMap[i.pid]=[];pidMap[i.pid].push({qty:i.qty,date:new Date(s.created_at)});}));
+          const alerts=Object.entries(pidMap).map(([pid,ords])=>{
+            if(ords.length<2)return null;
+            const total=ords.reduce((a,o)=>a+o.qty,0);
+            const span=Math.max(1,Math.floor((ords[ords.length-1].date-ords[0].date)/(86400000)));
+            const upd=total/span;
+            const sincelast=Math.floor((Date.now()-ords[ords.length-1].date)/(86400000));
+            const avgQ=total/ords.length;
+            const dl=upd>0?Math.max(0,Math.round((avgQ/upd)-sincelast)):null;
+            if(dl===null||dl>5)return null;
+            const p=products.find(x=>x.id===pid);
+            return p?{name:p.name,dl}:null;
+          }).filter(Boolean);
+          if(!alerts.length)return null;
+          return<div style={{marginTop:8,background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#92400e"}}>
+            <div style={{fontWeight:700,marginBottom:3}}>🔮 Restock predictions</div>
+            {alerts.map((a,i)=><div key={i}>{a.name}: ~{a.dl<=0?"likely out now":`${a.dl} day${a.dl!==1?"s":""} left`}</div>)}
+          </div>;
+        })()}
         {custUnpaidBalance>0&&<div style={{marginTop:8,background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px"}}>
           <div style={{fontWeight:700,fontSize:12,color:"#854d0e",marginBottom:4}}>⚠️ Outstanding Balance</div>
           {custUnpaidInvs.map(s=>(
@@ -2009,6 +2166,9 @@ export default function OrderPortal() {
   const [createdSale, setCreatedSale] = useState(null);
   const [showPayment, setShowPayment] = useState(false);
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
+  const [driverSigData, setDriverSigData] = useState(null);
+  const [driverSigDrawing, setDriverSigDrawing] = useState(false);
+  const driverSigRef = {current:null}; // ref passed as prop
   const [paymentSaving, setPaymentSaving] = useState(false);
 
   const collectPayment = async (sale, method) => {
@@ -2029,6 +2189,7 @@ export default function OrderPortal() {
       const payData = {
         status:"paid",
         method,
+        signature_data:driverSigData||null,
         amount:total,
         check_number:payForm.checkNum||"",
         bank_name:payForm.bankName||"",
@@ -3169,7 +3330,7 @@ export default function OrderPortal() {
               {driverTab==="load"&&<DriverLoadTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co}/>}
 
               {/* ── SELL TAB ── */}
-              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={driverData.co||co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust} payForm={payForm} setPayForm={setPayForm} paymentSaving={paymentSaving} setPaymentSaving={setPaymentSaving} collectPayment={collectPayment} createdSale={createdSale} setCreatedSale={setCreatedSale} showPayment={showPayment} setShowPayment={setShowPayment}/>}
+              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={driverData.co||co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust} payForm={payForm} setPayForm={setPayForm} paymentSaving={paymentSaving} setPaymentSaving={setPaymentSaving} collectPayment={collectPayment} createdSale={createdSale} setCreatedSale={setCreatedSale} showPayment={showPayment} setShowPayment={setShowPayment} sigData={driverSigData} setSigData={setDriverSigData}/>}
 
               {/* ── EXPENSES TAB ── */}
               {driverTab==="expenses"&&<DriverExpensesTab driverData={driverData} supabase={supabase}/>}

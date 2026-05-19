@@ -868,6 +868,184 @@ const EXPENSE_CATS=[
   {k:"other",e:"📋",l:"Other",line:"Line 22"},
 ];
 
+
+// ── FEATURE: Referral Engine ────────────────────────────────────────────────
+function ReferralsTab({referrals,setReferrals,customers,creditMemos,setCreditMemos,supabase,showToast,showConfirm,fmt}){
+  const uid=()=>Math.random().toString(36).slice(2,9).toUpperCase();
+  const[form,setForm]=React.useState({referrer_id:"",referred_name:"",referred_phone:"",referred_email:"",credit_amount:"25",notes:""});
+  const[saving,setSaving]=React.useState(false);
+  const totalCreditsIssued=referrals.filter(r=>r.status==="credited").reduce((a,r)=>a+parseFloat(r.credit_amount||0),0);
+  const saveReferral=async()=>{
+    if(!form.referrer_id||!form.referred_name.trim())return showToast("Referrer and referred business name required","error");
+    setSaving(true);
+    try{
+      const rec={id:"REF-"+uid(),referrer_id:form.referrer_id,referred_name:form.referred_name.trim(),referred_phone:form.referred_phone.trim(),referred_email:form.referred_email.trim(),credit_amount:parseFloat(form.credit_amount)||25,notes:form.notes.trim(),status:"pending",created_at:new Date().toISOString()};
+      const{error}=await supabase.from("referrals").insert(rec);
+      if(error)throw error;
+      setReferrals(prev=>[rec,...prev]);
+      setForm({referrer_id:"",referred_name:"",referred_phone:"",referred_email:"",credit_amount:"25",notes:""});
+      showToast("Referral recorded");
+    }catch(e){showToast(e.message,"error");}
+    setSaving(false);
+  };
+  const convertReferral=async(r)=>{
+    showConfirm(`Issue $${r.credit_amount} credit to ${customers.find(c=>c.id===r.referrer_id)?.name}?`,async()=>{
+      try{
+        await supabase.from("referrals").update({status:"credited",credited_at:new Date().toISOString()}).eq("id",r.id);
+        const cred={id:"CM-"+uid(),cust_id:r.referrer_id,invoice_id:null,reason:"Referral Bonus",amount:r.credit_amount,notes:`Referral bonus for bringing in ${r.referred_name}`,status:"open",created_at:new Date().toISOString()};
+        await supabase.from("credit_memos").insert(cred);
+        setReferrals(prev=>prev.map(x=>x.id===r.id?{...x,status:"credited"}:x));
+        setCreditMemos(prev=>[cred,...prev]);
+        showToast(`$${r.credit_amount} credit issued!`);
+      }catch(e){showToast(e.message,"error");}
+    });
+  };
+  const deleteRef=id=>showConfirm("Delete this referral?",async()=>{await supabase.from("referrals").delete().eq("id",id);setReferrals(prev=>prev.filter(r=>r.id!==id));showToast("Deleted");});
+  const sBadge=s=>({pending:<span className="bdg ba2">PENDING</span>,credited:<span className="bdg bg2">CREDITED</span>}[s]||<span className="bdg bgr">{s}</span>);
+  return(
+    <div className="fu">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+        <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22}}>🤝 Referral Engine</div><div style={{fontSize:12,color:"#9ca3af"}}>Reward customers who bring in new retailers — auto credit memos issued</div></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:18}}>
+        {[{l:"Total Referrals",v:referrals.length,c:"#7c3aed"},{l:"Pending Conversion",v:referrals.filter(r=>r.status==="pending").length,c:"#f59e0b"},{l:"Credits Issued",v:fmt(totalCreditsIssued),c:"#059669"}].map(k=>(<div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>))}
+      </div>
+      <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#065f46"}}>
+        <strong>How it works:</strong> Record a referral when an existing customer introduces a new retailer. Once the new retailer places their first order, click "Convert" to auto-issue a credit memo to the referrer.
+      </div>
+      <div className="card" style={{padding:20,marginBottom:18,borderTop:"3px solid #7c3aed"}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:14}}>➕ Record New Referral</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div><label>Referrer (existing customer) *</label><select value={form.referrer_id} onChange={e=>setForm(f=>({...f,referrer_id:e.target.value}))}><option value="">— Select —</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+          <div><label>Credit Amount ($)</label><input type="number" min="1" step="1" value={form.credit_amount} onChange={e=>setForm(f=>({...f,credit_amount:e.target.value}))}/></div>
+          <div><label>New Business Name *</label><input value={form.referred_name} onChange={e=>setForm(f=>({...f,referred_name:e.target.value}))} placeholder="e.g. Corner Gas Station"/></div>
+          <div><label>New Business Phone</label><input value={form.referred_phone} onChange={e=>setForm(f=>({...f,referred_phone:e.target.value}))}/></div>
+          <div><label>New Business Email</label><input type="email" value={form.referred_email} onChange={e=>setForm(f=>({...f,referred_email:e.target.value}))}/></div>
+          <div><label>Notes</label><input value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="e.g. met on Route 40"/></div>
+        </div>
+        <button className="btn ba" onClick={saveReferral} disabled={saving}>{saving?"Saving…":"✅ Record Referral"}</button>
+      </div>
+      {referrals.length===0?<div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>No referrals yet</div>:(
+        <div className="card" style={{overflow:"hidden"}}>
+          <div className="tw"><table><thead><tr><th>Ref ID</th><th>Referrer</th><th>New Business</th><th>Credit</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>{referrals.map(r=>{const ref=customers.find(c=>c.id===r.referrer_id);return(<tr key={r.id}>
+            <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{r.id}</span></td>
+            <td style={{fontWeight:600}}>{ref?.name||"—"}</td>
+            <td><div style={{fontWeight:600}}>{r.referred_name}</div>{r.referred_phone&&<div style={{fontSize:10,color:"#6b7280"}}>{r.referred_phone}</div>}</td>
+            <td style={{fontWeight:700,color:"#059669"}}>{fmt(r.credit_amount)}</td>
+            <td style={{fontSize:11,color:"#6b7280"}}>{r.created_at?.slice(0,10)}</td>
+            <td>{sBadge(r.status)}</td>
+            <td><div style={{display:"flex",gap:5}}>
+              {r.status==="pending"&&<button className="btn bg" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>convertReferral(r)}>💳 Convert</button>}
+              <button className="btn br" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>deleteRef(r.id)}>✕</button>
+            </div></td>
+          </tr>);})}</tbody></table></div>
+        </div>
+      )}
+    </div>
+  );
+}
+// ────────────────────────────────────────────────────────────────────────────
+
+
+// ── FEATURE: Competitor Price Tracker ──────────────────────────────────────
+function CompetitorPricesTab({compPrices,setCompPrices,products,supabase,showToast,showConfirm,fmt}){
+  const[form,setForm]=React.useState({product_id:"",competitor_name:"",their_price:"",region:"",notes:""});
+  const[saving,setSaving]=React.useState(false);
+  const uid=()=>Math.random().toString(36).slice(2,8).toUpperCase();
+
+  const savePrice=async()=>{
+    if(!form.product_id||!form.competitor_name.trim()||!form.their_price)return showToast("Product, competitor name and price required","error");
+    setSaving(true);
+    try{
+      // Upsert: if same product+competitor exists, update
+      const existing=compPrices.find(p=>p.product_id===form.product_id&&p.competitor_name.toLowerCase()===form.competitor_name.toLowerCase().trim());
+      const rec={product_id:form.product_id,competitor_name:form.competitor_name.trim(),their_price:parseFloat(form.their_price),region:form.region.trim()||"General",notes:form.notes.trim(),updated_at:new Date().toISOString()};
+      if(existing){
+        await supabase.from("competitor_prices").update(rec).eq("id",existing.id);
+        setCompPrices(prev=>prev.map(p=>p.id===existing.id?{...p,...rec}:p));
+        showToast("Price updated");
+      }else{
+        const full={...rec,id:"CP-"+uid(),created_at:new Date().toISOString()};
+        const{error}=await supabase.from("competitor_prices").insert(full);
+        if(error)throw error;
+        setCompPrices(prev=>[full,...prev]);
+        showToast("Competitor price logged");
+      }
+      setForm({product_id:"",competitor_name:"",their_price:"",region:"",notes:""});
+    }catch(e){showToast(e.message,"error");}
+    setSaving(false);
+  };
+
+  const deleteEntry=id=>showConfirm("Delete this entry?",async()=>{await supabase.from("competitor_prices").delete().eq("id",id);setCompPrices(prev=>prev.filter(p=>p.id!==id));showToast("Deleted");});
+
+  // Group by product
+  const byProduct={};
+  compPrices.forEach(cp=>{if(!byProduct[cp.product_id])byProduct[cp.product_id]=[];byProduct[cp.product_id].push(cp);});
+
+  const alertCount=products.filter(p=>{const entries=byProduct[p.id]||[];return entries.some(e=>e.their_price<p.price&&(p.price-e.their_price)/p.price>0.05);}).length;
+
+  return(
+    <div className="fu">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+        <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22}}>🕵️ Competitor Prices</div><div style={{fontSize:12,color:"#9ca3af"}}>Track competitor pricing per product — get alerted when you're overpriced</div></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:18}}>
+        {[{l:"Products Tracked",v:Object.keys(byProduct).length,c:"#7c3aed"},{l:"Total Entries",v:compPrices.length,c:"#059669"},{l:"Price Alerts",v:alertCount,c:alertCount>0?"#dc2626":"#059669"}].map(k=>(
+          <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>
+        ))}
+      </div>
+      {alertCount>0&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#dc2626"}}>
+        <strong>⚠️ {alertCount} product{alertCount!==1?"s":""} priced above competitor by >5%</strong> — consider reviewing these prices.
+      </div>}
+      {/* Log Form */}
+      <div className="card" style={{padding:20,marginBottom:18,borderTop:"3px solid #7c3aed"}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:14}}>➕ Log Competitor Price</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div><label>Product *</label><select value={form.product_id} onChange={e=>setForm(f=>({...f,product_id:e.target.value}))}><option value="">— Select product —</option>{products.map(p=><option key={p.id} value={p.id}>{p.name} (your price: {fmt(p.price)})</option>)}</select></div>
+          <div><label>Competitor Name *</label><input value={form.competitor_name} onChange={e=>setForm(f=>({...f,competitor_name:e.target.value}))} placeholder="e.g. Smith Wholesale"/></div>
+          <div><label>Their Price ($) *</label><input type="number" min="0" step="0.01" value={form.their_price} onChange={e=>setForm(f=>({...f,their_price:e.target.value}))}/></div>
+          <div><label>Region</label><input value={form.region} onChange={e=>setForm(f=>({...f,region:e.target.value}))} placeholder="e.g. Indiana, Route 40"/></div>
+          <div style={{gridColumn:"1/-1"}}><label>Notes</label><input value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="e.g. seen at customer on 5/15"/></div>
+        </div>
+        <button className="btn ba" onClick={savePrice} disabled={saving}>{saving?"Saving…":"💾 Log Price"}</button>
+      </div>
+      {/* Price comparison table */}
+      {Object.entries(byProduct).length===0?<div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>No competitor prices logged yet</div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {Object.entries(byProduct).map(([pid,entries])=>{
+            const prod=products.find(p=>p.id===pid);if(!prod)return null;
+            const minComp=Math.min(...entries.map(e=>e.their_price));
+            const diff=prod.price-minComp;
+            const diffPct=prod.price>0?((diff/prod.price)*100).toFixed(1):0;
+            const isOverpriced=diff>0&&Math.abs(diff/prod.price)>0.05;
+            return(
+              <div key={pid} className="card" style={{padding:16,borderLeft:isOverpriced?"3px solid #dc2626":diff<0?"3px solid #059669":"3px solid #e5e7eb"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,flexWrap:"wrap",gap:8}}>
+                  <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15}}>{prod.name}</div><div style={{fontSize:11,color:"#6b7280"}}>Your price: <strong style={{color:"#7c3aed"}}>{fmt(prod.price)}</strong> · Lowest competitor: <strong style={{color:isOverpriced?"#dc2626":"#059669"}}>{fmt(minComp)}</strong></div></div>
+                  <span className={`bdg ${isOverpriced?"br2":diff<0?"bg2":"bgr"}`}>{isOverpriced?`▲ ${diffPct}% overpriced`:diff<0?`▼ ${Math.abs(diffPct)}% cheaper`:"~parity"}</span>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {entries.map(e=>(
+                    <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",background:"#f9fafb",borderRadius:6,fontSize:12}}>
+                      <div><strong>{e.competitor_name}</strong>{e.region&&<span style={{color:"#9ca3af",marginLeft:6}}>{e.region}</span>}</div>
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        <span style={{fontWeight:700,color:e.their_price<prod.price?"#059669":"#dc2626"}}>{fmt(e.their_price)}</span>
+                        <span style={{fontSize:10,color:"#9ca3af"}}>{e.updated_at?.slice(0,10)}</span>
+                        <button onClick={()=>deleteEntry(e.id)} style={{background:"transparent",border:"none",color:"#dc2626",cursor:"pointer",padding:"0 4px",fontSize:12}}>✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+// ────────────────────────────────────────────────────────────────────────────
 // -- PURCHASE ORDERS & SUPPLIER MANAGEMENT ------------------------------------
 function CreditMemosTab({creditMemos,setCreditMemos,customers,sales,calcSaleGrandTotal,supabase,showToast,showConfirm,fmt}){
   const uid4=()=>Math.random().toString(36).slice(2,8).toUpperCase();
@@ -2482,7 +2660,8 @@ function IRSReports({sales,payments,paymentsLog,products,customers,trucks,expens
   const grossRevenue=filteredSales.reduce((a,s)=>a+parseFloat(s.total||0),0);
   const taxCollected=filteredSales.reduce((a,s)=>a+calcSaleTax(s),0);
   const grossReceipts=grossRevenue+taxCollected; // Schedule C Line 1
-  const cogs=filteredSales.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return b+(p?.cost||0)*i.qty;},0),0);
+  const _prodMap=Object.fromEntries(products.map(p=>[p.id,p]));
+  const cogs=filteredSales.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>{const p=_prodMap[i.pid];return b+(p?.cost||0)*i.qty;},0),0);
   const grossProfit=grossRevenue-cogs; // Line 5
   const grossMargin=grossRevenue>0?((grossProfit/grossRevenue)*100).toFixed(1):"0";
   const totalExpenses2=localExpenses.reduce((a,e)=>a+parseFloat(e.amount||0),0);
@@ -3186,6 +3365,8 @@ export default function App(){
   const[auditLog,setAuditLog]=useState([]);
   const[recurringOrders,setRecurringOrders]=useState([]);
   const[promotions,setPromotions]=useState([]);
+  const[referrals,setReferrals]=useState([]);
+  const[compPrices,setCompPrices]=useState([]);
   const[warehouses,setWarehouses]=useState([{id:"main",name:"Main Warehouse",location:""}]);
   const[paymentsLog,setPaymentsLog]=useState([]);
   const[walkinRegs,setWalkinRegs]=useState([]);
@@ -3536,7 +3717,7 @@ export default function App(){
   const loadAll=useCallback(async()=>{
     setLoading(true);
     try{
-      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR,wiR,cmR,alR,rrR,proR]=await Promise.all([
+      const[coR,prR,trR,cuR,ldR,saR,rtR,pmR,orR,stR,exR,wiR,cmR,alR,rrR,proR,rfR,cpR]=await Promise.all([
         supabase.from("company").select("*").single(),
         supabase.from("products").select("*").order("name"),
         supabase.from("trucks").select("*").order("driver"),
@@ -3553,6 +3734,8 @@ export default function App(){
         supabase.from("audit_log").select("*").order("created_at",{ascending:false}).limit(500),
         supabase.from("recurring_orders").select("*").order("created_at",{ascending:false}),
         supabase.from("promotions").select("*").order("created_at",{ascending:false}),
+        supabase.from("referrals").select("*").order("created_at",{ascending:false}),
+        supabase.from("competitor_prices").select("*").order("updated_at",{ascending:false}),
       ]);
       if(coR.data){setCo(coR.data);setCoEdit(coR.data);}
       if(prR.data)setProducts(prR.data);
@@ -3570,6 +3753,8 @@ export default function App(){
       if(alR.data)setAuditLog(alR.data);
       if(rrR.data)setRecurringOrders(rrR.data);
       if(proR.data)setPromotions(proR.data);
+      if(rfR?.data)setReferrals(rfR.data);
+      if(cpR?.data)setCompPrices(cpR.data);
       // Load truck reset requests (graceful fallback if table doesn't exist yet)
       try{
         const{data:rr}=await supabase.from("truck_resets").select("*").order("created_at",{ascending:false});
@@ -3633,6 +3818,35 @@ export default function App(){
         <p style="margin-top:20px;font-size:12px;color:#6b7280">Questions? Contact us at ${co?.phone||""} · ${co?.email||""}</p>
       </div>
     </body></html>`;
+  };
+
+  // Send SMS/WhatsApp via Twilio
+  const sendSMS=async(to,body)=>{
+    if(!co?.twilio_sid||!co?.twilio_token||!co?.twilio_from)return{ok:false,err:"Twilio not configured — add credentials in Settings"};
+    const phone=(to||"").replace(/[^0-9+]/g,"");
+    if(phone.length<10)return{ok:false,err:"No valid phone number"};
+    const toNum=co.twilio_from?.startsWith("whatsapp:")?`whatsapp:${phone.startsWith("+")?phone:"+1"+phone}`:phone.startsWith("+")?phone:"+1"+phone;
+    try{
+      const{data:{session:s}}=await supabase.auth.getSession();
+      const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-sms`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
+        body:JSON.stringify({to:toNum,body,from:co.twilio_from,account_sid:co.twilio_sid,auth_token:co.twilio_token}),
+      });
+      const d=await res.json();
+      if(!res.ok)return{ok:false,err:d.error||"SMS send failed"};
+      return{ok:true};
+    }catch(e){return{ok:false,err:e.message};}
+  };
+
+  // Build short SMS body for a new invoice
+  const buildSMSInvoice=(sale,cust)=>{
+    const gt=calcSaleGrandTotal(sale);
+    const portalUrl=window.location.origin;
+    return `Hi ${cust?.name||""},
+Invoice ${sale.id} from ${co?.name||"Your Supplier"}: $${gt.toFixed(2)} due on delivery.
+View: ${portalUrl}/?invoice=${sale.id}
+- ${co?.phone||""}`;
   };
 
   // Logaudit helper already defined above
@@ -3782,6 +3996,74 @@ export default function App(){
   };
 
   const calcSaleGrandTotal = sale => sale.total + calcSaleTax(sale) + parseFloat(sale.previous_balance||0);
+
+  // ── FEATURE: Restock predictions — units/day velocity per customer per product ──
+  const restockPredictions = useMemo(()=>{
+    const map = {}; // map[custId][pid] = {unitsPerDay, daysLeft, lastOrderDays}
+    customers.forEach(c=>{
+      const cs = sales.filter(s=>s.cust_id===c.id&&s.created_at).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+      if(cs.length<2){ map[c.id]={}; return; }
+      const pidMap = {};
+      cs.forEach(s=>(s.items||[]).forEach(i=>{
+        if(!pidMap[i.pid])pidMap[i.pid]=[];
+        pidMap[i.pid].push({qty:i.qty,date:new Date(s.created_at)});
+      }));
+      map[c.id]={};
+      Object.entries(pidMap).forEach(([pid,orders])=>{
+        if(orders.length<2)return;
+        const totalQty=orders.reduce((a,o)=>a+o.qty,0);
+        const firstDate=orders[0].date;
+        const lastDate=orders[orders.length-1].date;
+        const daySpan=Math.max(1,Math.floor((lastDate-firstDate)/(86400000)));
+        const unitsPerDay=totalQty/daySpan;
+        const daysSinceLast=Math.floor((Date.now()-lastDate)/(86400000));
+        // Assume avg order qty as stock they received last time
+        const avgOrderQty=totalQty/orders.length;
+        const daysLeft=unitsPerDay>0?Math.max(0,Math.round((avgOrderQty/unitsPerDay)-daysSinceLast)):null;
+        map[c.id][pid]={unitsPerDay:parseFloat(unitsPerDay.toFixed(2)),daysLeft,daysSinceLast,avgOrderQty:Math.round(avgOrderQty),ordersCount:orders.length};
+      });
+    });
+    return map;
+  },[customers,sales]);
+  // ──────────────────────────────────────────────────────────────────────────
+  // ── FEATURE: Payment risk scoring ─────────────────────────────────────────
+  // Returns {score:"green"|"yellow"|"red", label, reasons[]}
+  const custPaymentRisk = useMemo(()=>{
+    const map = {};
+    customers.forEach(c=>{
+      const cs = sales.filter(s=>s.cust_id===c.id);
+      if(!cs.length){ map[c.id]={score:"green",label:"New",reasons:[]}; return; }
+      const now = Date.now();
+      const paid = cs.filter(s=>pmtFor(s.id)?.status==="paid");
+      const unpaid = cs.filter(s=>pmtFor(s.id)?.status!=="paid");
+      const reasons = [];
+      let pts = 0; // higher = riskier
+      // Factor 1: unpaid invoice count
+      if(unpaid.length>=3){ pts+=3; reasons.push(`${unpaid.length} unpaid invoices`); }
+      else if(unpaid.length>=1){ pts+=1; }
+      // Factor 2: oldest unpaid age
+      const ages = unpaid.map(s=>Math.floor((now-new Date(s.created_at||s.date).getTime())/(86400000)));
+      const maxAge = ages.length?Math.max(...ages):0;
+      if(maxAge>=90){ pts+=4; reasons.push(`${maxAge}d overdue invoice`); }
+      else if(maxAge>=60){ pts+=3; reasons.push(`${maxAge}d overdue invoice`); }
+      else if(maxAge>=30){ pts+=1; }
+      // Factor 3: returned check flag
+      if(hasReturnedCheck(c)){ pts+=4; reasons.push("Returned check on file"); }
+      // Factor 4: balance trend (growing balance over last 3 invoices)
+      if(unpaid.length>0){
+        const bal = unpaid.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+        const totalInv = cs.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+        const unpaidRatio = totalInv>0?bal/totalInv:0;
+        if(unpaidRatio>0.7&&bal>200){ pts+=2; reasons.push(`${(unpaidRatio*100).toFixed(0)}% of billings unpaid`); }
+      }
+      const score = pts>=6?"red":pts>=3?"yellow":"green";
+      const label = score==="red"?"High Risk":score==="yellow"?"Watch":"Good";
+      map[c.id]={score,label,reasons,pts};
+    });
+    return map;
+  },[customers,sales,pmtMap,stateTaxes,products]);
+  // ──────────────────────────────────────────────────────────────────────────
+
   const getSaleState = sale => {
     const cust = getC(sale.cust_id);
     return sale.state || cust?.state || "";
@@ -4208,6 +4490,14 @@ export default function App(){
             .then(r=>r.ok?showToast(`✅ Invoice emailed to ${cust.email}`):null);
         }
       }
+      // Auto-SMS invoice if enabled
+      if(co?.sms_invoices&&co?.twilio_sid&&co?.twilio_token&&co?.twilio_from){
+        const cust=getC(ns.cust_id);
+        if(cust?.phone){
+          sendSMS(cust.phone,buildSMSInvoice(ns,cust))
+            .then(r=>r.ok?showToast(`📱 Invoice SMS sent to ${cust.phone}`):null);
+        }
+      }
     }catch(e){showToast(e.message,"error");}
     setSaving(false);
   };
@@ -4442,6 +4732,11 @@ export default function App(){
           await supabase.from("payments").insert({sale_id:ns.id,status:pmtStatus,method:order.payment_method||"cash"});
           setSales(prev=>[ns,...prev]);
           setPayments(prev=>[...prev,{sale_id:ns.id,status:pmtStatus}]);
+          // Auto-SMS on order approval
+          if(co?.sms_invoices&&co?.twilio_sid&&co?.twilio_token&&co?.twilio_from){
+            const c=customers.find(x=>x.id===ns.cust_id);
+            if(c?.phone) sendSMS(c.phone,buildSMSInvoice(ns,c)).catch(()=>{});
+          }
         }catch(e){console.error("Auto-process error:",e);}
       }
     };
@@ -4536,6 +4831,8 @@ export default function App(){
     {id:"orders",label:"Orders",icon:ic.orders,badge:orders.filter(o=>o.payment_method!=="card"&&o.status==="approved").length||0},
     ...(isAdmin?[{id:"recurring",label:"Recurring Orders",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>🔁</span>}]:[]),
     ...(isAdmin?[{id:"promotions",label:"Promotions",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>🏷️</span>}]:[]),
+    ...(isAdmin?[{id:"referrals",label:"Referral Engine",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>🤝</span>}]:[]),
+    ...(isAdmin?[{id:"competitorprices",label:"Competitor Prices",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>🕵️</span>}]:[]),
     {id:"sales",label:"Sales & Invoices",icon:ic.inv},
     ...(isAdmin?[{id:"creditmemos",label:"Credit Memos",icon:<span style={{display:"inline-flex",width:16,height:16,alignItems:"center",justifyContent:"center",fontSize:12}}>📝</span>}]:[]),
     {id:"taxinvoices",label:"Tax Invoices",icon:ic.inv},
@@ -5333,7 +5630,29 @@ export default function App(){
             );
           })()}
 
-          {/* ══ CREDIT MEMOS ══ */}
+          {/* ══ COMPETITOR PRICES + REFERRALS ══ */}
+          {tab==="competitorprices"&&isAdmin&&<CompetitorPricesTab
+            compPrices={compPrices}
+            setCompPrices={setCompPrices}
+            products={products}
+            supabase={supabase}
+            showToast={showToast}
+            showConfirm={showConfirm}
+            fmt={fmt}
+          />}
+
+          {tab==="referrals"&&isAdmin&&<ReferralsTab
+            referrals={referrals}
+            setReferrals={setReferrals}
+            customers={customers}
+            creditMemos={creditMemos}
+            setCreditMemos={setCreditMemos}
+            supabase={supabase}
+            showToast={showToast}
+            showConfirm={showConfirm}
+            fmt={fmt}
+          />}
+
           {tab==="creditmemos"&&isAdmin&&<CreditMemosTab
             creditMemos={creditMemos}
             setCreditMemos={setCreditMemos}
@@ -5425,9 +5744,9 @@ export default function App(){
                 const ageBadge=days=>days<=30?<span className="bdg bg2">0–30d</span>:days<=60?<span className="bdg ba2">31–60d</span>:days<=90?<span className="bdg" style={{background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa"}}>61–90d</span>:<span className="bdg br2">90+d</span>;
                 const filtered=visSales.filter(s=>arFilter==="all"||(arFilter==="unpaid"&&pmtFor(s.id)?.status!=="paid")||(arFilter==="paid"&&pmtFor(s.id)?.status==="paid"));
                 return filtered.length===0?<Empty icon="🔍" msg="NO RECORDS MATCH"/>:(
-                  <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Age</th><th>Driver</th><th>Grand Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
+                  <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Risk</th><th>Date</th><th>Age</th><th>Driver</th><th>Grand Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
                   <tbody>{filtered.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid,days=ageDays(s);return(
-                    <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{pmt?.status==="paid"?<span className="bdg bg2">Paid</span>:ageBadge(days)}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
+                    <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td>{(()=>{const r=custPaymentRisk[s.cust_id];if(!r||r.score==="green")return<span className="bdg bg2">✓ Good</span>;const cfg={yellow:{cls:"ba2",icon:"⚠️"},red:{cls:"br2",icon:"🔴"}};return<span className={"bdg "+cfg[r.score].cls} title={r.reasons.join(" · ")}>{cfg[r.score].icon} {r.label}</span>;})()}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{pmt?.status==="paid"?<span className="bdg bg2">Paid</span>:ageBadge(days)}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
                     <td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}{pmt?.status!=="paid"&&isAdmin&&(()=>{const cust=getC(s.cust_id);const alreadyFlagged=hasReturnedCheck(cust);return<button className="btn br" style={{fontSize:10,padding:"4px 8px",whiteSpace:"nowrap"}} title={alreadyFlagged?"Customer already flagged":"Flag as returned check"} onClick={async()=>{if(alreadyFlagged)return showToast("Customer already flagged for returned check","error");showConfirm(`Flag ${cust?.name} for a returned check on invoice ${s.id}?\n\nThis will:\n• Add $${RETURNED_CHECK_FEE} penalty to their last unpaid invoice\n• Add RETURNED CHECK warning to all platforms`,async()=>{
                       // 1. Flag the customer
                       await markCheckReturned(s.cust_id);
@@ -5918,6 +6237,7 @@ export default function App(){
                       <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end"}}>
                         {truck&&<span className="bdg bb2">{truck.route||truck.plate}</span>}
                         {hasReturnedCheck(c)&&<span className="bdg br2" style={{background:"#fef2f2",color:"#dc2626",border:"1px solid #fecaca",animation:"pu 2s infinite"}}>🚨 Returned Check</span>}
+                        {(()=>{const r=custPaymentRisk[c.id];if(!r||r.score==="green")return null;const cfg={yellow:{bg:"#fffbeb",color:"#92400e",border:"#fde68a",icon:"⚠️"},red:{bg:"#fef2f2",color:"#991b1b",border:"#fecaca",icon:"🔴"}};const s=cfg[r.score];return<span title={r.reasons.join(" · ")} className="bdg" style={{background:s.bg,color:s.color,border:`1px solid ${s.border}`,cursor:"default"}}>{s.icon} {r.label}</span>;})()}
                         {Object.keys(parseCustomPrices(c)).length>0&&<span className="bdg bb2" style={{background:"#ede9fe",color:"#7c3aed",border:"1px solid #ddd6fe"}}>💲 Custom Prices</span>}
                         <button className="btn bgh" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>isEditingThis?cancelEditCustomer():startEditCustomer(c)}>{isEditingThis?<>{ic.X} Cancel</>:<>{ic.edit} Edit</>}</button>
                         {isAdmin&&!isEditingThis&&<button className="btn br" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>deleteCustomer(c.id,c.name)}>{ic.X}</button>}
@@ -5928,6 +6248,15 @@ export default function App(){
                       {[{l:"Revenue",v:fmt(rev),c:"#059669"},{l:"Profit",v:fmt(prof),c:"#7c3aed"},{l:"Orders",v:cs.length,c:"#7c3aed"},{l:"Balance",v:fmt(unpaid),c:unpaid>0?"#dc2626":"#059669"}].map(k=>(
                         <div key={k.l} style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:k.c}}>{k.v}</div><div style={{fontSize:9,color:"#9ca3af",letterSpacing:".05em",marginTop:1}}>{k.l}</div></div>
                       ))}
+                    {(()=>{
+                      const preds=restockPredictions[c.id]||{};
+                      const alerts=Object.entries(preds).filter(([,v])=>v.daysLeft!==null&&v.daysLeft<=5&&v.ordersCount>=2).map(([pid,v])=>({p:getP(pid),v})).filter(x=>x.p);
+                      if(!alerts.length)return null;
+                      return<div style={{marginTop:8,background:"#fef9c3",border:"1px solid #fde68a",borderRadius:7,padding:"6px 10px"}}>
+                        <div style={{fontSize:9,fontWeight:700,color:"#92400e",letterSpacing:".07em",marginBottom:3}}>🔮 RESTOCK ALERTS</div>
+                        {alerts.map(({p,v})=><div key={p.id} style={{fontSize:11,color:"#92400e"}}>{p.name}: ~{v.daysLeft<=0?"out now":`${v.daysLeft}d left`}</div>)}
+                      </div>;
+                    })()}
                     </div>
                     {c.credit_limit>0&&unpaid>0&&(()=>{const pct=Math.min(100,(unpaid/c.credit_limit)*100);const over=unpaid>=c.credit_limit;return(
                       <div style={{marginTop:10,background:over?"#fef2f2":"#fff7ed",border:`1px solid ${over?"#fecaca":"#fed7aa"}`,borderRadius:8,padding:"8px 10px"}}>
@@ -6720,7 +7049,32 @@ export default function App(){
                     </div>
                   </div>
 
-                  {/* Tax Enable/Disable Toggle */}
+                  {/* SMS / WhatsApp Notifications (Twilio) */}
+                  <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"#0369a1",marginBottom:10}}>📱 SMS / WhatsApp Notifications (Twilio)</div>
+                    <div style={{fontSize:11,color:"#6b7280",marginBottom:10,lineHeight:1.6}}>
+                      Send invoice links via SMS or WhatsApp after every sale. Free trial available at <a href="https://twilio.com" target="_blank" rel="noreferrer" style={{color:"#0369a1"}}>twilio.com</a>.<br/>
+                      Use a Twilio <strong>WhatsApp sandbox</strong> number (free) or upgrade to a real number for SMS.
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      <div><label>Twilio Account SID</label><input type="password" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" value={coEdit.twilio_sid||""} onChange={e=>setCoEdit(prev=>({...prev,twilio_sid:e.target.value.trim()}))}/></div>
+                      <div><label>Twilio Auth Token</label><input type="password" placeholder="your_auth_token" value={coEdit.twilio_token||""} onChange={e=>setCoEdit(prev=>({...prev,twilio_token:e.target.value.trim()}))}/></div>
+                      <div><label>Twilio From Number (SMS: +1xxxxxxxxxx · WhatsApp: whatsapp:+14155238886)</label><input placeholder="whatsapp:+14155238886" value={coEdit.twilio_from||""} onChange={e=>setCoEdit(prev=>({...prev,twilio_from:e.target.value.trim()}))}/></div>
+                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                        <label style={{margin:0,fontWeight:500,fontSize:12,display:"flex",alignItems:"center",gap:6}}>
+                          <input type="checkbox" checked={!!coEdit.sms_invoices} onChange={e=>setCoEdit(prev=>({...prev,sms_invoices:e.target.checked}))} style={{marginRight:2}}/>
+                          Auto-send invoice link to customer after every sale
+                        </label>
+                      </div>
+                      {coEdit.twilio_sid&&coEdit.twilio_token&&coEdit.twilio_from&&(
+                        <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,padding:"8px 12px",fontSize:11,color:"#065f46"}}>
+                          ✅ Configured — messages will send from <strong>{coEdit.twilio_from}</strong>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Tax Enable/Disable Toggle */}}
                   <div style={{background:co?.tax_enabled?"#f0fdf4":"#fef2f2",border:`1px solid ${co?.tax_enabled?"#a7f3d0":"#fecaca"}`,borderRadius:10,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
                       <div style={{fontWeight:700,fontSize:13,color:"#212121"}}>🏛 Tax Collection</div>
