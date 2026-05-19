@@ -231,10 +231,24 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
 }
 
 // -- DRIVER LOAD TAB -----------------------------------------------------------
-function CustomerAccountView({selCust,supabase,co,setStep,products=[]}){
+function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes=[]}){
   const[acctData,setAcctData]=useState(null);
   const[acctLoading,setAcctLoading]=useState(true);
   const[viewInv,setViewInv]=useState(null); // selected invoice to view
+
+  // Calculate tobacco tax for an invoice — mirrors App.jsx calcSaleTax
+  const calcInvTax = (sale) => {
+    if(!co?.tax_enabled) return 0;
+    const stateId = sale.state || selCust?.state || "";
+    const stData = stateTaxes.find(s=>s.id===stateId);
+    const rate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
+    if(!rate) return 0;
+    const taxable = (sale.items||[]).reduce((a,i)=>{
+      const p = products.find(x=>x.id===i.pid);
+      return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
+    },0);
+    return parseFloat((taxable*rate/100).toFixed(2));
+  };
 
   useEffect(()=>{
     supabase.from("sales").select("*").eq("cust_id",selCust.id).order("created_at",{ascending:false})
@@ -250,7 +264,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[]}){
   if(acctLoading)return<div style={{padding:60,textAlign:"center",color:"#9ca3af"}}>Loading your account…</div>;
 
   const{invoices,payments}=acctData;
-  const totalDue=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0)+parseFloat(s.previous_balance||0),0);
+  const totalDue=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0)+calcInvTax(s)+parseFloat(s.previous_balance||0),0);
   const totalPaid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0),0);
   const fmt=n=>`$${parseFloat(n||0).toFixed(2)}`;
 
@@ -260,7 +274,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[]}){
     const prevBal=parseFloat(viewInv.previous_balance||0);
     const penalty=parseFloat(viewInv.check_penalty_applied||0);
     const itemsTotal=parseFloat(viewInv.total||0);
-    const grandTotal=itemsTotal+prevBal;
+    const grandTotal=itemsTotal+calcInvTax(viewInv)+prevBal;
     return(
       <div className="fu" style={{maxWidth:680,margin:"0 auto"}}>
         <button onClick={()=>setViewInv(null)} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:13,marginBottom:16,display:"flex",alignItems:"center",gap:6,padding:0}}>
@@ -414,7 +428,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[]}){
                     <td style={{padding:"10px 14px",fontWeight:700,color:"#7c3aed",fontSize:12,textDecoration:"underline"}}>{s.id}</td>
                     <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{s.date}</td>
                     <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{(s.items||[]).length} item{(s.items||[]).length!==1?"s":""}</td>
-                    <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontSize:13}}>{fmt(parseFloat(s.total||0)+parseFloat(s.previous_balance||0))}</td>
+                    <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontSize:13}}>{fmt(parseFloat(s.total||0)+calcInvTax(s)+parseFloat(s.previous_balance||0))}</td>
                     <td style={{padding:"10px 14px"}}>
                       <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:6,background:paid?"#f0fdf4":"#fef2f2",color:paid?"#065f46":"#dc2626"}}>
                         {paid?"✓ PAID":"UNPAID"}
@@ -1445,10 +1459,11 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     ]);
     const paidIds=new Set((pm||[]).filter(p=>p.status==="paid").map(p=>p.sale_id));
     const allUnpaid=(cs||[]).filter(s=>!paidIds.has(s.id));
+    const co=driverData.co;
     const bal=parseFloat(allUnpaid.reduce((a,s)=>{
       const custSt=(s.state||"").trim();
       const st=stateTaxes.find(x=>x.id?.toUpperCase()===custSt.toUpperCase()||x.name?.toLowerCase()===custSt.toLowerCase());
-      const rate=st?.exempt?0:parseFloat(st?.rate||0);
+      const rate=(co?.tax_enabled&&!st?.exempt)?parseFloat(st?.rate||co?.tax_rate||0):0;
       const taxableAmt=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);
       const stax=parseFloat((taxableAmt*rate/100).toFixed(2));
       return a+s.total+stax+parseFloat(s.previous_balance||0);
@@ -2424,7 +2439,7 @@ export default function OrderPortal() {
     const {data:staxes} = await supabase.from("state_taxes").select("*");
     const bal = parseFloat(allUnpaid.reduce((a,s)=>{
       const st = (staxes||[]).find(x=>x.id===(s.state||""));
-      const rate = st?.exempt ? 0 : parseFloat(st?.rate||co?.tax_rate||0);
+      const rate = (co?.tax_enabled && !st?.exempt) ? parseFloat(st?.rate||co?.tax_rate||0) : 0;
       const taxable = (s.items||[]).reduce((b,i)=>{
         const p = products.find(x=>x.id===i.pid);
         return isTaxableProd(p) ? b+(p?.price||0)*i.qty : b;
@@ -3636,7 +3651,7 @@ export default function OrderPortal() {
       </div>}
 
       {/* ══ MY ACCOUNT ══ */}
-      {step==="myaccount"&&selCust&&<CustomerAccountView selCust={selCust} supabase={supabase} co={co} setStep={setStep} products={products}/>}
+      {step==="myaccount"&&selCust&&<CustomerAccountView selCust={selCust} supabase={supabase} co={co} setStep={setStep} products={products} stateTaxes={portalStateTaxes}/>}
 
       {/* ══ ORDER FORM ══ */}
       {step==="order"&&<div className="fu">

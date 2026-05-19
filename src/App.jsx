@@ -589,9 +589,10 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
 };
 
 // -- SETTLEMENT DOC ------------------------------------------------------------
-const calcSettleTax=(sale,products,stateTaxes)=>{
+const calcSettleTax=(sale,products,stateTaxes,co)=>{
+  if(!co?.tax_enabled) return 0;
   const st=stateTaxes?.find(s=>s.id===(sale.state||""));
-  const rate=st?.exempt?0:parseFloat(st?.rate||0);
+  const rate=st?.exempt?0:parseFloat(st?.rate||co?.tax_rate||0);
   if(!rate)return 0;
   return parseFloat(((sale.items||[]).reduce((a,i)=>{
     const p=products?.find(x=>x.id===i.pid);
@@ -619,7 +620,7 @@ const SettleDoc=({truck,d,co,customers,payments,products,stateTaxes})=>{
       </div>
       {d.truckSales.length>0&&<><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>INVOICE DETAIL</div>
       <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Invoice","Customer","Units","Subtotal","Tax","Total","Status"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#9ca3af",borderBottom:"1px solid #e5e7eb",background:"transparent"}}>{h}</th>)}</tr></thead>
-      <tbody>{d.truckSales.map(s=>{const cust=customers.find(c=>c.id===s.cust_id);const pmt=payments.find(p=>p.sale_id===s.id);return(<tr key={s.id}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,fontWeight:700,color:"#2563eb"}}>{s.id}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{cust?.name}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{fmt(s.total)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,color:"#7c3aed"}}>{fmt(calcSettleTax(s,products,stateTaxes))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:700}}>{fmt(s.total+calcSettleTax(s,products,stateTaxes)+parseFloat(s.previous_balance||0))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb"}}><span style={{background:pmt?.status==="paid"?"#dcfce7":"#fef9c3",color:pmt?.status==="paid"?"#166534":"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:700}}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td></tr>);})}</tbody></table></>}
+      <tbody>{d.truckSales.map(s=>{const cust=customers.find(c=>c.id===s.cust_id);const pmt=payments.find(p=>p.sale_id===s.id);return(<tr key={s.id}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,fontWeight:700,color:"#2563eb"}}>{s.id}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{cust?.name}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{fmt(s.total)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,color:"#7c3aed"}}>{fmt(calcSettleTax(s,products,stateTaxes,co))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:700}}>{fmt(s.total+calcSettleTax(s,products,stateTaxes,co)+parseFloat(s.previous_balance||0))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb"}}><span style={{background:pmt?.status==="paid"?"#dcfce7":"#fef9c3",color:pmt?.status==="paid"?"#166534":"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:700}}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td></tr>);})}</tbody></table></>}
       <div style={{marginTop:20,paddingTop:10,borderTop:"1px solid #e5e7eb",fontSize:10,color:"#9ca3af",textAlign:"center"}}>{co?.name} · {co?.phone} · {dateLabel()}</div>
     </div>
   );
@@ -4277,7 +4278,7 @@ export default function App(){
       const cust=getC(amendSale.cust_id);
       const custSt=(cust?.state||"").trim();
       const st=stateTaxes.find(x=>x.id?.toUpperCase()===custSt.toUpperCase()||x.name?.toLowerCase()===custSt.toLowerCase());
-      const tRate=st?.exempt?0:parseFloat(st?.rate||0);
+      const tRate=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);
 
       const newItems=Object.entries(amendItems)
         .filter(([,q])=>parseInt(q)>0)
@@ -4414,7 +4415,7 @@ export default function App(){
             setLoads(prev=>[nl,...prev]);
             loadId=nl.id;
           }
-          const profit=order.items.reduce((a,i)=>{const p=getP(i.pid);return a+((p?.price||0)-(p?.cost||0))*i.qty;},0);
+          const profit=order.items.reduce((a,i)=>{const p=getP(i.pid);return a+(getEffectivePrice(order.cust_id,i.pid)-(p?.cost||0))*i.qty;},0);
           const penalty=parseFloat(order.check_penalty_applied||0);
           const ns={id:"INV-"+order.id.replace("ORD-",""),load_id:loadId,truck_id:truckId,cust_id:order.cust_id,date:nowStr(),items:order.items,total:order.subtotal,profit,previous_balance:order.previous_balance||0,previous_invoice_ids:order.previous_invoice_ids||"",check_penalty_applied:penalty};
           const pmtStatus=order.payment_method==="card"?"paid":"unpaid";
@@ -7417,7 +7418,7 @@ export default function App(){
         const cust=getC(amendSale.cust_id);
         const custSt=(cust?.state||"").trim();
         const st=stateTaxes.find(x=>x.id?.toUpperCase()===custSt.toUpperCase()||x.name?.toLowerCase()===custSt.toLowerCase());
-        const tRate=st?.exempt?0:parseFloat(st?.rate||0);
+        const tRate=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);
 
         const newItems=Object.entries(amendItems).filter(([,q])=>parseInt(q)>0).map(([pid,qty])=>({pid,qty:parseInt(qty)}));
         const newSub=newItems.reduce((a,i)=>a+(getEffectivePrice(amendSale.cust_id,i.pid)||0)*i.qty,0);
