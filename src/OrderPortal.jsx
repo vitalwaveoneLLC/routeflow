@@ -786,7 +786,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       const invId = "INV-" + String(seqData||1).padStart(4,"0");
       // Check if customer has returned check — penalty always recorded on invoice
       const rcFlagOnSale = (selCustObj?.notes||"").includes("RETURNED_CHECK:1");
-      const salePenalty = rcFlagOnSale ? parseFloat(co?.check_penalty||50) : 0;
+      const salePenalty = 0; // Penalty applied retroactively by admin only - not at sale creation
       const ns = {
         id:invId,
         load_id:driverData.activeLoad?.id,
@@ -1332,7 +1332,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
   const gt  = sub+tax;
   const cardFee = 3;
   const cardTotal = parseFloat((gt*(1+cardFee/100)).toFixed(2));
-  const wiCheckPenalty = wiHasReturnedCheck ? RETURNED_CHECK_FEE : 0;
+  const wiCheckPenalty = 0; // Penalty applied retroactively by admin only
   const totalDue  = (wiPay==="card"?cardTotal:gt)+wiPrevBal+wiCheckPenalty;
 
   const handleWiCust = async(cid)=>{
@@ -2068,7 +2068,7 @@ export default function OrderPortal() {
   const custRcFee=parseFloat(co?.check_penalty||50);
   // Penalty always applied for flagged customers on delivery — driver handles actual collection
   // For card payments no penalty since check isn't used
-  const custCheckPenalty=custRcFlag&&payMethod!=="card"?custRcFee:0;
+  const custCheckPenalty = 0; // Penalty applied retroactively by admin only
   const cardSurcharge = payMethod==="card" ? parseFloat(((total-promoDiscount)*CARD_FEE/100).toFixed(2)) : 0;
   const grandTotal = parseFloat((total-promoDiscount+cardSurcharge+custCheckPenalty).toFixed(2));
 
