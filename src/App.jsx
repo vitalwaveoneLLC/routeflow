@@ -7071,7 +7071,7 @@ export default function App(){
                     </div>
                   </div>
 
-                  {/* Tax Enable/Disable Toggle */}}
+                  {/* Tax Enable/Disable Toggle */}
                   <div style={{background:co?.tax_enabled?"#f0fdf4":"#fef2f2",border:`1px solid ${co?.tax_enabled?"#a7f3d0":"#fecaca"}`,borderRadius:10,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
                       <div style={{fontWeight:700,fontSize:13,color:"#212121"}}>🏛 Tax Collection</div>
