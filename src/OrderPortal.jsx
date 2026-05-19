@@ -3181,7 +3181,7 @@ export default function OrderPortal() {
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                           <div>
                             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                              <span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700}}>{s.id}</span>
+                              <span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setDriverViewInv(s)}>{s.id}</span>
                               {isPaid
                                 ?<span style={{background:"#dcfce7",color:"#166534",padding:"2px 8px",borderRadius:4,fontSize:10,fontWeight:700}}>✓ PAID</span>
                                 :<span style={{background:"#fef9c3",color:"#854d0e",padding:"2px 8px",borderRadius:4,fontSize:10,fontWeight:700}}>⏳ UNPAID</span>
@@ -3460,6 +3460,18 @@ export default function OrderPortal() {
                 initCust={walkInCust?.id||null}
                 setDriverViewInv={setDriverViewInv}
               />
+              {/* Invoice modal for walk-in */}
+              {driverViewInv&&<div style={{position:"fixed",inset:0,background:"#00000060",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setDriverViewInv(null)}>
+                <div style={{background:"#fff",borderRadius:14,maxWidth:520,width:"100%",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+                  <div style={{padding:"14px 18px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{fontWeight:700,fontSize:16}}>Invoice {driverViewInv.id}</div>
+                    <button onClick={()=>setDriverViewInv(null)} style={{background:"#f3f4f6",border:"none",borderRadius:7,padding:"8px 14px",fontSize:12,cursor:"pointer"}}>✕ Close</button>
+                  </div>
+                  <div style={{padding:16}}>
+                    <DriverInvoiceView sale={driverViewInv} customers={customers} products={products} co={co} driver={customers.find(c=>c.id===driverViewInv.cust_id)?.name||""} stateTaxes={portalStateTaxes}/>
+                  </div>
+                </div>
+              </div>}
             </>
           )}
         </div>}

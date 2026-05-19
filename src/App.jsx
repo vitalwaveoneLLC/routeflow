@@ -4818,7 +4818,7 @@ export default function App(){
               {visSales.length===0?<Empty icon="💳" msg="NO SALES YET"/>:(
                 <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Total</th><th>+Tax</th><th>Grand Total</th><th>Status</th><th></th></tr></thead>
                 <tbody>{visSales.slice(0,6).map(s=>(
-                  <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{fmt(s.total)}</td><td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td><td><span className="bdg bg2">{fmt(calcSaleGrandTotal(s))}</span></td><td><span className={`bdg ${pmtFor(s.id)?.status==="paid"?"bg2":"br2"}`}>{pmtFor(s.id)?.status==="paid"?"PAID":"UNPAID"}</span></td><td><button className="btn bb" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt}</button></td>
+                  <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td><td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{fmt(s.total)}</td><td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td><td><span className="bdg bg2">{fmt(calcSaleGrandTotal(s))}</span></td><td><span className={`bdg ${pmtFor(s.id)?.status==="paid"?"bg2":"br2"}`}>{pmtFor(s.id)?.status==="paid"?"PAID":"UNPAID"}</span></td><td><button className="btn bb" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt}</button></td>
                 </tr>))}</tbody></table></div>
               )}
             </div>
@@ -6503,7 +6503,7 @@ export default function App(){
                             </td>
                             <td>
                               {penaltySales.length>0
-                                ?penaltySales.map(s=><div key={s.id}><span style={{fontWeight:700,color:"#7c3aed",fontSize:11}}>{s.id}</span><span style={{fontSize:10,color:"#9ca3af",marginLeft:4}}>(+${s.check_penalty_applied} added)</span></div>)
+                                ?penaltySales.map(s=><div key={s.id}><span style={{fontWeight:700,color:"#7c3aed",fontSize:11,cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span><span style={{fontSize:10,color:"#9ca3af",marginLeft:4}}>(+${s.check_penalty_applied} added)</span></div>)
                                 :<span style={{color:"#9ca3af",fontSize:11}}>—</span>}
                             </td>
                             <td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#dc2626"}}>${co?.check_penalty||50}</span></td>
