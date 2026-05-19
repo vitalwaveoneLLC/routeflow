@@ -3645,15 +3645,26 @@ export default function App(){
   };
 
   // Lookups
-  const getP=id=>products.find(p=>p.id===id);
-  const getT=id=>trucks.find(t=>t.id===id);
-  const getC=id=>customers.find(c=>c.id===id);
-  const activeLoads=tid=>loads.filter(l=>l.truck_id===tid&&l.status==="out");
-  const activeLoad=tid=>activeLoads(tid).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0];
-  const pmtFor=sid=>payments.find(p=>p.sale_id===sid);
+  // O(1) lookup maps — rebuilt only when source arrays change
+  const productMap=useMemo(()=>Object.fromEntries(products.map(p=>[p.id,p])),[products]);
+  const truckMap  =useMemo(()=>Object.fromEntries(trucks.map(t=>[t.id,t])),[trucks]);
+  const customerMap=useMemo(()=>Object.fromEntries(customers.map(c=>[c.id,c])),[customers]);
+  const pmtMap=useMemo(()=>Object.fromEntries(payments.map(p=>[p.sale_id,p])),[payments]);
+  const getP=id=>productMap[id];
+  const getT=id=>truckMap[id];
+  const getC=id=>customerMap[id];
+  const pmtFor=sid=>pmtMap[sid];
+  const activeLoads=useMemo(()=>{const m={};loads.filter(l=>l.status==="out").forEach(l=>{if(!m[l.truck_id])m[l.truck_id]=[];m[l.truck_id].push(l);});return m;},[loads]);
+  const activeLoad=tid=>(activeLoads[tid]||[]).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0];
 
   // -- CUSTOM PRICING -----------------------------------------------------------------------------
-  const parseCustomPrices=cust=>{try{const m=(cust?.notes||"").match(/CUSTOM_PRICES:({.*?})/);return m?JSON.parse(m[1]):{};}catch{return{};}};
+  // Parse custom prices once per customer — memoized map avoids JSON.parse in render loops
+  const customPriceMap=useMemo(()=>{
+    const m={};
+    customers.forEach(c=>{try{const mt=(c?.notes||"").match(/CUSTOM_PRICES:({.*?})/);m[c.id]=mt?JSON.parse(mt[1]):{};}catch{m[c.id]={};}});
+    return m;
+  },[customers]);
+  const parseCustomPrices=cust=>customPriceMap[cust?.id]||{};
   const hasReturnedCheck=cust=>!!(cust?.notes||"").includes("RETURNED_CHECK:1");
   const RETURNED_CHECK_FEE=parseFloat(co?.check_penalty||50);
   const markCheckReturned=async(custId)=>{
@@ -3824,12 +3835,20 @@ export default function App(){
   const paidSales=useMemo(()=>visSales.filter(s=>pmtFor(s.id)?.status==="paid"),[visSales,payments]);
   const collectedRevenue=useMemo(()=>paidSales.reduce((a,s)=>a+s.total,0),[paidSales]);
   const collectedProfit=useMemo(()=>paidSales.reduce((a,s)=>a+s.profit,0),[paidSales]);
+  const totalBilled=useMemo(()=>visSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0),[visSales,payments,stateTaxes,products,customers]);
+  const paidGrandTotal=useMemo(()=>paidSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0),[paidSales,stateTaxes,products,customers]);
 
-  const settlementData=tid=>{
-    const ts=sales.filter(s=>s.truck_id===tid),tr=returns.filter(r=>r.truck_id===tid),al=loads.filter(l=>l.truck_id===tid);
-    const rev=ts.reduce((a,s)=>a+s.total,0),prof=ts.reduce((a,s)=>a+s.profit,0);
-    return{truckSales:ts,loadedUnits:al.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+i.qty,0),0),soldUnits:ts.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>b+i.qty,0),0),retUnits:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0),rev,prof,cogs:rev-prof,tax:ts.reduce((a,s)=>a+calcSaleTax(s),0),collected:ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),outstanding:ts.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0)};
-  };
+  // settlementData memoized per truck — avoids recomputing on every render
+  const settlementDataMap=useMemo(()=>{
+    const m={};
+    trucks.forEach(({id:tid})=>{
+      const ts=sales.filter(s=>s.truck_id===tid),tr=returns.filter(r=>r.truck_id===tid),al=loads.filter(l=>l.truck_id===tid);
+      const rev=ts.reduce((a,s)=>a+s.total,0),prof=ts.reduce((a,s)=>a+s.profit,0);
+      m[tid]={truckSales:ts,loadedUnits:al.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+i.qty,0),0),soldUnits:ts.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>b+i.qty,0),0),retUnits:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0),rev,prof,cogs:rev-prof,tax:ts.reduce((a,s)=>a+calcSaleTax(s),0),collected:ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),outstanding:ts.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0)};
+    });
+    return m;
+  },[trucks,sales,returns,loads,payments,stateTaxes,products,customers]);
+  const settlementData=tid=>settlementDataMap[tid]||{truckSales:[],loadedUnits:0,soldUnits:0,retUnits:0,rev:0,prof:0,cogs:0,tax:0,collected:0,outstanding:0};
 
   // -- CSV IMPORT -------------------------------------------------------------
   const[csvPreview,setCsvPreview]=useState([]);
@@ -4697,7 +4716,7 @@ export default function App(){
           {/* ══ DASHBOARD ══ */}
           {tab==="dashboard"&&<div className="fu">
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:18}}>
-              {[{l:"Collected",v:fmt(collectedRevenue),c:"#059669",s:`${paidSales.length} paid / ${visSales.length} total`},{l:"Gross Profit",v:fmt(collectedProfit),c:"#7c3aed",s:collectedRevenue>0?`${((collectedProfit/collectedRevenue)*100).toFixed(1)}% margin`:"—"},{l:"Tax Collected",v:fmt(paidSales.reduce((a,s)=>a+calcSaleTax(s),0)),c:"#7c3aed",s:"tobacco only"},{l:"AR Outstanding",v:fmt(totalAR),c:"#dc2626",s:"unpaid"}].map(k=>(
+              {[{l:"Collected",v:fmt(collectedRevenue),c:"#059669",s:`${paidSales.length} paid / ${visSales.length} total`},{l:"Gross Profit",v:fmt(collectedProfit),c:"#7c3aed",s:collectedRevenue>0?`${((collectedProfit/collectedRevenue)*100).toFixed(1)}% margin`:"—"},{l:"Tax Collected",v:fmt(totalTax),c:"#7c3aed",s:"tobacco only"},{l:"AR Outstanding",v:fmt(totalAR),c:"#dc2626",s:"unpaid"}].map(k=>(
                 <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div><div style={{fontSize:10,color:"#9ca3af",marginTop:4}}>{k.s}</div></div>
               ))}
             </div>
@@ -5365,7 +5384,7 @@ export default function App(){
               );
             })()}
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
-              {[{l:"Total Billed",v:fmt(visSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0)),c:"#7c3aed"},{l:"Collected",v:fmt(visSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0)),c:"#059669"},{l:"Outstanding",v:fmt(totalAR),c:"#dc2626"}].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
+              {[{l:"Total Billed",v:fmt(totalBilled),c:"#7c3aed"},{l:"Collected",v:fmt(paidGrandTotal),c:"#059669"},{l:"Outstanding",v:fmt(totalAR),c:"#dc2626"}].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
             </div>
             <div style={{display:"flex",gap:7,marginBottom:14,flexWrap:"wrap"}}>
               {["all","unpaid","paid"].map(f=><button key={f} className={`btn ${arFilter===f?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>setArFilter(f)}>{f}</button>)}
@@ -5720,7 +5739,7 @@ export default function App(){
               <div className="card" style={{padding:22}}>
                 <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:19,color:"#212121",marginBottom:3}}>P&L STATEMENT</div>
                 <div style={{fontSize:11,color:"#9ca3af",marginBottom:16}}>{co?.name} · {dateLabel()}</div>
-                {[{s:"REVENUE",rows:[{l:"Gross Sales",v:fmt(totalRevenue),c:"#059669"},{l:"Tax (Tobacco only)",v:fmt(totalTax),c:"#7c3aed"},{l:"Total incl. Tax",v:fmt(totalRevenue+totalTax),c:"#7c3aed",b:true}]},{s:"COST & PROFIT",rows:[{l:"COGS",v:fmt(totalRevenue-totalProfit),c:"#dc2626"},{l:"Gross Profit",v:fmt(totalProfit),c:"#059669",b:true},{l:"Gross Margin",v:totalRevenue>0?`${((totalProfit/totalRevenue)*100).toFixed(1)}%`:"0%",c:"#7c3aed",b:true}]},{s:"INVENTORY",rows:[{l:"Shelf Value (cost)",v:fmt(products.reduce((a,p)=>a+p.shelf*p.cost,0)),c:"#6b7280"},{l:"Shelf Value (retail)",v:fmt(products.reduce((a,p)=>a+p.shelf*p.price,0)),c:"#059669"}]},{s:"RECEIVABLES",rows:[{l:"Total Invoiced",v:fmt(sales.reduce((a,s)=>a+calcSaleGrandTotal(s),0)),c:"#7c3aed"},{l:"Collected",v:fmt(sales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0)),c:"#059669"},{l:"Outstanding",v:fmt(totalAR),c:"#dc2626",b:true}]}].map(sec=>(
+                {[{s:"REVENUE",rows:[{l:"Gross Sales",v:fmt(totalRevenue),c:"#059669"},{l:"Tax (Tobacco only)",v:fmt(totalTax),c:"#7c3aed"},{l:"Total incl. Tax",v:fmt(totalRevenue+totalTax),c:"#7c3aed",b:true}]},{s:"COST & PROFIT",rows:[{l:"COGS",v:fmt(totalRevenue-totalProfit),c:"#dc2626"},{l:"Gross Profit",v:fmt(totalProfit),c:"#059669",b:true},{l:"Gross Margin",v:totalRevenue>0?`${((totalProfit/totalRevenue)*100).toFixed(1)}%`:"0%",c:"#7c3aed",b:true}]},{s:"INVENTORY",rows:[{l:"Shelf Value (cost)",v:fmt(products.reduce((a,p)=>a+p.shelf*p.cost,0)),c:"#6b7280"},{l:"Shelf Value (retail)",v:fmt(products.reduce((a,p)=>a+p.shelf*p.price,0)),c:"#059669"}]},{s:"RECEIVABLES",rows:[{l:"Total Invoiced",v:fmt(totalBilled),c:"#7c3aed"},{l:"Collected",v:fmt(paidGrandTotal),c:"#059669"},{l:"Outstanding",v:fmt(totalAR),c:"#dc2626",b:true}]}].map(sec=>(
                   <div key={sec.s} style={{marginBottom:16}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:10,color:"#9ca3af",letterSpacing:".12em",marginBottom:6,paddingBottom:4,borderBottom:"1px solid #e5e7eb"}}>{sec.s}</div>
                   {sec.rows.map(row=><div key={row.l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #0a1420"}}><span style={{fontSize:12,color:row.b?"#a0b8d0":"#3a5870",fontWeight:row.b?600:400}}>{row.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:row.b?800:600,fontSize:row.b?16:14,color:row.c}}>{row.v}</span></div>)}
                   </div>

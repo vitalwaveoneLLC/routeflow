@@ -805,7 +805,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       // Include tax and any nested previous balance in outstanding amount
       const totalUnpaid = allUnpaid.reduce((a,s)=>{
         const st = driverData?.stateTaxes?.find(x=>x.id===(s.state||""));
-        const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
+        const rate = (!co?.tax_enabled || st?.exempt) ? 0 : parseFloat(st?.rate||co?.tax_rate||0);
         const taxable = (s.items||[]).reduce((b,i)=>{
           const p = products.find(x=>x.id===i.pid);
           return isTaxableProd(p) ? b+(p?.price||0)*i.qty : b;
@@ -846,7 +846,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const selCustObj = driverData.customers.find(c=>c.id===selCust);
   const custStateId = freshCustState || selCustObj?.state || driverData.truck?.state || "";
   const custStateTax = driverData.stateTaxes?.find(s=>s.id===custStateId);
-  const driverTaxRate = custStateTax?.exempt ? 0 : parseFloat(custStateTax?.rate||0);
+  const driverTaxRate = (!co?.tax_enabled || custStateTax?.exempt) ? 0 : parseFloat(custStateTax?.rate||co?.tax_rate||0);
   const sub = inStockProducts.reduce((a,p)=>{
     const qty=items[p.id]||0;if(!qty)return a;
     const caseQty=parseInt(p.case_qty)||1;
@@ -939,7 +939,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   if(showPayment && createdSale){
     const saleTax = (() => {
       const st = driverData.stateTaxes?.find(s=>s.id===(createdSale.state||""));
-      const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
+      const rate = (!co?.tax_enabled || st?.exempt) ? 0 : parseFloat(st?.rate||co?.tax_rate||0);
       if(!rate) return 0;
       const taxable = (createdSale.items||[]).reduce((a,i)=>{
         const p = products.find(x=>x.id===i.pid);
@@ -1028,7 +1028,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
                 <div style={{marginTop:10,background:"#faf5ff",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#7c3aed",fontWeight:700}}>
                   Amount to collect: ${(()=>{
                     const st=driverData.stateTaxes?.find(x=>x.id===(createdSale.state||""));
-                    const rate=st?.exempt?0:parseFloat(st?.rate||0);
+                    const rate=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);
                     const taxable=(createdSale.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
                     const tax=parseFloat((taxable*rate/100).toFixed(2));
                     const gt=createdSale.total+tax;
@@ -2015,7 +2015,7 @@ export default function OrderPortal() {
     setPaymentSaving(true);
     try{
       const st = driverData?.stateTaxes?.find(s=>s.id===(sale.state||""));
-      const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
+      const rate = (!co?.tax_enabled || st?.exempt) ? 0 : parseFloat(st?.rate||co?.tax_rate||0);
       const taxable = (sale.items||[]).reduce((a,i)=>{
         const p = products.find(x=>x.id===i.pid);
         return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
@@ -2771,7 +2771,7 @@ export default function OrderPortal() {
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:10,color:"#4b6080",marginBottom:4}}>TODAY'S REVENUE</div>
                   <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0ea5e9"}}>
-                    ${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)} collected
+                    ${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=(!driverData.co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||driverData.co?.tax_rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)} collected
                   </div>
                   <button onClick={async()=>{
                     const truckId = driverData.truck?.id;
@@ -2972,7 +2972,7 @@ export default function OrderPortal() {
                   {[
                     {l:"Customers",v:driverData.customers.length,e:"⛽",c:"#0ea5e9"},
                     {l:"Today's Sales",v:driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).length,e:"📄",c:"#7c3aed"},
-                    {l:"Collected Today",v:`$${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)}`,e:"💰",c:"#059669"},{l:"Balance Due",v:(()=>{const lastUnpaid=driverData.sales.filter(s=>!s._paid).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];if(!lastUnpaid)return "$0.00";const st=driverData.stateTaxes?.find(x=>x.id===(lastUnpaid.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(lastUnpaid.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return "$"+(lastUnpaid.total+tax+parseFloat(lastUnpaid.previous_balance||0)).toFixed(2);})(),e:"⏳",c:"#f59e0b"},
+                    {l:"Collected Today",v:`$${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=(!driverData.co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||driverData.co?.tax_rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)}`,e:"💰",c:"#059669"},{l:"Balance Due",v:(()=>{const lastUnpaid=driverData.sales.filter(s=>!s._paid).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];if(!lastUnpaid)return "$0.00";const st=driverData.stateTaxes?.find(x=>x.id===(lastUnpaid.state||""));const rate=(!driverData.co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||driverData.co?.tax_rate||0);const taxable=(lastUnpaid.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return "$"+(lastUnpaid.total+tax+parseFloat(lastUnpaid.previous_balance||0)).toFixed(2);})(),e:"⏳",c:"#f59e0b"},
                   ].map(k=>(
                     <div key={k.l} className="card" style={{padding:"12px",textAlign:"center"}}>
                       <div style={{fontSize:20,marginBottom:3}}>{k.e}</div>
@@ -3184,7 +3184,7 @@ export default function OrderPortal() {
                     const isPaid=s._paid||false;
                     const saleTax=(()=>{
                       const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));
-                      const rate=st?.exempt?0:parseFloat(st?.rate||0);
+                      const rate=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);
                       if(!rate)return 0;
                       const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
                       return parseFloat((taxable*rate/100).toFixed(2));
@@ -3254,7 +3254,7 @@ export default function OrderPortal() {
               {/* History Payment Modal */}
               {showHistoryPayment&&createdSaleForHistory&&(()=>{
                 const s=createdSaleForHistory;
-                const saleTax=(()=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);if(!rate)return 0;const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);return parseFloat((taxable*rate/100).toFixed(2));})();
+                const saleTax=(()=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);if(!rate)return 0;const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);return parseFloat((taxable*rate/100).toFixed(2));})();
                 const gt=parseFloat((s.total+saleTax).toFixed(2));
                 const cardTotal=parseFloat((gt*(1+CARD_FEE/100)).toFixed(2));
                 const methods=[{id:"cash",label:"💵 Cash",color:"#059669"},{id:"check",label:"🧾 Check",color:"#0369a1"},{id:"money_order",label:"📮 Money Order",color:"#7c3aed"},{id:"zelle",label:"⚡ Zelle",color:"#6366f1"},{id:"card",label:`💳 Card (+${CARD_FEE}%)`,color:"#dc2626"}];
