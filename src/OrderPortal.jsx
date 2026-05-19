@@ -237,6 +237,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes
   const[viewInv,setViewInv]=useState(null); // selected invoice to view
 
   // Calculate tobacco tax for an invoice — mirrors App.jsx calcSaleTax
+  const _invProdMap = React.useMemo(()=>Object.fromEntries(products.map(p=>[p.id,p])),[products]);
   const calcInvTax = (sale) => {
     if(!co?.tax_enabled) return 0;
     const stateId = sale.state || selCust?.state || "";
@@ -244,7 +245,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes
     const rate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
     if(!rate) return 0;
     const taxable = (sale.items||[]).reduce((a,i)=>{
-      const p = products.find(x=>x.id===i.pid);
+      const p = _invProdMap[i.pid];
       return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
     },0);
     return parseFloat((taxable*rate/100).toFixed(2));
@@ -1014,14 +1015,16 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       setItems({});
       // Auto-SMS invoice if enabled
       if(co?.sms_invoices&&co?.twilio_sid){
-        const cust=driverData.customers.find(c=>c.id===selCust);
-        if(cust?.phone){
-          const gt=parseFloat((ns.total+(()=>{const st=driverData.stateTaxes?.find(s=>s.id===(ns.state||""));const r=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);const tx=(ns.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);return parseFloat((tx*r/100).toFixed(2));})())+parseFloat(ns.previous_balance||0)).toFixed(2));
-          const portal=window.location.origin;
-          sendDriverSMS(cust.phone,`Hi ${cust.name},
-Invoice ${ns.id} from ${co?.name||"Your Supplier"}: $${gt} due on delivery.
-View: ${portal}
-- ${co?.phone||""}`);
+        const smsCust=driverData.customers.find(c=>c.id===selCust);
+        if(smsCust?.phone){
+          const smsSt=driverData.stateTaxes?.find(s=>s.id===(ns.state||""));
+          const smsRate=(!co?.tax_enabled||smsSt?.exempt)?0:parseFloat(smsSt?.rate||co?.tax_rate||0);
+          const smsTaxable=(ns.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
+          const smsTax=parseFloat((smsTaxable*smsRate/100).toFixed(2));
+          const smsGt=(ns.total+smsTax+parseFloat(ns.previous_balance||0)).toFixed(2);
+          const smsPortal=window.location.origin;
+          const smsBody=`Hi ${smsCust.name},\nInvoice ${ns.id} from ${co?.name||"Your Supplier"}: $${smsGt} due on delivery.\nView: ${smsPortal}\n- ${co?.phone||""}`;
+          sendDriverSMS(smsCust.phone,smsBody);
         }
       }
       setSelCust("");

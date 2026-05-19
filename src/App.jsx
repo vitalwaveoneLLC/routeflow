@@ -3843,10 +3843,7 @@ export default function App(){
   const buildSMSInvoice=(sale,cust)=>{
     const gt=calcSaleGrandTotal(sale);
     const portalUrl=window.location.origin;
-    return `Hi ${cust?.name||""},
-Invoice ${sale.id} from ${co?.name||"Your Supplier"}: $${gt.toFixed(2)} due on delivery.
-View: ${portalUrl}/?invoice=${sale.id}
-- ${co?.phone||""}`;
+    return `Hi ${cust?.name||""},\nInvoice ${sale.id} from ${co?.name||"Your Supplier"}: $${gt.toFixed(2)} due on delivery.\nView: ${portalUrl}/?invoice=${sale.id}\n- ${co?.phone||""}`;
   };
 
   // Logaudit helper already defined above
