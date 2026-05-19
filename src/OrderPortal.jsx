@@ -237,7 +237,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes
   const[viewInv,setViewInv]=useState(null); // selected invoice to view
 
   // Calculate tobacco tax for an invoice — mirrors App.jsx calcSaleTax
-  const _invProdMap = React.useMemo(()=>Object.fromEntries(products.map(p=>[p.id,p])),[products]);
+  const _invProdMap = useMemo(()=>Object.fromEntries(products.map(p=>[p.id,p])),[products]);
   const calcInvTax = (sale) => {
     if(!co?.tax_enabled) return 0;
     const stateId = sale.state || selCust?.state || "";
@@ -813,8 +813,8 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
 
 // -- DRIVER SELL TAB -----------------------------------------------------------
 function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust, payForm, setPayForm, paymentSaving, setPaymentSaving, collectPayment, createdSale, setCreatedSale, showPayment, setShowPayment, sigData=null, setSigData=()=>{}}){
-  const sigRef = React.useRef(null);
-  const [sigDrawing, setSigDrawing] = React.useState(false);
+  const sigRef = useRef(null);
+  const [sigDrawing, setSigDrawing] = useState(false);
 
   // Send SMS via Twilio (uses co settings passed as prop)
   const sendDriverSMS=async(to,body)=>{
@@ -2171,7 +2171,6 @@ export default function OrderPortal() {
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
   const [driverSigData, setDriverSigData] = useState(null);
   const [driverSigDrawing, setDriverSigDrawing] = useState(false);
-  const driverSigRef = {current:null}; // ref passed as prop
   const [paymentSaving, setPaymentSaving] = useState(false);
 
   const collectPayment = async (sale, method) => {
@@ -2207,6 +2206,7 @@ export default function OrderPortal() {
       }
       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
       setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
+      setDriverSigData(null); // clear signature after payment recorded
     }catch(e){console.error("Payment error:",e.message);}
     setPaymentSaving(false);
   };

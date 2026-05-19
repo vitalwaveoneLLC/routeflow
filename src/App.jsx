@@ -490,7 +490,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
   if(!sale)return null;
   const cust=customers.find(c=>c.id===sale.cust_id),truck=trucks.find(t=>t.id===sale.truck_id);
   const getP=pid=>products.find(p=>p.id===pid);
-  const CARD_FEE=3;
+  const CARD_FEE_PCT=3;
   const stateId=sale.state||cust?.state||"";
   const stData=stateTaxes?.find(s=>s.id===stateId);
   const stateRate=stData?.exempt?0:parseFloat(stData?.rate||0);
@@ -500,7 +500,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
   const penalty=parseFloat(sale.check_penalty_applied||0);
   const prevBal=parseFloat(sale.previous_balance||0);
   const gt=sub+tax+prevBal; // previous_balance already contains penalty
-  const cardFeeAmt=parseFloat((gt*CARD_FEE/100).toFixed(2));
+  const cardFeeAmt=parseFloat((gt*CARD_FEE_PCT/100).toFixed(2));
   const gtCard=parseFloat((gt+cardFeeAmt).toFixed(2));
   return(
     <div className="wdoc">
@@ -871,9 +871,9 @@ const EXPENSE_CATS=[
 
 // ── FEATURE: Referral Engine ────────────────────────────────────────────────
 function ReferralsTab({referrals,setReferrals,customers,creditMemos,setCreditMemos,supabase,showToast,showConfirm,fmt}){
-  const uid=()=>Math.random().toString(36).slice(2,9).toUpperCase();
-  const[form,setForm]=React.useState({referrer_id:"",referred_name:"",referred_phone:"",referred_email:"",credit_amount:"25",notes:""});
-  const[saving,setSaving]=React.useState(false);
+  const uid=()=>Math.random().toString(36).slice(2,8).toUpperCase();
+  const[form,setForm]=useState({referrer_id:"",referred_name:"",referred_phone:"",referred_email:"",credit_amount:"25",notes:""});
+  const[saving,setSaving]=useState(false);
   const totalCreditsIssued=referrals.filter(r=>r.status==="credited").reduce((a,r)=>a+parseFloat(r.credit_amount||0),0);
   const saveReferral=async()=>{
     if(!form.referrer_id||!form.referred_name.trim())return showToast("Referrer and referred business name required","error");
@@ -950,8 +950,8 @@ function ReferralsTab({referrals,setReferrals,customers,creditMemos,setCreditMem
 
 // ── FEATURE: Competitor Price Tracker ──────────────────────────────────────
 function CompetitorPricesTab({compPrices,setCompPrices,products,supabase,showToast,showConfirm,fmt}){
-  const[form,setForm]=React.useState({product_id:"",competitor_name:"",their_price:"",region:"",notes:""});
-  const[saving,setSaving]=React.useState(false);
+  const[form,setForm]=useState({product_id:"",competitor_name:"",their_price:"",region:"",notes:""});
+  const[saving,setSaving]=useState(false);
   const uid=()=>Math.random().toString(36).slice(2,8).toUpperCase();
 
   const savePrice=async()=>{
