@@ -269,6 +269,20 @@ function CustomerAccountView({selCust,supabase,co,setStep}){
         ))}
       </div>
 
+      {/* Returned Check Warning */}
+      {(selCust?.notes||"").includes("RETURNED_CHECK:1")&&(
+        <div style={{background:"#1a0000",border:"2px solid #dc2626",borderRadius:10,padding:"14px 18px",marginBottom:16,display:"flex",gap:12,alignItems:"flex-start"}}>
+          <span style={{fontSize:28,flexShrink:0}}>🚨</span>
+          <div>
+            <div style={{fontWeight:800,fontSize:14,color:"#dc2626",marginBottom:4}}>RETURNED CHECK ON FILE</div>
+            <div style={{fontSize:13,color:"#f87171",lineHeight:1.6}}>
+              Your account has a returned check on file. A <strong style={{color:"#fbbf24"}}>${co?.check_penalty||50} penalty fee</strong> will be added to your next order if paying by check.<br/>
+              Please contact us at <strong style={{color:"#fbbf24"}}>{co?.phone||"your driver"}</strong> to resolve this.
+            </div>
+          </div>
+        </div>
+      )}
+
       {invoices.length===0
         ?<div style={{background:"#fff",borderRadius:10,padding:40,textAlign:"center",color:"#9ca3af",border:"1px solid #e5e7eb"}}>
             <div style={{fontSize:32,marginBottom:8}}>📋</div>
@@ -1355,7 +1369,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const {data:seq}=await supabase.rpc("next_invoice_number");
       const invId="INV-"+String(seq||1).padStart(4,"0");
       const profit=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(wiCust,i.pid)-(p?.cost||0))*i.qty;},0);
-      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),created_at:new Date().toISOString()};
+      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:wiCheckPenalty||0,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await Promise.all(saleItems.map(i=>{const p=products.find(x=>x.id===i.pid);return p?supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id):Promise.resolve();}));
       let wiRecUrl="";
@@ -1888,8 +1902,11 @@ export default function OrderPortal() {
       const saleTax = parseFloat((taxable*rate/100).toFixed(2));
       const gt = parseFloat((sale.total+saleTax).toFixed(2));
       const surcharge = method==="card" ? parseFloat((gt*CARD_FEE/100).toFixed(2)) : 0;
-      const total = parseFloat((gt+surcharge).toFixed(2));
-      // Try update first, then insert if no existing record
+      // Check penalty — applies if customer has returned check and pays by check
+      const custObj = (driverData.customers||[]).find(c=>c.id===sale.cust_id);
+      const rcFee = parseFloat(driverData.co?.check_penalty||50);
+      const checkPenalty = (custObj?.notes||"").includes("RETURNED_CHECK:1") && method==="check" ? rcFee : 0;
+      const total = parseFloat((gt+surcharge+(sale.previous_balance||0)+checkPenalty).toFixed(2));
       const {data:existing} = await supabase.from("payments").select("id,sale_id").eq("sale_id",sale.id).maybeSingle();
       const payData = {
         status:"paid",
@@ -1898,15 +1915,17 @@ export default function OrderPortal() {
         check_number:payForm.checkNum||"",
         bank_name:payForm.bankName||"",
         zelle_ref:payForm.zelleRef||"",
-        note:payForm.notes||"",
+        note:(payForm.notes||"")+(checkPenalty>0?` | $${checkPenalty} returned check penalty applied`:""),
         collected_at:new Date().toISOString(),
       };
       if(existing){
-        // Update existing payment record
         await supabase.from("payments").update(payData).eq("sale_id",sale.id);
       } else {
-        // Insert new payment record
         await supabase.from("payments").insert({sale_id:sale.id,...payData});
+      }
+      // Save penalty on the sale record too
+      if(checkPenalty>0){
+        await supabase.from("sales").update({check_penalty_applied:checkPenalty}).eq("id",sale.id);
       }
       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
       setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
@@ -2141,9 +2160,10 @@ export default function OrderPortal() {
         subtotal,
         tax,
         total: grandTotal,
-        notes: notes+(payMethod==="card"?` | Paid by card online (incl. ${CARD_FEE}% surcharge $${cardSurcharge.toFixed(2)})`:" | Payment on delivery"),
+        notes: notes+(payMethod==="card"?` | Paid by card online (incl. ${CARD_FEE}% surcharge $${cardSurcharge.toFixed(2)})`:" | Payment on delivery")+(custCheckPenalty>0?` | $${custCheckPenalty} returned check penalty applied`:""),
         previous_balance: custPrevBalance||0,
         previous_invoice_ids: custPrevInvs.map(s=>s.id).join(",")||"",
+        check_penalty_applied: custCheckPenalty||0,
         status: "approved",
         payment_method: payMethod,
         signature: sigData||null,
@@ -3462,6 +3482,16 @@ export default function OrderPortal() {
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0a1628",marginBottom:6}}>Welcome back, {selCust.name}</div>
             <div style={{fontSize:13,color:"#6b7280"}}>What would you like to do today?</div>
           </div>
+
+          {/* Returned Check Warning on choice screen */}
+          {(selCust?.notes||"").includes("RETURNED_CHECK:1")&&(
+            <div style={{background:"#1a0000",border:"2px solid #dc2626",borderRadius:10,padding:"12px 16px",marginBottom:20,display:"flex",gap:10,alignItems:"center"}}>
+              <span style={{fontSize:22}}>🚨</span>
+              <div style={{fontSize:12,color:"#f87171"}}>
+                <strong style={{color:"#dc2626"}}>Returned check on file.</strong> A ${co?.check_penalty||50} penalty applies if paying by check on your next order.
+              </div>
+            </div>
+          )}
 
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
             {/* Place Order */}
