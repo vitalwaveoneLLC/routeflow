@@ -1047,7 +1047,7 @@ function CompetitorPricesTab({compPrices,setCompPrices,products,supabase,showToa
 }
 // ────────────────────────────────────────────────────────────────────────────
 // -- PURCHASE ORDERS & SUPPLIER MANAGEMENT ------------------------------------
-function CreditMemosTab({creditMemos,setCreditMemos,customers,sales,calcSaleGrandTotal,supabase,showToast,showConfirm,fmt}){
+function CreditMemosTab({creditMemos,setCreditMemos,customers,sales,calcSaleGrandTotal,supabase,showToast,showConfirm,fmt,onViewInvoice=()=>{}}){
   const uid4=()=>Math.random().toString(36).slice(2,8).toUpperCase();
   const[cmForm,setCmForm]=useState({cust_id:"",invoice_id:"",reason:"Return",amount:"",notes:""});
   const[cmSaving,setCmSaving]=useState(false);
@@ -1146,7 +1146,7 @@ function CreditMemosTab({creditMemos,setCreditMemos,customers,sales,calcSaleGran
                           <td style={{padding:"9px 13px",fontWeight:700,color:"#7c3aed",fontSize:12}}>{m.id}</td>
                           <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{new Date(m.created_at).toLocaleDateString()}</td>
                           <td style={{padding:"9px 13px",fontWeight:600,fontSize:12}}>{cust?.name||"—"}</td>
-                          <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{m.invoice_id||"—"}</td>
+                          <td style={{padding:"9px 13px",fontSize:11}}>{m.invoice_id?<span style={{color:"#7c3aed",fontWeight:700,cursor:"pointer",textDecoration:"underline"}} onClick={()=>onViewInvoice(m.invoice_id)}>{m.invoice_id}</span>:"—"}</td>
                           <td style={{padding:"9px 13px"}}><span className="bdg bb2">{m.reason}</span></td>
                           <td style={{padding:"9px 13px",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:m.status==="voided"?"#9ca3af":"#dc2626"}}>{fmt(m.amount)}</td>
                           <td style={{padding:"9px 13px"}}>{statusBadge(m.status)}</td>
@@ -5660,6 +5660,7 @@ export default function App(){
             showToast={showToast}
             showConfirm={showConfirm}
             fmt={fmt}
+            onViewInvoice={sid=>{const s=sales.find(x=>x.id===sid);if(s){setViewSale(s);setModal("invoice");}}}
           />}
 
           {/* ══ AR ══ */}
@@ -5743,7 +5744,7 @@ export default function App(){
                 return filtered.length===0?<Empty icon="🔍" msg="NO RECORDS MATCH"/>:(
                   <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Risk</th><th>Date</th><th>Age</th><th>Driver</th><th>Grand Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
                   <tbody>{filtered.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid,days=ageDays(s);return(
-                    <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td>{(()=>{const r=custPaymentRisk[s.cust_id];if(!r||r.score==="green")return<span className="bdg bg2">✓ Good</span>;const cfg={yellow:{cls:"ba2",icon:"⚠️"},red:{cls:"br2",icon:"🔴"}};return<span className={"bdg "+cfg[r.score].cls} title={r.reasons.join(" · ")}>{cfg[r.score].icon} {r.label}</span>;})()}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{pmt?.status==="paid"?<span className="bdg bg2">Paid</span>:ageBadge(days)}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
+                    <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td>{(()=>{const r=custPaymentRisk[s.cust_id];if(!r||r.score==="green")return<span className="bdg bg2">✓ Good</span>;const cfg={yellow:{cls:"ba2",icon:"⚠️"},red:{cls:"br2",icon:"🔴"}};return<span className={"bdg "+cfg[r.score].cls} title={r.reasons.join(" · ")}>{cfg[r.score].icon} {r.label}</span>;})()}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{pmt?.status==="paid"?<span className="bdg bg2">Paid</span>:ageBadge(days)}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
                     <td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}{pmt?.status!=="paid"&&isAdmin&&(()=>{const cust=getC(s.cust_id);const alreadyFlagged=hasReturnedCheck(cust);return<button className="btn br" style={{fontSize:10,padding:"4px 8px",whiteSpace:"nowrap"}} title={alreadyFlagged?"Customer already flagged":"Flag as returned check"} onClick={async()=>{if(alreadyFlagged)return showToast("Customer already flagged for returned check","error");showConfirm(`Flag ${cust?.name} for a returned check on invoice ${s.id}?\n\nThis will:\n• Add $${RETURNED_CHECK_FEE} penalty to their last unpaid invoice\n• Add RETURNED CHECK warning to all platforms`,async()=>{
                       // 1. Flag the customer
                       await markCheckReturned(s.cust_id);
