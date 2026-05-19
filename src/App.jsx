@@ -3660,11 +3660,10 @@ export default function App(){
   const RETURNED_CHECK_FEE=parseFloat(co?.check_penalty||50);
   const markCheckReturned=async(custId)=>{
     const cust=getC(custId);if(!cust)return;
-    if((cust.notes||"").includes("RETURNED_CHECK:1"))return; // already flagged, skip silently
+    if((cust.notes||"").includes("RETURNED_CHECK:1"))return; // already flagged
     const newNotes=(cust.notes||"").trim()+"\nRETURNED_CHECK:1";
     await supabase.from("customers").update({notes:newNotes}).eq("id",custId);
     setCustomers(prev=>prev.map(c=>c.id===custId?{...c,notes:newNotes}:c));
-    showToast("⚠️ Customer flagged — returned check recorded");
   };
   const clearReturnedCheck=async(custId)=>{
     const cust=getC(custId);if(!cust)return;
@@ -3711,7 +3710,6 @@ export default function App(){
           check_penalty_invoice:saleId,
         }).eq("id",targetSale.id);
         setSales(prev=>prev.map(s=>s.id===targetSale.id?{...s,previous_balance:newPrevBal,check_penalty_applied:penalty,check_penalty_invoice:saleId}:s));
-        showToast(`🔴 $${penalty} penalty added to invoice ${targetSale.id}`);
       } else {
         // No unpaid invoice - create a standalone penalty record on the returned check invoice
         const newPrevBal=parseFloat(sales.find(s=>s.id===saleId)?.previous_balance||0)+penalty;
@@ -3720,14 +3718,18 @@ export default function App(){
           check_penalty_applied:penalty,
         }).eq("id",saleId);
         setSales(prev=>prev.map(s=>s.id===saleId?{...s,previous_balance:newPrevBal,check_penalty_applied:penalty}:s));
-        showToast(`🔴 $${penalty} penalty added to invoice ${saleId} (no other unpaid invoice found)`);
       }
       // ----------------------------------------------------------------------
 
       // Auto-flag the customer
       await markCheckReturned(custId);
       setRcModal(null);
-      showToast("🔴 Returned check uploaded — customer flagged & penalty applied");
+      // Single consolidated toast
+      if(targetSale){
+        showToast(`🔴 Returned check recorded — ${cust?.name} flagged, $${penalty} penalty added to invoice ${targetSale.id}`);
+      } else {
+        showToast(`🔴 Returned check recorded — ${cust?.name} flagged, $${penalty} penalty added to invoice ${saleId}`);
+      }
     }catch(e){showToast(e.message,"error");}
     setRcUploading(false);
   };
@@ -5433,7 +5435,23 @@ export default function App(){
                   <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Age</th><th>Driver</th><th>Grand Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
                   <tbody>{filtered.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid,days=ageDays(s);return(
                     <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{pmt?.status==="paid"?<span className="bdg bg2">Paid</span>:ageBadge(days)}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
-                    <td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}{pmt?.status!=="paid"&&isAdmin&&(()=>{const cust=getC(s.cust_id);const alreadyFlagged=hasReturnedCheck(cust);return<button className="btn br" style={{fontSize:10,padding:"4px 8px",whiteSpace:"nowrap"}} title={alreadyFlagged?"Customer already flagged":"Flag as returned check"} onClick={async()=>{if(alreadyFlagged)return showToast("Customer already flagged for returned check","error");showConfirm(`Flag ${cust?.name} for a returned check on invoice ${s.id}?\n\nThis will:\n• Add RETURNED CHECK warning to driver portal\n• Require cash/Zelle/card only for future sales`,async()=>{await flagReturnedCheck(s.cust_id);showToast(`🔴 ${cust?.name} flagged — driver will see warning`);});}}>🔴 {alreadyFlagged?"Flagged":"Flag Check"}</button>;})()}<button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.inv}</button>{isAdmin&&<button className="btn bp" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>openAmend(s)}>✏️</button>}{isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}</div></td>
+                    <td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}{pmt?.status!=="paid"&&isAdmin&&(()=>{const cust=getC(s.cust_id);const alreadyFlagged=hasReturnedCheck(cust);return<button className="btn br" style={{fontSize:10,padding:"4px 8px",whiteSpace:"nowrap"}} title={alreadyFlagged?"Customer already flagged":"Flag as returned check"} onClick={async()=>{if(alreadyFlagged)return showToast("Customer already flagged for returned check","error");showConfirm(`Flag ${cust?.name} for a returned check on invoice ${s.id}?\n\nThis will:\n• Add $${RETURNED_CHECK_FEE} penalty to their last unpaid invoice\n• Add RETURNED CHECK warning to all platforms`,async()=>{
+                      // 1. Flag the customer
+                      await markCheckReturned(s.cust_id);
+                      // 2. Add penalty to last unpaid invoice (excluding the returned one)
+                      const penalty=RETURNED_CHECK_FEE;
+                      const custSales=sales.filter(x=>x.cust_id===s.cust_id);
+                      const otherUnpaid=custSales.filter(x=>{const p=pmtFor(x.id);return x.id!==s.id&&(!p||p.status!=="paid");}).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+                      const targetSale=otherUnpaid[0]||s; // fallback to current if no other unpaid
+                      const newPrevBal=parseFloat(targetSale.previous_balance||0)+penalty;
+                      await supabase.from("sales").update({
+                        previous_balance:newPrevBal,
+                        check_penalty_applied:penalty,
+                        check_penalty_invoice:s.id,
+                      }).eq("id",targetSale.id);
+                      setSales(prev=>prev.map(x=>x.id===targetSale.id?{...x,previous_balance:newPrevBal,check_penalty_applied:penalty}:x));
+                      showToast(`🔴 ${cust?.name} flagged — $${penalty} penalty added to invoice ${targetSale.id}`);
+                    });}}>{alreadyFlagged?"🔴 Flagged":"🔴 Flag Check"}</button>;})()}<button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.inv}</button>{isAdmin&&<button className="btn bp" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>openAmend(s)}>✏️</button>}{isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}</div></td>
                   </tr>);})}
                   </tbody></table></div>
                 );

@@ -248,7 +248,7 @@ function CustomerAccountView({selCust,supabase,co,setStep}){
   if(acctLoading)return<div style={{padding:60,textAlign:"center",color:"#9ca3af"}}>Loading your account…</div>;
 
   const{invoices,payments}=acctData;
-  const totalDue=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0),0);
+  const totalDue=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0)+parseFloat(s.check_penalty_applied||0),0);
   const totalPaid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0),0);
 
   return(
@@ -2319,7 +2319,7 @@ export default function OrderPortal() {
 
     // Check unpaid balance
     const [{data:custSales},{data:pmts}] = await Promise.all([
-      supabase.from("sales").select("id,total,date").eq("cust_id",match.id),
+      supabase.from("sales").select("id,total,date,state,items,previous_balance,check_penalty_applied").eq("cust_id",match.id),
       supabase.from("payments").select("sale_id,status").eq("status","unpaid"),
     ]);
     const unpaidIds = new Set((pmts||[]).map(p=>p.sale_id));
@@ -2334,7 +2334,8 @@ export default function OrderPortal() {
         return isTaxableProd(p) ? b+(p?.price||0)*i.qty : b;
       }, 0);
       const tax = parseFloat((taxable*rate/100).toFixed(2));
-      return a + s.total + tax + parseFloat(s.previous_balance||0);
+      const penalty = parseFloat(s.check_penalty_applied||0);
+      return a + s.total + tax + parseFloat(s.previous_balance||0) + penalty;
     }, 0).toFixed(2));
     setCustPrevBalance(bal);
     setCustPrevInvs(allUnpaid);
