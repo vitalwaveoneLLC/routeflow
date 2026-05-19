@@ -5118,7 +5118,7 @@ export default function App(){
                       {isReturnedCheck&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}
                     </td>
                     <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver||"Walk-in"}</td>
-                    <td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} prev</span>}</td>
+                    <td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} {s.check_penalty_applied>0?"penalty":"prev"}</span>}</td>
                     <td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td>
                     <td><span className="bdg bb2">{fmt(gt)}</span></td>
                     <td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(s.profit)}</td>
@@ -7490,7 +7490,7 @@ export default function App(){
               {[
                 ["Subtotal",fmt(newSub),"#212121"],
                 tRate>0?["Tobacco Tax ("+tRate+"%)",fmt(newTax),"#7c3aed"]:null,
-                parseFloat(amendSale.previous_balance||0)>0?["Previous Balance",fmt(parseFloat(amendSale.previous_balance||0)),"#dc2626"]:null,
+                parseFloat(amendSale.previous_balance||0)>0?[amendSale.check_penalty_applied>0?"🚨 Returned Check Penalty":"⚠️ Prev. Balance",fmt(parseFloat(amendSale.previous_balance||0)),"#dc2626"]:null,
                 ["New Grand Total",fmt(newTotal),"#059669"],
                 ["Original Total",fmt(origTotal),"#9ca3af"],
                 newTotal!==origTotal?["Difference",`${newTotal>origTotal?"+":""}${fmt(newTotal-origTotal)}`,newTotal>origTotal?"#dc2626":"#059669"]:null,

@@ -849,21 +849,17 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           {saleTax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#059669"}}>
             <span>Tobacco/Vape Tax</span><span>${saleTax.toFixed(2)}</span>
           </div>}
-          {createdSale.previous_balance>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#dc2626",borderTop:"1px dashed #fecaca",marginTop:4,paddingTop:4}}>
-            <span>⚠️ Previous Balance ({createdSale.previous_invoice_ids})</span>
-            <span style={{fontWeight:700}}>${parseFloat(createdSale.previous_balance).toFixed(2)}</span>
-          </div>}
-          {driverCheckPenalty>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#dc2626",marginTop:4}}>
-            <span>🚨 Returned Check Penalty</span>
-            <span style={{fontWeight:700}}>${driverCheckPenalty.toFixed(2)}</span>
+          {parseFloat(createdSale.previous_balance||0)>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#dc2626",borderTop:"1px dashed #fecaca",marginTop:4,paddingTop:4}}>
+            <span>{driverCheckPenalty>0?"🚨 Returned Check Penalty":`⚠️ Previous Balance (${createdSale.previous_invoice_ids||""})`}</span>
+            <span style={{fontWeight:700}}>${parseFloat(createdSale.previous_balance||0).toFixed(2)}</span>
           </div>}
           <div style={{display:"flex",justifyContent:"space-between",fontSize:15,fontWeight:800,color:"#0a1628",borderTop:"1px solid #d1fae5",marginTop:6,paddingTop:6}}>
             <span>TOTAL DUE (Cash/Zelle)</span>
-            <span>${(gt+driverCheckPenalty+(createdSale.previous_balance||0)).toFixed(2)}</span>
+            <span>${(gt+parseFloat(createdSale.previous_balance||0)).toFixed(2)}</span>
           </div>
           <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#dc2626",marginTop:3}}>
             <span>TOTAL DUE (Card +{CARD_FEE}%)</span>
-            <span>${(cardTotal+(createdSale.previous_balance||0)*(1+CARD_FEE/100)).toFixed(2)}</span>
+            <span>${(parseFloat(((gt+parseFloat(createdSale.previous_balance||0))*(1+CARD_FEE/100)).toFixed(2)))}</span>
           </div>
         </div>
 
@@ -1720,7 +1716,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
           {/* Updated totals */}
           <div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:10,padding:"12px 14px",marginBottom:14}}>
             <div style={{fontWeight:700,fontSize:12,color:"#5b21b6",marginBottom:8}}>UPDATED TOTALS</div>
-            {[["Subtotal",fmt2(amendSub),"#212121"],amendTax>0?["Tax ("+tRate+"%)",fmt2(amendTax),"#7c3aed"]:null,parseFloat(amendSale.previous_balance||0)>0?["Prev. Balance",fmt2(parseFloat(amendSale.previous_balance||0)),"#dc2626"]:null,["New Total",fmt2(amendTotal),"#059669"]].filter(Boolean).map(([l,v,c])=>(
+            {[["Subtotal",fmt2(amendSub),"#212121"],amendTax>0?["Tax ("+tRate+"%)",fmt2(amendTax),"#7c3aed"]:null,parseFloat(amendSale.previous_balance||0)>0?[amendSale.check_penalty_applied>0?"🚨 Returned Check Penalty":"⚠️ Prev. Balance",fmt2(parseFloat(amendSale.previous_balance||0)),"#dc2626"]:null,["New Total",fmt2(amendTotal),"#059669"]].filter(Boolean).map(([l,v,c])=>(
               <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4,fontWeight:l==="New Total"?800:400}}>
                 <span style={{color:"#6b7280"}}>{l}</span><span style={{color:c,fontFamily:"'Inter',sans-serif"}}>{v}</span>
               </div>
@@ -3088,7 +3084,7 @@ export default function OrderPortal() {
                           <div style={{textAlign:"right"}}>
                             <div style={{fontWeight:800,fontSize:18,color:isPaid?"#059669":"#7c3aed"}}>${gt.toFixed(2)}</div>
                             {saleTax>0&&<div style={{fontSize:10,color:"#9ca3af"}}>incl. ${saleTax.toFixed(2)} tax</div>}
-                            {prevBal>0&&<div style={{fontSize:10,color:"#dc2626",fontWeight:600}}>incl. ${prevBal.toFixed(2)} prev. balance</div>}
+                            {prevBal>0&&<div style={{fontSize:10,color:"#dc2626",fontWeight:600}}>{s.check_penalty_applied>0?"🚨 Returned Check Penalty":`incl. $${prevBal.toFixed(2)} prev. balance`}</div>}
                             {s.email_sent&&<div style={{fontSize:10,color:"#0ea5e9"}}>✓ Email sent</div>}
                           </div>
                         </div>
@@ -3732,7 +3728,7 @@ export default function OrderPortal() {
                 <div style={{fontSize:11,color:"#4b6080",letterSpacing:".08em",marginBottom:10}}>HOW WOULD YOU LIKE TO PAY?</div>
                 {custRcFlag&&(
                   <div style={{background:"#1a0000",border:"1px solid #dc2626",borderRadius:8,padding:"8px 12px",marginBottom:8,fontSize:11,color:"#f87171",fontWeight:600}}>
-                    🚨 Returned check on file — <strong style={{color:"#fbbf24"}}>${custRcFee} penalty</strong> included in total. Pay by Card to waive.
+                    🚨 Returned check on file — <strong style={{color:"#fbbf24"}}>${custRcFee} penalty</strong> will be added to your invoice by your account manager.
                   </div>
                 )}
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -3746,7 +3742,7 @@ export default function OrderPortal() {
                       <div>
                         <div style={{fontSize:13,fontWeight:600,color:payMethod==="delivery"?"#f59e0b":"#fff"}}>💵 Pay on Delivery</div>
                         <div style={{fontSize:11,color:"#4b6080",marginTop:1}}>
-                          Cash · Check · Money Order · Zelle — No fee{custRcFlag?` (+$${custRcFee} penalty if check)`:""}
+                        Cash · Check · Money Order · Zelle — No fee
                         </div>
                       </div>
                     </div>
