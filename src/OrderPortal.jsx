@@ -200,7 +200,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
     return isTaxableProd(p)?a+getEffectivePrice(cust,p)*i.qty:a;
   },0)*stateRate/100).toFixed(2));
   const penalty = parseFloat(sale.check_penalty_applied||0);
-  const gt = sub+tax+penalty;
+  const gt = sub+tax+parseFloat(sale.previous_balance||0);
   return(
     <div style={{fontFamily:"'Inter',sans-serif"}}>
       <div style={{background:"#7c3aed",padding:"16px 20px",borderRadius:"8px 8px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -218,8 +218,8 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
         </table>
         <div style={{display:"flex",justifyContent:"flex-end"}}>
           <div style={{width:220}}>
-            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null,parseFloat(sale.previous_balance||0)>0?[`[!]️ Prev. Balance (${sale.previous_invoice_ids||""})`,`$${parseFloat(sale.previous_balance||0).toFixed(2)}`]:null,penalty>0?["🚨 Returned Check Penalty",`$${penalty.toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6",background:l.includes("Prev")||l.includes("Penalty")?"#fef2f2":"transparent",margin:l.includes("Prev")||l.includes("Penalty")?"0 -4px":0,padding:l.includes("Prev")||l.includes("Penalty")?"5px 4px":"5px 0"}}><span style={{fontSize:12,color:l.includes("Prev")||l.includes("Penalty")?"#dc2626":"#6b7280",fontWeight:l.includes("Prev")||l.includes("Penalty")?700:400}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":l.includes("Prev")||l.includes("Penalty")?"#dc2626":"#212121",fontWeight:l.includes("Prev")||l.includes("Penalty")?700:400}}>{v}</span></div>)}
-            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL DUE</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${(gt+parseFloat(sale.previous_balance||0)).toFixed(2)}</span></div>
+            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null,parseFloat(sale.previous_balance||0)>0?[`[!]️ Prev. Balance (${sale.previous_invoice_ids||""})`,`$${parseFloat(sale.previous_balance||0).toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6",background:l.includes("Prev")?"#fef2f2":"transparent",margin:l.includes("Prev")?"0 -4px":0,padding:l.includes("Prev")?"5px 4px":"5px 0"}}><span style={{fontSize:12,color:l.includes("Prev")?"#dc2626":"#6b7280",fontWeight:l.includes("Prev")?700:400}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":l.includes("Prev")?"#dc2626":"#212121",fontWeight:l.includes("Prev")?700:400}}>{v}</span></div>)}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL DUE</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${gt.toFixed(2)}</span></div>
           </div>
         </div>
         <div style={{marginTop:12,background:"#f9fafb",borderRadius:7,padding:"10px 12px",fontSize:11,color:"#6b7280"}}>

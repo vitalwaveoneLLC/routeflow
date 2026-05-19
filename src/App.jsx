@@ -498,7 +498,8 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
   const taxable=(sale.items||[]).reduce((a,i)=>{const p=getP(i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
   const tax=parseFloat((taxable*stateRate/100).toFixed(2));
   const penalty=parseFloat(sale.check_penalty_applied||0);
-  const gt=sub+tax+penalty;
+  const prevBal=parseFloat(sale.previous_balance||0);
+  const gt=sub+tax+prevBal; // previous_balance already contains penalty
   const cardFeeAmt=parseFloat((gt*CARD_FEE/100).toFixed(2));
   const gtCard=parseFloat((gt+cardFeeAmt).toFixed(2));
   return(
@@ -559,17 +560,13 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
               <span style={{fontSize:13,color:"#6b7280"}}>{`Tobacco/Vape Tax   -   ${stateId} (${stateRate}%)`}</span>
               <span style={{fontSize:13,color:"#059669"}}>{fmt(tax)}</span>
             </div>}
-            {parseFloat(sale.previous_balance||0)>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6",background:"#fef2f2",margin:"0 -4px",padding:"6px 4px"}}>
-              <span style={{fontSize:13,color:"#dc2626",fontWeight:600}}>⚠️ Previous Balance ({sale.previous_invoice_ids})</span>
-              <span style={{fontSize:13,color:"#dc2626",fontWeight:700}}>{fmt(parseFloat(sale.previous_balance||0))}</span>
-            </div>}
-            {penalty>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6",background:"#fef2f2",margin:"0 -4px",padding:"6px 4px"}}>
-              <span style={{fontSize:13,color:"#dc2626",fontWeight:600}}>🚨 Returned Check Penalty</span>
-              <span style={{fontSize:13,color:"#dc2626",fontWeight:700}}>{fmt(penalty)}</span>
+            {prevBal>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6",background:"#fef2f2",margin:"0 -4px",padding:"6px 4px"}}>
+              <span style={{fontSize:13,color:"#dc2626",fontWeight:600}}>⚠️ Previous Balance {penalty>0?`(incl. $${penalty} returned check penalty)`:""} {sale.previous_invoice_ids?`(${sale.previous_invoice_ids})`:""}</span>
+              <span style={{fontSize:13,color:"#dc2626",fontWeight:700}}>{fmt(prevBal)}</span>
             </div>}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111",marginTop:3}}>
               <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#111"}}>💵 CASH / CHECK TOTAL</span>
-              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#059669"}}>{fmt(gt+parseFloat(sale.previous_balance||0))}</span>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:20,color:"#059669"}}>{fmt(gt)}</span>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",padding:"6px 8px",background:"#faf5ff",margin:"0 -8px"}}>
               <span style={{fontSize:12,color:"#7c3aed"}}>💳 Card surcharge ({CARD_FEE}%)</span>
