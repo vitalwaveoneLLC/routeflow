@@ -784,6 +784,9 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     try{
       const {data:seqData} = await supabase.rpc("next_invoice_number");
       const invId = "INV-" + String(seqData||1).padStart(4,"0");
+      // Check if customer has returned check — penalty always recorded on invoice
+      const rcFlagOnSale = (selCustObj?.notes||"").includes("RETURNED_CHECK:1");
+      const salePenalty = rcFlagOnSale ? parseFloat(co?.check_penalty||50) : 0;
       const ns = {
         id:invId,
         load_id:driverData.activeLoad?.id,
@@ -796,6 +799,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         profit,
         previous_balance:custUnpaidBalance>0?custUnpaidBalance:0,
         previous_invoice_ids:custUnpaidBalance>0?custUnpaidInvs.map(s=>s.id).join(","):"",
+        check_penalty_applied:salePenalty,
         created_at:new Date().toISOString()
       };
       await supabase.from("sales").insert(ns);
@@ -827,11 +831,12 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     const hasRc = (driverData.customers||[]).find(c=>c.id===createdSale.cust_id);
     const driverRcFlag = (hasRc?.notes||"").includes("RETURNED_CHECK:1");
     const DRIVER_RC_FEE = parseFloat(co?.check_penalty||50);
-    const driverCheckPenalty = driverRcFlag&&payForm.method==="check" ? DRIVER_RC_FEE : 0;
+    // Penalty is already saved on the sale — read from record, always show on invoice
+    const driverCheckPenalty = parseFloat(createdSale.check_penalty_applied||0);
     const cardTotal = parseFloat(((gt+driverCheckPenalty)*(1+CARD_FEE/100)).toFixed(2));
     const methods = [
       {id:"cash",label:"💵 Cash",color:"#059669",note:"No surcharge"},
-      {id:"check",label:"🧾 Check",color:"#0369a1",note:driverRcFlag?`⚠️ +$${DRIVER_RC_FEE} penalty applies`:"No surcharge"},
+      {id:"check",label:"🧾 Check",color:"#0369a1",note:driverRcFlag?`⚠️ Returned check on file`:"No surcharge"},
       {id:"money_order",label:"📮 Money Order",color:"#7c3aed",note:"No surcharge"},
       {id:"zelle",label:"⚡ Zelle",color:"#6366f1",note:"No surcharge"},
       {id:"card",label:"💳 Card",color:"#dc2626",note:`+${CARD_FEE}% surcharge = $${cardTotal.toFixed(2)}`},
@@ -1327,7 +1332,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
   const gt  = sub+tax;
   const cardFee = 3;
   const cardTotal = parseFloat((gt*(1+cardFee/100)).toFixed(2));
-  const wiCheckPenalty = wiHasReturnedCheck&&wiPay==="check" ? RETURNED_CHECK_FEE : 0;
+  const wiCheckPenalty = wiHasReturnedCheck ? RETURNED_CHECK_FEE : 0;
   const totalDue  = (wiPay==="card"?cardTotal:gt)+wiPrevBal+wiCheckPenalty;
 
   const handleWiCust = async(cid)=>{
@@ -1903,10 +1908,8 @@ export default function OrderPortal() {
       const saleTax = parseFloat((taxable*rate/100).toFixed(2));
       const gt = parseFloat((sale.total+saleTax).toFixed(2));
       const surcharge = method==="card" ? parseFloat((gt*CARD_FEE/100).toFixed(2)) : 0;
-      // Check penalty — applies if customer has returned check and pays by check
-      const custObj = (driverData.customers||[]).find(c=>c.id===sale.cust_id);
-      const rcFee = parseFloat(driverData.co?.check_penalty||50);
-      const checkPenalty = (custObj?.notes||"").includes("RETURNED_CHECK:1") && method==="check" ? rcFee : 0;
+      // Read penalty from sale record — already set at sale creation time
+      const checkPenalty = parseFloat(sale.check_penalty_applied||0);
       const total = parseFloat((gt+surcharge+(sale.previous_balance||0)+checkPenalty).toFixed(2));
       const {data:existing} = await supabase.from("payments").select("id,sale_id").eq("sale_id",sale.id).maybeSingle();
       const payData = {
@@ -1923,10 +1926,6 @@ export default function OrderPortal() {
         await supabase.from("payments").update(payData).eq("sale_id",sale.id);
       } else {
         await supabase.from("payments").insert({sale_id:sale.id,...payData});
-      }
-      // Save penalty on the sale record too
-      if(checkPenalty>0){
-        await supabase.from("sales").update({check_penalty_applied:checkPenalty}).eq("id",sale.id);
       }
       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
       setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});

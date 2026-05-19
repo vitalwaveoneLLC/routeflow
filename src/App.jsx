@@ -4415,7 +4415,8 @@ export default function App(){
             loadId=nl.id;
           }
           const profit=order.items.reduce((a,i)=>{const p=getP(i.pid);return a+((p?.price||0)-(p?.cost||0))*i.qty;},0);
-          const ns={id:"INV-"+order.id.replace("ORD-",""),load_id:loadId,truck_id:truckId,cust_id:order.cust_id,date:nowStr(),items:order.items,total:order.subtotal,profit};
+          const penalty=parseFloat(order.check_penalty_applied||0);
+          const ns={id:"INV-"+order.id.replace("ORD-",""),load_id:loadId,truck_id:truckId,cust_id:order.cust_id,date:nowStr(),items:order.items,total:order.subtotal,profit,previous_balance:order.previous_balance||0,previous_invoice_ids:order.previous_invoice_ids||"",check_penalty_applied:penalty};
           const pmtStatus=order.payment_method==="card"?"paid":"unpaid";
           await supabase.from("sales").insert(ns);
           await supabase.from("payments").insert({sale_id:ns.id,status:pmtStatus,method:order.payment_method||"cash"});
