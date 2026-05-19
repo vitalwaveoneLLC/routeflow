@@ -561,7 +561,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
               <span style={{fontSize:13,color:"#059669"}}>{fmt(tax)}</span>
             </div>}
             {prevBal>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6",background:"#fef2f2",margin:"0 -4px",padding:"6px 4px"}}>
-              <span style={{fontSize:13,color:"#dc2626",fontWeight:600}}>⚠️ Previous Balance {penalty>0?`(incl. $${penalty} returned check penalty)`:""} {sale.previous_invoice_ids?`(${sale.previous_invoice_ids})`:""}</span>
+              <span style={{fontSize:13,color:"#dc2626",fontWeight:600}}>{penalty>0?"🚨 Returned Check Penalty":`⚠️ Previous Balance (${sale.previous_invoice_ids||""})`}</span>
               <span style={{fontSize:13,color:"#dc2626",fontWeight:700}}>{fmt(prevBal)}</span>
             </div>}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111",marginTop:3}}>
@@ -3673,6 +3673,7 @@ export default function App(){
   const uploadReturnedCheck=async(file,saleId,custId)=>{
     if(!file)return showToast("No file selected","error");
     setRcUploading(true);
+    const cust=getC(custId);
     try{
       const ext=file.name.split(".").pop();
       const path=`returned-checks/RC-${saleId}-${uid()}.${ext}`;

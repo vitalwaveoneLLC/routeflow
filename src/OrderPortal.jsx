@@ -218,7 +218,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
         </table>
         <div style={{display:"flex",justifyContent:"flex-end"}}>
           <div style={{width:220}}>
-            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null,parseFloat(sale.previous_balance||0)>0?[`[!]️ Prev. Balance (${sale.previous_invoice_ids||""})`,`$${parseFloat(sale.previous_balance||0).toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6",background:l.includes("Prev")?"#fef2f2":"transparent",margin:l.includes("Prev")?"0 -4px":0,padding:l.includes("Prev")?"5px 4px":"5px 0"}}><span style={{fontSize:12,color:l.includes("Prev")?"#dc2626":"#6b7280",fontWeight:l.includes("Prev")?700:400}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":l.includes("Prev")?"#dc2626":"#212121",fontWeight:l.includes("Prev")?700:400}}>{v}</span></div>)}
+            {[["Subtotal",`$${sub.toFixed(2)}`],tax>0?["Tobacco/Vape Tax",`$${tax.toFixed(2)}`]:null,parseFloat(sale.previous_balance||0)>0?[penalty>0?`🚨 Returned Check Penalty`:`⚠️ Prev. Balance (${sale.previous_invoice_ids||""})`,`$${parseFloat(sale.previous_balance||0).toFixed(2)}`]:null].filter(Boolean).map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f3f4f6",background:l.includes("Prev")||l.includes("Penalty")?"#fef2f2":"transparent",margin:l.includes("Prev")||l.includes("Penalty")?"0 -4px":0,padding:l.includes("Prev")||l.includes("Penalty")?"5px 4px":"5px 0"}}><span style={{fontSize:12,color:l.includes("Prev")||l.includes("Penalty")?"#dc2626":"#6b7280",fontWeight:l.includes("Prev")||l.includes("Penalty")?700:400}}>{l}</span><span style={{fontSize:12,color:l.includes("Tax")?"#059669":l.includes("Prev")||l.includes("Penalty")?"#dc2626":"#212121",fontWeight:l.includes("Prev")||l.includes("Penalty")?700:400}}>{v}</span></div>)}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #111"}}><span style={{fontWeight:800,fontSize:14}}>TOTAL DUE</span><span style={{fontWeight:900,fontSize:20,color:"#7c3aed"}}>${gt.toFixed(2)}</span></div>
           </div>
         </div>
@@ -784,9 +784,6 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
     try{
       const {data:seqData} = await supabase.rpc("next_invoice_number");
       const invId = "INV-" + String(seqData||1).padStart(4,"0");
-      // Check if customer has returned check — penalty always recorded on invoice
-      const rcFlagOnSale = (selCustObj?.notes||"").includes("RETURNED_CHECK:1");
-      const salePenalty = 0; // Penalty applied retroactively by admin only - not at sale creation
       const ns = {
         id:invId,
         load_id:driverData.activeLoad?.id,
@@ -799,7 +796,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         profit,
         previous_balance:custUnpaidBalance>0?custUnpaidBalance:0,
         previous_invoice_ids:custUnpaidBalance>0?custUnpaidInvs.map(s=>s.id).join(","):"",
-        check_penalty_applied:salePenalty,
+        check_penalty_applied: 0,
         created_at:new Date().toISOString()
       };
       await supabase.from("sales").insert(ns);
@@ -1332,8 +1329,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
   const gt  = sub+tax;
   const cardFee = 3;
   const cardTotal = parseFloat((gt*(1+cardFee/100)).toFixed(2));
-  const wiCheckPenalty = 0; // Penalty applied retroactively by admin only
-  const totalDue  = (wiPay==="card"?cardTotal:gt)+wiPrevBal+wiCheckPenalty;
+  const totalDue = (wiPay==="card"?cardTotal:gt)+wiPrevBal;
 
   const handleWiCust = async(cid)=>{
     setWiCust(cid);setWiPrevBal(0);setWiPrevInvs([]);
@@ -1375,7 +1371,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const {data:seq}=await supabase.rpc("next_invoice_number");
       const invId="INV-"+String(seq||1).padStart(4,"0");
       const profit=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(wiCust,i.pid)-(p?.cost||0))*i.qty;},0);
-      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:wiCheckPenalty||0,created_at:new Date().toISOString()};
+      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:0,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await Promise.all(saleItems.map(i=>{const p=products.find(x=>x.id===i.pid);return p?supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id):Promise.resolve();}));
       let wiRecUrl="";
@@ -1385,7 +1381,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
         const {data:upD,error:upE}=await supabase.storage.from("receipts").upload(path,wiReceiptFile,{upsert:true});
         if(!upE) wiRecUrl=supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
       }
-      await supabase.from("payments").insert({id:"PMT-"+uid2(),sale_id:invId,status:"paid",method:wiPay,amount:totalDue,check_number:wiCheck||"",zelle_ref:wiZelle||"",note:`Walk-in sale${wiCheckPenalty>0?` | $${wiCheckPenalty} returned check penalty applied`:""}`,receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
+      await supabase.from("payments").insert({id:"PMT-"+uid2(),sale_id:invId,status:"paid",method:wiPay,amount:totalDue,check_number:wiCheck||"",zelle_ref:wiZelle||"",note:"Walk-in sale",receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
       setDriverData(prev=>({...prev, sales:[{...ns,_paid:true},...prev.sales]}));
       setWiSales(prev=>[{...ns,_paid:true},...prev]);
       setWiItems({});setWiPrevBal(0);setWiPrevInvs([]);setWiCheck("");setWiZelle("");setWiReceiptFile(null);setWiReceiptUrl("");
@@ -1489,8 +1485,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
             <div>
               <div style={{fontWeight:800,fontSize:13,color:"#dc2626"}}>RETURNED CHECK ON FILE</div>
               <div style={{fontSize:11,color:"#f87171",marginTop:2}}>
-                A <strong style={{color:"#fbbf24"}}>${RETURNED_CHECK_FEE} penalty fee</strong> will be added if paying by check.
-                Cash, Zelle, or Card recommended.
+                A <strong style={{color:"#fbbf24"}}>${RETURNED_CHECK_FEE} penalty</strong> will be added to this invoice. Cash, Zelle, or Card recommended.
               </div>
             </div>
           </div>
@@ -1557,7 +1552,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       {sub>0&&(
         <div className="card" style={{padding:"14px 16px",marginTop:4,marginBottom:12}}>
           <div style={{fontWeight:700,fontSize:12,color:"#0a1628",marginBottom:8}}>ORDER SUMMARY</div>
-          {[["Subtotal",fmt2(sub),"#212121"],tax>0?["Tobacco Tax ("+taxRate2+"%)",fmt2(tax),"#7c3aed"]:null,wiPrevBal>0?["Prev. Balance",fmt2(wiPrevBal),"#dc2626"]:null,wiCheckPenalty>0?[`🚨 Returned Check Penalty`,fmt2(wiCheckPenalty),"#dc2626"]:null,wiPay==="card"?["Card Fee ("+cardFee+"%)",fmt2(parseFloat((gt*cardFee/100).toFixed(2))),"#f59e0b"]:null,["Total Due",fmt2(totalDue),"#059669"]].filter(Boolean).map(([l,v,c])=>(
+          {[["Subtotal",fmt2(sub),"#212121"],tax>0?["Tobacco Tax ("+taxRate2+"%)",fmt2(tax),"#7c3aed"]:null,wiPrevBal>0?["Prev. Balance",fmt2(wiPrevBal),"#dc2626"]:null,wiPay==="card"?["Card Fee ("+cardFee+"%)",fmt2(parseFloat((gt*cardFee/100).toFixed(2))),"#f59e0b"]:null,["Total Due",fmt2(totalDue),"#059669"]].filter(Boolean).map(([l,v,c])=>(
             <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:5,paddingBottom:l==="Total Due"?0:5,borderBottom:l==="Total Due"?"none":"1px solid #f3f4f6"}}>
               <span style={{fontSize:11,color:l==="Total Due"?"#212121":"#6b7280",fontWeight:l==="Total Due"?700:400}}>{l}</span>
               <span style={{fontSize:l==="Total Due"?15:12,fontWeight:l==="Total Due"?800:600,color:c}}>{v}</span>
@@ -1908,9 +1903,8 @@ export default function OrderPortal() {
       const saleTax = parseFloat((taxable*rate/100).toFixed(2));
       const gt = parseFloat((sale.total+saleTax).toFixed(2));
       const surcharge = method==="card" ? parseFloat((gt*CARD_FEE/100).toFixed(2)) : 0;
-      // Read penalty from sale record — already set at sale creation time
-      const checkPenalty = parseFloat(sale.check_penalty_applied||0);
-      const total = parseFloat((gt+surcharge+(sale.previous_balance||0)+checkPenalty).toFixed(2));
+      // previous_balance already contains penalty — do NOT add check_penalty_applied separately
+      const total = parseFloat((gt+surcharge+parseFloat(sale.previous_balance||0)).toFixed(2));
       const {data:existing} = await supabase.from("payments").select("id,sale_id").eq("sale_id",sale.id).maybeSingle();
       const payData = {
         status:"paid",
@@ -1919,7 +1913,7 @@ export default function OrderPortal() {
         check_number:payForm.checkNum||"",
         bank_name:payForm.bankName||"",
         zelle_ref:payForm.zelleRef||"",
-        note:(payForm.notes||"")+(checkPenalty>0?` | $${checkPenalty} returned check penalty applied`:""),
+        note: payForm.notes||"",
         collected_at:new Date().toISOString(),
       };
       if(existing){
@@ -2066,11 +2060,8 @@ export default function OrderPortal() {
   const promoDiscount=promoApplied?.discount||0;
   const custRcFlag=(selCust?.notes||"").includes("RETURNED_CHECK:1");
   const custRcFee=parseFloat(co?.check_penalty||50);
-  // Penalty always applied for flagged customers on delivery — driver handles actual collection
-  // For card payments no penalty since check isn't used
-  const custCheckPenalty = 0; // Penalty applied retroactively by admin only
   const cardSurcharge = payMethod==="card" ? parseFloat(((total-promoDiscount)*CARD_FEE/100).toFixed(2)) : 0;
-  const grandTotal = parseFloat((total-promoDiscount+cardSurcharge+custCheckPenalty).toFixed(2));
+  const grandTotal = parseFloat((total-promoDiscount+cardSurcharge).toFixed(2));
 
   const setQty=(pid,val,max)=>setQuantities(prev=>({...prev,[pid]:Math.min(max,Math.max(0,parseInt(val)||0))}));
 
@@ -2162,10 +2153,10 @@ export default function OrderPortal() {
         subtotal,
         tax,
         total: grandTotal,
-        notes: notes+(payMethod==="card"?` | Paid by card online (incl. ${CARD_FEE}% surcharge $${cardSurcharge.toFixed(2)})`:" | Payment on delivery")+(custCheckPenalty>0?` | $${custCheckPenalty} returned check penalty applied`:""),
+        notes: notes+(payMethod==="card"?` | Paid by card online (incl. ${CARD_FEE}% surcharge $${cardSurcharge.toFixed(2)})`:" | Payment on delivery"),
         previous_balance: custPrevBalance||0,
         previous_invoice_ids: custPrevInvs.map(s=>s.id).join(",")||"",
-        check_penalty_applied: custCheckPenalty||0,
+        check_penalty_applied: 0,
         status: "approved",
         payment_method: payMethod,
         signature: sigData||null,
@@ -3651,8 +3642,8 @@ export default function OrderPortal() {
                 <div>
                   <div style={{fontWeight:800,fontSize:14,color:"#dc2626",marginBottom:4}}>RETURNED CHECK ON FILE</div>
                   <div style={{fontSize:13,color:"#f87171",lineHeight:1.6}}>
-                    Your account has a returned check. A <strong style={{color:"#fbbf24"}}>${custRcFee} penalty fee</strong> has been added to your order total.
-                    Pay by <strong style={{color:"#fbbf24"}}>Card</strong> to waive this fee.
+                    Your account has a returned check on file. A <strong style={{color:"#fbbf24"}}>${custRcFee} penalty</strong> will be added to your invoice by your account manager.
+                    Contact us at <strong style={{color:"#fbbf24"}}>{co?.phone||"your driver"}</strong> to resolve this.
                   </div>
                 </div>
               </div>
@@ -3701,7 +3692,7 @@ export default function OrderPortal() {
                   <span>Previous Balance</span><span>{fmt(custPrevBalance)}</span>
                 </div>
               </div>}
-              {[{l:"Subtotal",v:fmt(subtotal)},{l:`Tax   -   Tobacco only`,v:fmt(tax)},{l:"New Order Total",v:fmt(total)},...(custPrevBalance>0?[{l:"⚠️ Previous Balance",v:fmt(custPrevBalance)}]:[]),...(custCheckPenalty>0?[{l:"🚨 Returned Check Penalty",v:fmt(custCheckPenalty)}]:[])].map(k=>(
+              {[{l:"Subtotal",v:fmt(subtotal)},{l:`Tax   -   Tobacco only`,v:fmt(tax)},{l:"New Order Total",v:fmt(total)},...(custPrevBalance>0?[{l:"⚠️ Previous Balance",v:fmt(custPrevBalance)}]:[])].map(k=>(
                 <div key={k.l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #ffffff10"}}>
                   <span style={{fontSize:12,color:k.l.includes("Balance")?"#fca5a5":"#4b6080"}}>{k.l}</span>
                   <span style={{fontSize:12,color:k.l.includes("Balance")?"#fca5a5":"#9ca3af"}}>{k.v}</span>
