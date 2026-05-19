@@ -231,9 +231,11 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
 }
 
 // -- DRIVER LOAD TAB -----------------------------------------------------------
-function CustomerAccountView({selCust,supabase,co,setStep}){
+function CustomerAccountView({selCust,supabase,co,setStep,products=[]}){
   const[acctData,setAcctData]=useState(null);
   const[acctLoading,setAcctLoading]=useState(true);
+  const[viewInv,setViewInv]=useState(null); // selected invoice to view
+
   useEffect(()=>{
     supabase.from("sales").select("*").eq("cust_id",selCust.id).order("created_at",{ascending:false})
       .then(({data:invs})=>{
@@ -250,6 +252,111 @@ function CustomerAccountView({selCust,supabase,co,setStep}){
   const{invoices,payments}=acctData;
   const totalDue=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0)+parseFloat(s.previous_balance||0),0);
   const totalPaid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0),0);
+  const fmt=n=>`$${parseFloat(n||0).toFixed(2)}`;
+
+  // Invoice detail view
+  if(viewInv){
+    const paid=payments.find(p=>p.sale_id===viewInv.id&&p.status==="paid");
+    const prevBal=parseFloat(viewInv.previous_balance||0);
+    const penalty=parseFloat(viewInv.check_penalty_applied||0);
+    const itemsTotal=parseFloat(viewInv.total||0);
+    const grandTotal=itemsTotal+prevBal;
+    return(
+      <div className="fu" style={{maxWidth:680,margin:"0 auto"}}>
+        <button onClick={()=>setViewInv(null)} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:13,marginBottom:16,display:"flex",alignItems:"center",gap:6,padding:0}}>
+          ← Back to My Account
+        </button>
+
+        {/* Invoice Header */}
+        <div style={{background:"#0a1628",borderRadius:"10px 10px 0 0",padding:"18px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+          <div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#fff"}}>INVOICE</div>
+            <div style={{fontSize:12,color:"#4b6080",marginTop:2}}>#{viewInv.id}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontWeight:700,fontSize:14,color:"#fff"}}>{co?.name}</div>
+            <div style={{fontSize:11,color:"#4b6080",marginTop:2}}>{co?.phone}</div>
+          </div>
+        </div>
+
+        {/* Invoice Meta */}
+        <div style={{background:"#f9fafb",padding:"14px 24px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,borderBottom:"1px solid #e5e7eb"}}>
+          <div>
+            <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".1em",marginBottom:3}}>BILL TO</div>
+            <div style={{fontWeight:700,fontSize:13}}>{selCust.name}</div>
+            {selCust.address&&<div style={{fontSize:11,color:"#6b7280"}}>{selCust.address}</div>}
+            {selCust.phone&&<div style={{fontSize:11,color:"#6b7280"}}>{selCust.phone}</div>}
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".1em",marginBottom:3}}>DATE</div>
+            <div style={{fontWeight:700,fontSize:13}}>{viewInv.date}</div>
+            <div style={{marginTop:8}}>
+              <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:6,background:paid?"#f0fdf4":"#fef2f2",color:paid?"#065f46":"#dc2626"}}>
+                {paid?"✓ PAID":"⏳ UNPAID"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Items */}
+        <div style={{background:"#fff",borderBottom:"1px solid #e5e7eb"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:"#f3f4f6"}}>
+              {["Product","Qty","Unit Price","Total"].map(h=>(
+                <th key={h} style={{padding:"9px 14px",textAlign:h==="Product"?"left":"right",fontSize:10,fontWeight:700,color:"#6b7280"}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {(viewInv.items||[]).map((item,i)=>{
+                const prod=products.find(p=>p.id===item.pid);
+                const unitPrice=prod?.price||item.price||0;
+                const lineTotal=item.qty*unitPrice;
+                return(
+                  <tr key={i} style={{borderBottom:"1px solid #f9fafb"}}>
+                    <td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:"#111"}}>{prod?.name||item.name||item.pid}</td>
+                    <td style={{padding:"10px 14px",fontSize:13,textAlign:"right"}}>{item.qty}</td>
+                    <td style={{padding:"10px 14px",fontSize:13,textAlign:"right",color:"#6b7280"}}>{fmt(unitPrice)}</td>
+                    <td style={{padding:"10px 14px",fontSize:13,fontWeight:700,textAlign:"right"}}>{fmt(lineTotal)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Totals */}
+        <div style={{background:"#fff",padding:"16px 24px",borderRadius:"0 0 10px 10px",border:"1px solid #e5e7eb",borderTop:"none"}}>
+          <div style={{display:"flex",justifyContent:"flex-end"}}>
+            <div style={{width:280}}>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
+                <span style={{fontSize:13,color:"#6b7280"}}>Subtotal</span>
+                <span style={{fontSize:13,fontWeight:600}}>{fmt(itemsTotal)}</span>
+              </div>
+              {prevBal>0&&(
+                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6",background:"#fef2f2",margin:"0 -4px",padding:"6px 4px"}}>
+                  <span style={{fontSize:13,color:"#dc2626",fontWeight:600}}>{penalty>0?"🚨 Returned Check Penalty":"⚠️ Previous Balance"}</span>
+                  <span style={{fontSize:13,color:"#dc2626",fontWeight:700}}>{fmt(prevBal)}</span>
+                </div>
+              )}
+              <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderTop:"2px solid #0a1628",marginTop:4}}>
+                <span style={{fontWeight:800,fontSize:14,color:"#0a1628"}}>TOTAL DUE</span>
+                <span style={{fontWeight:900,fontSize:20,color:paid?"#059669":"#0a1628"}}>{fmt(grandTotal)}</span>
+              </div>
+              {paid&&<div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#065f46",fontWeight:600,textAlign:"center"}}>
+                ✅ Payment received — Thank you!
+              </div>}
+              {!paid&&<div style={{background:"#fef9c3",border:"1px solid #fde68a",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#854d0e",fontWeight:600,textAlign:"center"}}>
+                ⏳ Balance due — Please pay your driver or contact us
+              </div>}
+            </div>
+          </div>
+          <div style={{marginTop:16,paddingTop:12,borderTop:"1px solid #f3f4f6",fontSize:11,color:"#9ca3af",textAlign:"center"}}>
+            Questions? Call {co?.phone||"us"} · {co?.email||""}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return(
     <div className="fu" style={{maxWidth:700,margin:"0 auto"}}>
@@ -262,7 +369,7 @@ function CustomerAccountView({selCust,supabase,co,setStep}){
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
-        {[{l:"Total Invoices",v:invoices.length,c:"#7c3aed"},{l:"Amount Paid",v:`$${totalPaid.toFixed(2)}`,c:"#059669"},{l:"Balance Due",v:`$${totalDue.toFixed(2)}`,c:totalDue>0?"#dc2626":"#059669"}].map(k=>(
+        {[{l:"Total Invoices",v:invoices.length,c:"#7c3aed"},{l:"Amount Paid",v:fmt(totalPaid),c:"#059669"},{l:"Balance Due",v:fmt(totalDue),c:totalDue>0?"#dc2626":"#059669"}].map(k=>(
           <div key={k.l} style={{background:"#fff",borderRadius:10,padding:"14px 16px",border:"1px solid #e5e7eb",textAlign:"center"}}>
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:k.c}}>{k.v}</div>
             <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>{k.l}</div>
@@ -290,7 +397,7 @@ function CustomerAccountView({selCust,supabase,co,setStep}){
             <div style={{fontWeight:600}}>No invoices yet</div>
           </div>
         :<div style={{background:"#fff",borderRadius:10,overflow:"hidden",border:"1px solid #e5e7eb"}}>
-          <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#6b7280"}}>INVOICE HISTORY</div>
+          <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#6b7280"}}>INVOICE HISTORY — tap an invoice to view details</div>
           <table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead><tr style={{background:"#0a1628",color:"#fff"}}>
               {["Invoice #","Date","Items","Total","Status"].map(h=>(
@@ -301,11 +408,13 @@ function CustomerAccountView({selCust,supabase,co,setStep}){
               {invoices.map(s=>{
                 const paid=payments.find(p=>p.sale_id===s.id&&p.status==="paid");
                 return(
-                  <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6"}}>
-                    <td style={{padding:"10px 14px",fontWeight:700,color:"#7c3aed",fontSize:12}}>{s.id}</td>
+                  <tr key={s.id} onClick={()=>setViewInv(s)} style={{borderBottom:"1px solid #f3f4f6",cursor:"pointer",transition:"background .15s"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                    onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                    <td style={{padding:"10px 14px",fontWeight:700,color:"#7c3aed",fontSize:12,textDecoration:"underline"}}>{s.id}</td>
                     <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{s.date}</td>
                     <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{(s.items||[]).length} item{(s.items||[]).length!==1?"s":""}</td>
-                    <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontSize:13}}>${parseFloat(s.total||0).toFixed(2)}</td>
+                    <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontSize:13}}>{fmt(parseFloat(s.total||0)+parseFloat(s.previous_balance||0))}</td>
                     <td style={{padding:"10px 14px"}}>
                       <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:6,background:paid?"#f0fdf4":"#fef2f2",color:paid?"#065f46":"#dc2626"}}>
                         {paid?"✓ PAID":"UNPAID"}
@@ -1236,7 +1345,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
 }
 
 // -- DRIVER WALK-IN TAB --------------------------------------------------------
-function DriverWalkInTab({driverData, setDriverData, products, supabase, initCust}){
+function DriverWalkInTab({driverData, setDriverData, products, supabase, initCust, setDriverViewInv=()=>{}}){
   const uid2 = ()=>Math.random().toString(36).slice(2,9).toUpperCase();
   const fmt2 = n=>`$${Number(n||0).toFixed(2)}`;
   const stateTaxes = driverData.stateTaxes||[];
@@ -1620,7 +1729,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
               <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
                 <div>
                   <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:3}}>
-                    <span style={{fontFamily:"'Inter',sans-serif",fontWeight:800,fontSize:14,color:"#0a1628"}}>{s.id}</span>
+                    <span style={{fontFamily:"'Inter',sans-serif",fontWeight:800,fontSize:14,color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>setDriverViewInv(s)}>{s.id}</span>
                     <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,background:isPaid?"#dcfce7":"#fef9c3",color:isPaid?"#166534":"#92400e"}}>{isPaid?"PAID":"UNPAID"}</span>
                     {s.amended_at&&<span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,background:"#ede9fe",color:"#5b21b6"}}>AMENDED</span>}
                   </div>
@@ -3349,6 +3458,7 @@ export default function OrderPortal() {
                 products={products.filter(p=>p.shelf>0)}
                 supabase={supabase}
                 initCust={walkInCust?.id||null}
+                setDriverViewInv={setDriverViewInv}
               />
             </>
           )}
@@ -3514,7 +3624,7 @@ export default function OrderPortal() {
       </div>}
 
       {/* ══ MY ACCOUNT ══ */}
-      {step==="myaccount"&&selCust&&<CustomerAccountView selCust={selCust} supabase={supabase} co={co} setStep={setStep}/>}
+      {step==="myaccount"&&selCust&&<CustomerAccountView selCust={selCust} supabase={supabase} co={co} setStep={setStep} products={products}/>}
 
       {/* ══ ORDER FORM ══ */}
       {step==="order"&&<div className="fu">

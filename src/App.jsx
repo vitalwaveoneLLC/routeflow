@@ -5111,7 +5111,7 @@ export default function App(){
                   const isPaid=pmt?.status==="paid";
                   return(
                   <tr key={s.id} style={{background:isReturnedCheck?"#fff5f5":""}}>
-                    <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td>
+                    <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
                     <td style={{color:"#6b7280",fontSize:11}}>{s.date}</td>
                     <td style={{color:"#212121",fontWeight:isReturnedCheck?700:400}}>
                       {getC(s.cust_id)?.name}
@@ -5318,7 +5318,7 @@ export default function App(){
                         const paid=pmtFor(s.id)?.status==="paid";
                         return(
                           <tr key={s.id}>
-                            <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td>
+                            <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
                             <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
                             <td style={{fontWeight:600,color:"#212121"}}>{cust?.name}</td>
                             <td><span className="tag" style={{background:"#ede9fe",color:"#7c3aed"}}>{st}</span></td>
@@ -5492,7 +5492,7 @@ export default function App(){
                   const cust=getC(s.cust_id);
                   return(
                     <tr key={s.id}>
-                      <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td>
+                      <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
                       <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
                       <td style={{fontWeight:600}}>{cust?.name}</td>
                       <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td>
