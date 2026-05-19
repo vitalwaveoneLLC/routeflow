@@ -996,7 +996,7 @@ function CompetitorPricesTab({compPrices,setCompPrices,products,supabase,showToa
         ))}
       </div>
       {alertCount>0&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#dc2626"}}>
-        <strong>⚠️ {alertCount} product{alertCount!==1?"s":""} priced above competitor by >5%</strong> — consider reviewing these prices.
+        <strong>⚠️ {alertCount} product{alertCount!==1?"s":""} priced above competitor by {'>'}5%</strong> — consider reviewing these prices.
       </div>}
       {/* Log Form */}
       <div className="card" style={{padding:20,marginBottom:18,borderTop:"3px solid #7c3aed"}}>
