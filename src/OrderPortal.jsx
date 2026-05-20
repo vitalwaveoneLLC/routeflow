@@ -1022,7 +1022,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         created_at:new Date().toISOString()
       };
       await supabase.from("sales").insert(ns);
-      await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
+      await supabase.from("payments").insert({company_id:co?.id||driverData?.co?.id,sale_id:ns.id,status:"unpaid"});
       setDriverData(prev=>({...prev,sales:[ns,...prev.sales]}));
       setCreatedSale(ns);
       setShowPayment(true);
@@ -1666,7 +1666,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const {data:seq}=await supabase.rpc("next_invoice_number");
       const invId="INV-"+String(seq||1).padStart(4,"0");
       const profit=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(wiCust,i.pid)-(p?.cost||0))*i.qty;},0);
-      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:nowStr(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:0,created_at:new Date().toISOString()};
+      const ns={company_id:co?.id||driverData?.co?.id,id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:nowStr(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:0,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await Promise.all(saleItems.map(i=>{const p=products.find(x=>x.id===i.pid);return p?supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id):Promise.resolve();}));
       // Auto-send WhatsApp invoice if enabled
@@ -1693,12 +1693,12 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const wiIsUnpaid = wiPay==="unpaid";
       if(wiIsUnpaid){
         // Save as unpaid — collect later
-        await supabase.from("payments").insert({id:"PMT-"+uid2(),sale_id:invId,status:"unpaid",method:null,amount:null,note:"Walk-in — collect later"});
+        await supabase.from("payments").insert({company_id:co?.id||driverData?.co?.id,id:"PMT-"+uid2(),sale_id:invId,status:"unpaid",method:null,amount:null,note:"Walk-in — collect later"});
         setDriverData(prev=>({...prev,sales:[{...ns,_paid:false},...prev.sales]}));
         setWiSales(prev=>[{...ns,_paid:false},...prev]);
       }else{
         // Save as paid immediately
-        await supabase.from("payments").insert({id:"PMT-"+uid2(),sale_id:invId,status:"paid",method:wiPay,amount:totalDue,check_number:wiCheck||"",zelle_ref:wiZelle||"",note:"Walk-in sale",receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
+        await supabase.from("payments").insert({company_id:co?.id||driverData?.co?.id,id:"PMT-"+uid2(),sale_id:invId,status:"paid",method:wiPay,amount:totalDue,check_number:wiCheck||"",zelle_ref:wiZelle||"",note:"Walk-in sale",receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
         setDriverData(prev=>({...prev,sales:[{...ns,_paid:true},...prev.sales]}));
         setWiSales(prev=>[{...ns,_paid:true},...prev]);
       }
@@ -2245,7 +2245,7 @@ export default function OrderPortal() {
       if(existing){
         await supabase.from("payments").update(payData).eq("sale_id",sale.id);
       } else {
-        await supabase.from("payments").insert({sale_id:sale.id,...payData});
+        await supabase.from("payments").insert({company_id:co?.id||driverData?.co?.id,sale_id:sale.id,...payData});
       }
       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
       setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
@@ -3291,7 +3291,7 @@ export default function OrderPortal() {
                           </div>
                           <button onClick={()=>{
                             if(!window.confirm("Request inventory reset?\n\nThis will ask your admin to:\n- Return "+totalRemaining+" units to warehouse\n- Close your current load\n\nYou cannot undo this request.")) return;
-                            supabase.from("truck_resets").insert({
+                            supabase.from("truck_resets").insert({company_id:co?.id||driverData?.co?.id,
                               id:"RST-"+Math.random().toString(36).slice(2,8).toUpperCase(),
                               truck_id:driverData.truck?.id,
                               driver_name:driverData.truck?.driver,
@@ -3345,7 +3345,7 @@ export default function OrderPortal() {
                       if(!newCustForm.name.trim()) return;
                       setNewCustSaving(true);
                       try{
-                        const rec={id:"C"+uid(),name:newCustForm.name.trim(),address:newCustForm.address.trim(),phone:newCustForm.phone.trim(),email:newCustForm.email.trim(),state:newCustForm.state.trim(),notes:"",truck_id:driverData.truck?.id};
+                        const rec={company_id:co?.id||driverData?.co?.id,id:"C"+uid(),name:newCustForm.name.trim(),address:newCustForm.address.trim(),phone:newCustForm.phone.trim(),email:newCustForm.email.trim(),state:newCustForm.state.trim(),notes:"",truck_id:driverData.truck?.id};
                         const{error}=await supabase.from("customers").insert(rec);
                         if(error)throw error;
                         setDriverData(prev=>({...prev,customers:[rec,...prev.customers]}));

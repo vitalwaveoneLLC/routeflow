@@ -879,7 +879,7 @@ function ReferralsTab({referrals,setReferrals,customers,creditMemos,setCreditMem
     if(!form.referrer_id||!form.referred_name.trim())return showToast("Referrer and referred business name required","error");
     setSaving(true);
     try{
-      const rec={id:"REF-"+uid(),referrer_id:form.referrer_id,referred_name:form.referred_name.trim(),referred_phone:form.referred_phone.trim(),referred_email:form.referred_email.trim(),credit_amount:parseFloat(form.credit_amount)||25,notes:form.notes.trim(),status:"pending",created_at:new Date().toISOString()};
+      const rec={company_id:co?.id,id:"REF-"+uid(),referrer_id:form.referrer_id,referred_name:form.referred_name.trim(),referred_phone:form.referred_phone.trim(),referred_email:form.referred_email.trim(),credit_amount:parseFloat(form.credit_amount)||25,notes:form.notes.trim(),status:"pending",created_at:new Date().toISOString()};
       const{error}=await supabase.from("referrals").insert(rec);
       if(error)throw error;
       setReferrals(prev=>[rec,...prev]);
@@ -892,7 +892,7 @@ function ReferralsTab({referrals,setReferrals,customers,creditMemos,setCreditMem
     showConfirm(`Issue $${r.credit_amount} credit to ${customers.find(c=>c.id===r.referrer_id)?.name}?`,async()=>{
       try{
         await supabase.from("referrals").update({status:"credited",credited_at:new Date().toISOString()}).eq("id",r.id);
-        const cred={id:"CM-"+uid(),cust_id:r.referrer_id,invoice_id:null,reason:"Referral Bonus",amount:r.credit_amount,notes:`Referral bonus for bringing in ${r.referred_name}`,status:"open",created_at:new Date().toISOString()};
+        const cred={company_id:co?.id,id:"CM-"+uid(),cust_id:r.referrer_id,invoice_id:null,reason:"Referral Bonus",amount:r.credit_amount,notes:`Referral bonus for bringing in ${r.referred_name}`,status:"open",created_at:new Date().toISOString()};
         await supabase.from("credit_memos").insert(cred);
         setReferrals(prev=>prev.map(x=>x.id===r.id?{...x,status:"credited"}:x));
         setCreditMemos(prev=>[cred,...prev]);
@@ -959,14 +959,14 @@ function CompetitorPricesTab({compPrices,setCompPrices,products,supabase,showToa
     setSaving(true);
     try{
       // Upsert: if same product+competitor exists, update
-      const existing=compPrices.find(p=>p.product_id===form.product_id&&p.competitor_name.toLowerCase()===form.competitor_name.toLowerCase().trim());
+      const existing=compPrices.find(p=>p.product_id===form.product_id&&p.competitor_name.toLowerCase()===form.competitor_name.toLowerCase().trim());company_id:co?.id,
       const rec={product_id:form.product_id,competitor_name:form.competitor_name.trim(),their_price:parseFloat(form.their_price),region:form.region.trim()||"General",notes:form.notes.trim(),updated_at:new Date().toISOString()};
       if(existing){
         await supabase.from("competitor_prices").update(rec).eq("id",existing.id);
         setCompPrices(prev=>prev.map(p=>p.id===existing.id?{...p,...rec}:p));
         showToast("Price updated");
       }else{
-        const full={...rec,id:"CP-"+uid(),created_at:new Date().toISOString()};
+        const full={company_id:co?.id,...rec,id:"CP-"+uid(),created_at:new Date().toISOString()};
         const{error}=await supabase.from("competitor_prices").insert(full);
         if(error)throw error;
         setCompPrices(prev=>[full,...prev]);
@@ -1054,7 +1054,7 @@ function CreditMemosTab({creditMemos,setCreditMemos,customers,sales,calcSaleGran
   const openBalance=cid=>creditMemos.filter(m=>m.cust_id===cid&&m.status==="open").reduce((a,m)=>a+parseFloat(m.amount||0),0);
   const saveMemo=async()=>{
     if(!cmForm.cust_id||!cmForm.amount||parseFloat(cmForm.amount)<=0)return showToast("Customer and amount required","error");
-    setCmSaving(true);
+  company_id:co?.id,  setCmSaving(true);
     const rec={id:"CM-"+uid4(),cust_id:cmForm.cust_id,invoice_id:cmForm.invoice_id||null,reason:cmForm.reason||"Return",amount:parseFloat(cmForm.amount),notes:cmForm.notes||"",status:"open",created_at:new Date().toISOString()};
     const{error}=await supabase.from("credit_memos").insert(rec);
     if(error){showToast(error.message,"error");setCmSaving(false);return;}
@@ -1444,7 +1444,7 @@ function PromotionsTab({promotions,setPromotions,products,customers,supabase,sho
   const[showForm,setShowForm]=useState(false);
 
   const savePromo=async()=>{
-    if(!form.code.trim()||!form.value||parseFloat(form.value)<=0)return showToast("Code and discount value required","error");
+    if(!form.code.trim()||!form.value||parseFloat(form.value)<=0)return showToast("Code and discount value recompany_id:co?.id,quired","error");
     setSaving(true);
     const rec={id:"PROMO-"+uid6(),code:form.code.trim().toUpperCase(),type:form.type,value:parseFloat(form.value),min_order:parseFloat(form.min_order)||0,product_id:form.product_id||null,applies_to:form.applies_to,expiry:form.expiry||null,active:true,description:form.description,uses:0,created_at:new Date().toISOString()};
     const{error}=await supabase.from("promotions").insert(rec);
@@ -1606,7 +1606,7 @@ function RecurringOrdersTab({recurringOrders,setRecurringOrders,customers,produc
     try{
       const cust=customers.find(c=>c.id===r.cust_id);
       const truck=trucks.find(t=>t.id===r.truck_id);
-      const total=r.items.reduce((a,it)=>{const p=products.find(x=>x.id===it.pid);return a+(p?.price||0)*it.qty;},0);
+      const total=r.items.reduce((a,it)=>{const p=products.findcompany_id:co?.id,(x=>x.id===it.pid);return a+(p?.price||0)*it.qty;},0);
       const rec={
         id:"ORD-"+uid5(),
         cust_id:r.cust_id,
@@ -1640,7 +1640,7 @@ function RecurringOrdersTab({recurringOrders,setRecurringOrders,customers,produc
 
   const saveRec=async()=>{
     if(!form.cust_id||!form.items.length)return showToast("Customer and at least one item required","error");
-    setSaving(true);
+ company_id:co?.id,   setSaving(true);
     const cust=customers.find(c=>c.id===form.cust_id);
     const rec={id:"REC-"+uid5(),cust_id:form.cust_id,cust_name:cust?.name||"",truck_id:form.truck_id||null,frequency:form.frequency,day:form.day,items:form.items,notes:form.notes,active:true,last_run:null,created_at:new Date().toISOString()};
     const{error}=await supabase.from("recurring_orders").insert(rec);
@@ -1983,7 +1983,7 @@ function PurchaseOrders({products,setProducts,supabase,showToast,showConfirm}){
       if(editSupId){
         const{error}=await supabase.from("suppliers").update(supForm).eq("id",editSupId);
         if(error)throw error;
-        setSuppliers(prev=>prev.map(s=>s.id===editSupId?{...s,...supForm}:s));
+        setSuppliers(prev=>prev.map(s=>s.id===editSupId?{...scompany_id:co?.id,,...supForm}:s));
         showToast("Supplier updated");setEditSupId(null);
       }else{
         const rec={id:"SUP-"+uid3(),...supForm,created_at:new Date().toISOString()};
@@ -2019,7 +2019,7 @@ function PurchaseOrders({products,setProducts,supabase,showToast,showConfirm}){
   const savePo=async()=>{
     if(!poForm.supplier_id)return showToast("Select a supplier","error");
     const items=poForm.items.filter(it=>it.pid&&parseInt(it.qty)>0&&parseFloat(it.unit_cost)>0);
-    if(!items.length)return showToast("Add at least one item with qty and cost","error");
+    if(!items.length)return showToast("Add at least one item with qty and ccompany_id:co?.id,ost","error");
     setSavingPo(true);
     try{
       const sup=suppliers.find(s=>s.id===poForm.supplier_id);
@@ -2047,7 +2047,7 @@ function PurchaseOrders({products,setProducts,supabase,showToast,showConfirm}){
   // Approve PO
   const logAuditLocal=async(action,entity,detail)=>{
     try{
-      await supabase.from("audit_log").insert({id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:"admin",action,entity,detail,created_at:new Date().toISOString()});
+      await supabase.from("audit_log").insert({company_id:co?.id,id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:"admin",action,entity,detail,created_at:new Date().toISOString()});
     }catch{}
   };
 
@@ -2376,7 +2376,7 @@ function ExpensesManager({expenses,setExpenses,trucks,supabase,showToast,showCon
   const catMap=Object.fromEntries(EXPENSE_CATS.map(c=>[c.k,c]));
 
   const submit=async()=>{
-    if(!expForm.amount||parseFloat(expForm.amount)<=0)return showToast("Amount required","error");
+    if(!expForm.amount||parseFloat(expForm.amount)<=0)return company_id:co?.id,showToast("Amount required","error");
     setSaving(true);
     try{
       const truck=trucks.find(t=>t.id===expForm.truck_id);
@@ -3147,7 +3147,7 @@ function StateTaxManager({stateTaxes,setStateTaxes,supabase,showToast}){
   const [savingEdit,setSavingEdit]=useState(false);
 
   const activeIds=new Set(stateTaxes.map(s=>s.id));
-  const ref=(id)=>ALL_STATES_TAX.find(s=>s.id===id)||{otp:0,cig:0,due:"20th",form:"OTP Return"};
+  const ref=(id)=>ALL_STATcompany_id:co?.id,ES_TAX.find(s=>s.id===id)||{otp:0,cig:0,due:"20th",form:"OTP Return"};
 
   const activate=async(stData,exempt=false)=>{
     const r=ref(stData.id);
@@ -3856,7 +3856,7 @@ export default function App(){
       cust?.name||"Customer",
       sale.id,
       gt.toFixed(2),
-      `${portalUrl}/?invoice=${sale.id}`,
+      company_id:co?.id,`${portalUrl}/?invoice=${sale.id}`,
     ].join("\n");
   };
 
@@ -3922,7 +3922,7 @@ export default function App(){
       if(ex){
         await supabase.from("payments").update({returned_check_url:rcUrl,status:"returned_check"}).eq("sale_id",saleId);
       } else {
-        await supabase.from("payments").insert({sale_id:saleId,status:"returned_check",returned_check_url:rcUrl});
+        await supabase.from("payments").insert({company_id:co?.id,sale_id:saleId,status:"returned_check",returned_check_url:rcUrl});
       }
       setPayments(prev=>prev.map(p=>p.sale_id===saleId?{...p,status:"returned_check",returned_check_url:rcUrl}:p));
 
@@ -4232,7 +4232,7 @@ export default function App(){
     setCsvImporting(false);
   };
 
-  // -- PRODUCT ACTIONS --------------------------------------------------------
+  // -- PRODUCT ACTIONS ---------------------------------company_id:co?.id,-----------------------
   const addProduct=async()=>{
     if(!np.name||!np.sku||!np.cost||!np.price)return showToast("Name, SKU, cost & price required","error");
     setSaving(true);
@@ -4265,7 +4265,7 @@ export default function App(){
     setSaving(false);
   };
 
-  // -- TRUCK ACTIONS ----------------------------------------------------------
+  // -- TRUCK ACcompany_id:co?.id,TIONS ----------------------------------------------------------
   const addTruck=async()=>{
     if(!nt.driver||!nt.plate)return showToast("Driver name & plate required","error");
     setSaving(true);
@@ -4283,7 +4283,7 @@ export default function App(){
     const{error}=await supabase.from("trucks").update({driver:fields.driver,plate:fields.plate,route:fields.route}).eq("id",id);
     if(error)showToast(error.message,"error");
     else{setTrucks(prev=>prev.map(t=>t.id===id?{...t,...fields}:t));showToast("Driver updated");setEditingTid(null);logAudit("EDIT","Truck",`Edited driver ${fields.driver}`);}
-    setSaving(false);
+    setSavcompany_id:co?.id,ing(false);
   };
 
   // -- CUSTOMER ACTIONS -------------------------------------------------------
@@ -4489,9 +4489,9 @@ export default function App(){
       // Get next invoice number from Supabase sequence
       const {data:seqData} = await supabase.rpc("next_invoice_number");
       const invId = "INV-" + String(seqData||1).padStart(4,"0");
-      const ns={id:invId,load_id:selLoad.id,truck_id:selTruck,cust_id:selCust,date:nowStr(),items,total,profit};
+      const ns={company_id:co?.id,id:invId,load_id:selLoad.id,truck_id:selTruck,cust_id:selCust,date:nowStr(),items,total,profit};
       await supabase.from("sales").insert(ns);
-      const pmtRec={sale_id:ns.id,status:isPaid?"paid":"unpaid",method:isPaid?salePayMethod:null,amount:isPaid?calcSaleGrandTotal(ns):null,paid_at:isPaid?new Date().toISOString():null};
+      const pmtRec={company_id:co?.id,sale_id:ns.id,status:isPaid?"paid":"unpaid",method:isPaid?salePayMethod:null,amount:isPaid?calcSaleGrandTotal(ns):null,paid_at:isPaid?new Date().toISOString():null};
       await supabase.from("payments").insert(pmtRec);
       setSales(prev=>[ns,...prev]);setPayments(prev=>[...prev,{...pmtRec}]);
       showToast(isPaid?"Sale recorded & marked paid":"Invoice created — collect later");
@@ -4520,7 +4520,7 @@ export default function App(){
   const openReturn=tid=>{
     const load=activeLoad(tid);if(!load)return showToast("No active load","error");
     const inv=truckInv(tid).filter(i=>i.remaining>0);if(!inv.length)return showToast("Nothing to return","error");
-    setSelTruck(tid);setSelLoad(load);setFormItems(inv.map(i=>({pid:i.pid,qty:0,max:i.remaining})));setModal("return");
+    setSelTruck(tid);secompany_id:co?.id,tSelLoad(load);setFormItems(inv.map(i=>({pid:i.pid,qty:0,max:i.remaining})));setModal("return");
   };
   const confirmReturn=async()=>{
     const items=formItems.filter(i=>i.qty>0);if(!items.length)return;
@@ -4551,7 +4551,7 @@ export default function App(){
     const paidAmt=amount||gt;
     const payRec={status:"paid",method,amount:paidAmt,check_number:checkNum,note,collected_by:collectedBy,paid_at:new Date().toISOString(),receipt_url:receiptUrl||""};
     if(ex)await supabase.from("payments").update(payRec).eq("sale_id",sid);
-    else await supabase.from("payments").insert({sale_id:sid,...payRec});
+    else await supabase.from("payments").insert({company_id:co?.id,sale_id:sid,...payRec});
     setPayments(prev=>prev.map(p=>p.sale_id===sid?{...p,status:"paid",method,amount:paidAmt,receipt_url:receiptUrl||""}:p));
     showToast("Payment recorded ✓");
     logAudit("PAY","Invoice",`Marked ${sid} paid via ${method} — ${fmt(paidAmt)}`);
@@ -4676,7 +4676,7 @@ export default function App(){
       let receiptUrl = "";
       if(pmForm.receipt_file){
         const ext = pmForm.receipt_file.name.split(".").pop();
-        const path = `receipts/PMT-${uid()}.${ext}`;
+        const path = `receipts/PMT-${uid(company_id:co?.id,)}.${ext}`;
         const {data:upData,error:upErr} = await supabase.storage.from("receipts").upload(path, pmForm.receipt_file, {upsert:true});
         if(!upErr) receiptUrl = supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
       }
@@ -4734,7 +4734,7 @@ export default function App(){
           if(!truckId) continue;
           let loadId=activeLoad(truckId)?.id;
           if(!loadId){
-            const nl={id:"LD-"+uid(),truck_id:truckId,date:nowStr(),items:order.items,status:"out"};
+            const nl={company_id:co?.id,id:"LD-"+uid(),truck_id:truckId,date:nowStr(),items:order.items,status:"out"};
             await supabase.from("loads").insert(nl);
             setLoads(prev=>[nl,...prev]);
             loadId=nl.id;
@@ -4744,7 +4744,7 @@ export default function App(){
           const ns={id:"INV-"+order.id.replace("ORD-",""),load_id:loadId,truck_id:truckId,cust_id:order.cust_id,date:nowStr(),items:order.items,total:order.subtotal,profit,previous_balance:order.previous_balance||0,previous_invoice_ids:order.previous_invoice_ids||"",check_penalty_applied:penalty};
           const pmtStatus=order.payment_method==="card"?"paid":"unpaid";
           await supabase.from("sales").insert(ns);
-          await supabase.from("payments").insert({sale_id:ns.id,status:pmtStatus,method:order.payment_method||"cash"});
+          await supabase.from("payments").insert({company_id:co?.id,sale_id:ns.id,status:pmtStatus,method:order.payment_method||"cash"});
           setSales(prev=>[ns,...prev]);
           setPayments(prev=>[...prev,{sale_id:ns.id,status:pmtStatus}]);
           // Auto-SMS on order approval
@@ -6463,7 +6463,7 @@ export default function App(){
                               ?<span style={{fontSize:9,fontWeight:700,padding:"4px 8px",borderRadius:6,background:"#fef9c3",color:"#854d0e",border:"1px solid #fde68a"}}>Reset Pending</span>
                               :<button style={{fontSize:10,padding:"4px 10px",border:"1.5px solid #f97316",background:"#fff7ed",color:"#c2410c",borderRadius:6,cursor:"pointer",fontWeight:700,fontFamily:"'Inter',sans-serif"}}
                                 onClick={()=>showConfirm("Reset ALL inventory on "+t.driver+"'s truck?\n\n- Return "+inv.reduce((a,i)=>a+i.remaining,0)+" units to warehouse shelf\n- Close the active load\n- Requires admin approval",()=>{
-                                  supabase.from("truck_resets").insert({
+                                  supabase.from("truck_resets").insert({company_id:co?.id,
                                     id:"RST-"+uid(),
                                     truck_id:t.id,
                                     driver_name:t.driver,
@@ -7947,7 +7947,7 @@ export default function App(){
       {stripeModal&&<StripePaymentModal
         sale={stripeModal.sale}
         customer={stripeModal.customer}
-        driver={stripeModal.driver}
+        drivercompany_id:co?.id,={stripeModal.driver}
         taxRate={taxRate} stateTaxes={stateTaxes}
         saleTax={calcSaleTax(stripeModal.sale)}
         onClose={()=>setStripeModal(null)}
