@@ -830,8 +830,8 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
         body:JSON.stringify({
           to:e164,
-          phone_number_id:co.meta_phone_id,
-          access_token:co.meta_token,
+          phone_number_id:co?.meta_phone_id,
+          access_token:co?.meta_token,
           template_name:co.meta_template||"invoice_notification",
           params:Array.isArray(params)?params:params.split("\n").filter(Boolean),
         }),
@@ -1530,6 +1530,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
 function DriverWalkInTab({driverData, setDriverData, products, supabase, initCust, setDriverViewInv=()=>{}}){
   const uid2 = ()=>Math.random().toString(36).slice(2,9).toUpperCase();
   const fmt2 = n=>`$${Number(n||0).toFixed(2)}`;
+  const co         = driverData.co||null;                     // company settings — in scope everywhere
   const stateTaxes = driverData.stateTaxes||[];
   const customers  = driverData.customers||[];
 
@@ -1603,10 +1604,10 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
   };
 
   const getTaxRate = (custObj)=>{
-    if(!custObj) return 0;
+    if(!custObj||!co?.tax_enabled) return 0;
     const cs=(custObj.state||"").trim();
     const st=stateTaxes.find(s=>s.id?.toUpperCase()===cs.toUpperCase()||s.name?.toLowerCase()===cs.toLowerCase());
-    return st?.exempt?0:parseFloat(st?.rate||0);
+    return st?.exempt?0:parseFloat(st?.rate||co?.tax_rate||0);
   };
 
   const taxRate2 = getTaxRate(wiCustObj);
@@ -1627,7 +1628,6 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     ]);
     const paidIds=new Set((pm||[]).filter(p=>p.status==="paid").map(p=>p.sale_id));
     const allUnpaid=(cs||[]).filter(s=>!paidIds.has(s.id));
-    const co=driverData.co;
     const bal=parseFloat(allUnpaid.reduce((a,s)=>{
       const custSt=(s.state||"").trim();
       const st=stateTaxes.find(x=>x.id?.toUpperCase()===custSt.toUpperCase()||x.name?.toLowerCase()===custSt.toLowerCase());
@@ -1672,7 +1672,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
           fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`,{
             method:"POST",
             headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
-            body:JSON.stringify({to:wiE164,phone_number_id:co.meta_phone_id,access_token:co.meta_token,template_name:co.meta_template||"invoice_notification",params:[wiCustObj.name,invId,wiGt,`${wiPortal}/?invoice=${invId}`]}),
+            body:JSON.stringify({to:wiE164,phone_number_id:co?.meta_phone_id,access_token:co?.meta_token,template_name:co.meta_template||"invoice_notification",params:[wiCustObj.name,invId,wiGt,`${wiPortal}/?invoice=${invId}`]}),
           }).catch(()=>{});// silent - never block the sale
         });
       }
@@ -2481,8 +2481,8 @@ export default function OrderPortal() {
             headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
             body:JSON.stringify({
               to:cpE164,
-              phone_number_id:co.meta_phone_id,
-              access_token:co.meta_token,
+              phone_number_id:co?.meta_phone_id,
+              access_token:co?.meta_token,
               template_name:co.meta_template||"invoice_notification",
               params:[selCust.name,id,grandTotal.toFixed(2),`${cpPortal}/?invoice=${id}`],
             }),

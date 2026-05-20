@@ -3834,8 +3834,8 @@ export default function App(){
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
         body:JSON.stringify({
           to:e164,
-          phone_number_id:co.meta_phone_id,
-          access_token:co.meta_token,
+          phone_number_id:co?.meta_phone_id,
+          access_token:co?.meta_token,
           template_name:co.meta_template||"invoice_notification",
           params:body.split("\n").filter(Boolean),
         }),
