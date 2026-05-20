@@ -755,7 +755,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
 
     setSaving(true);
     try{
-      const nl = {id:"LD-"+uid(),truck_id:driverData.truck?.id,date:new Date().toLocaleDateString(),items:loadItems,status:"out",created_at:new Date().toISOString()};
+      const nl = {id:"LD-"+uid(),truck_id:driverData.truck?.id,date:nowStr(),items:loadItems,status:"out",created_at:new Date().toISOString()};
       const {error} = await supabase.from("loads").insert(nl);
       if(error) throw error;
       await Promise.all(loadItems.map(item=>{
@@ -1005,7 +1005,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         truck_id:driverData.truck?.id,
         cust_id:selCust,
         state:freshCustState||selCustObj?.state||driverData.truck?.state||"",
-        date:new Date().toLocaleDateString(),
+        date:nowStr(),
         items:saleItems,
         total:sub,
         profit,
@@ -1659,7 +1659,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const {data:seq}=await supabase.rpc("next_invoice_number");
       const invId="INV-"+String(seq||1).padStart(4,"0");
       const profit=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(wiCust,i.pid)-(p?.cost||0))*i.qty;},0);
-      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:0,created_at:new Date().toISOString()};
+      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:nowStr(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:0,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await Promise.all(saleItems.map(i=>{const p=products.find(x=>x.id===i.pid);return p?supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id):Promise.resolve();}));
       // Auto-send WhatsApp invoice if enabled
@@ -1683,11 +1683,20 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
         const {data:upD,error:upE}=await supabase.storage.from("receipts").upload(path,wiReceiptFile,{upsert:true});
         if(!upE) wiRecUrl=supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
       }
-      await supabase.from("payments").insert({id:"PMT-"+uid2(),sale_id:invId,status:"paid",method:wiPay,amount:totalDue,check_number:wiCheck||"",zelle_ref:wiZelle||"",note:"Walk-in sale",receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
-      setDriverData(prev=>({...prev, sales:[{...ns,_paid:true},...prev.sales]}));
-      setWiSales(prev=>[{...ns,_paid:true},...prev]);
+      const wiIsUnpaid = wiPay==="unpaid";
+      if(wiIsUnpaid){
+        // Save as unpaid — collect later
+        await supabase.from("payments").insert({id:"PMT-"+uid2(),sale_id:invId,status:"unpaid",method:null,amount:null,note:"Walk-in — collect later"});
+        setDriverData(prev=>({...prev,sales:[{...ns,_paid:false},...prev.sales]}));
+        setWiSales(prev=>[{...ns,_paid:false},...prev]);
+      }else{
+        // Save as paid immediately
+        await supabase.from("payments").insert({id:"PMT-"+uid2(),sale_id:invId,status:"paid",method:wiPay,amount:totalDue,check_number:wiCheck||"",zelle_ref:wiZelle||"",note:"Walk-in sale",receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
+        setDriverData(prev=>({...prev,sales:[{...ns,_paid:true},...prev.sales]}));
+        setWiSales(prev=>[{...ns,_paid:true},...prev]);
+      }
       setWiItems({});setWiPrevBal(0);setWiPrevInvs([]);setWiCheck("");setWiZelle("");setWiReceiptFile(null);setWiReceiptUrl("");
-      setWiMsg({t:"success",m:`[OK] Invoice ${invId} created! View it in History.`});
+      setWiMsg({t:"success",m:wiIsUnpaid?`📤 Invoice ${invId} sent via WhatsApp — collect payment later`:`✅ Invoice ${invId} created & payment recorded`});
     }catch(e){setWiMsg({t:"error",m:e.message});}
     setWiSaving(false);
   };
@@ -1867,7 +1876,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       <div className="card" style={{padding:"14px 16px",marginBottom:12}}>
         <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:8}}>PAYMENT METHOD</label>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-          {[["cash","💵 Cash"],["check","🧾 Check"],["zelle","⚡ Zelle"],["money_order","📮 M.O."],["card","💳 Card"]].map(([id,label])=>(
+          {[["cash","💵 Cash"],["check","🧾 Check"],["zelle","⚡ Zelle"],["money_order","📮 M.O."],["card","💳 Card"],["unpaid","📤 Collect Later"]].map(([id,label])=>(
             <button key={id} onClick={()=>setWiPay(id)}
               style={{padding:"9px 8px",borderRadius:9,border:`1.5px solid ${wiPay===id?"#0a1628":"#e5e7eb"}`,background:wiPay===id?"#0a1628":"#fff",color:wiPay===id?"#fff":"#6b7280",fontSize:12,fontWeight:wiPay===id?700:400,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
               {label}
@@ -1902,7 +1911,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       {wiMsg&&<div style={{background:wiMsg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${wiMsg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:13,color:wiMsg.t==="success"?"#065f46":"#dc2626",marginBottom:10}}>{wiMsg.m}</div>}
       <button onClick={createWiSale} disabled={wiSaving||!wiCust||sub===0} className="btn-primary"
         style={{width:"100%",justifyContent:"center",padding:"13px",marginBottom:24,background:(!wiCust||sub===0)?"#9ca3af":"#0a1628"}}>
-        {wiSaving?<><span className="sp">⟳</span> Creating…</>:"🧾 Create Invoice & Record Payment"}
+        {wiSaving?<><span className="sp">⟳</span> Creating…</>:wiPay==="unpaid"?"📤 Create Invoice & Send":"🧾 Create Invoice & Record Payment"}
       </button>
     </div>
   );

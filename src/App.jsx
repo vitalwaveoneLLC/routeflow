@@ -1613,7 +1613,7 @@ function RecurringOrdersTab({recurringOrders,setRecurringOrders,customers,produc
         customer_name:cust?.name||r.cust_name,
         customer_address:cust?.address||"",
         customer_phone:cust?.phone||"",
-        date:new Date().toLocaleDateString(),
+        date:nowStr(),
         items:r.items,
         subtotal:total,
         tax:0,
@@ -3429,6 +3429,7 @@ export default function App(){
   const[selCust,setSelCust]=useState("");
   const[selLoad,setSelLoad]=useState(null);
   const[formItems,setFormItems]=useState([]);
+  const[salePayMethod,setSalePayMethod]=useState("unpaid"); // payment method for admin sell
   const[np,setNp]=useState({name:"",sku:"",cat:"Beverage",unit:"Case",case_qty:"24",cost:"",price:"",shelf:"",reorder_point:"5"});
   const[nt,setNt]=useState({driver:"",plate:"",route:""});
   const[nc,setNc]=useState({name:"",address:"",city:"",zip:"",state:"",phone:"",email:"",notes:"",truck_id:"",custom_pricing:false,custom_prices:{},credit_limit:""});
@@ -4481,6 +4482,7 @@ export default function App(){
   const confirmSale=async()=>{
     const items=formItems.filter(i=>i.qty>0);if(!items.length)return;
     setSaving(true);
+    const isPaid=salePayMethod!=="unpaid";
     try{
       const total=items.reduce((a,i)=>a+(getEffectivePrice(selCust,i.pid)*i.qty),0);
       const profit=items.reduce((a,i)=>{const p=getP(i.pid);return a+(getEffectivePrice(selCust,i.pid)-p.cost)*i.qty;},0);
@@ -4489,9 +4491,12 @@ export default function App(){
       const invId = "INV-" + String(seqData||1).padStart(4,"0");
       const ns={id:invId,load_id:selLoad.id,truck_id:selTruck,cust_id:selCust,date:nowStr(),items,total,profit};
       await supabase.from("sales").insert(ns);
-      await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
-      setSales(prev=>[ns,...prev]);setPayments(prev=>[...prev,{sale_id:ns.id,status:"unpaid"}]);
-      showToast("Sale recorded");setModal(null);setTimeout(()=>{setViewSale(ns);setModal("invoice");},80);
+      const pmtRec={sale_id:ns.id,status:isPaid?"paid":"unpaid",method:isPaid?salePayMethod:null,amount:isPaid?calcSaleGrandTotal(ns):null,paid_at:isPaid?new Date().toISOString():null};
+      await supabase.from("payments").insert(pmtRec);
+      setSales(prev=>[ns,...prev]);setPayments(prev=>[...prev,{...pmtRec}]);
+      showToast(isPaid?"Sale recorded & marked paid":"Invoice created — collect later");
+      setModal(null);setSalePayMethod("unpaid");
+      setTimeout(()=>{setViewSale(ns);setModal("invoice");},80);
       // Auto-email invoice if enabled
       if(co?.email_invoices&&co?.gmail_user&&co?.gmail_app_password){
         const cust=getC(ns.cust_id);
@@ -7708,9 +7713,23 @@ export default function App(){
           </div>
           <Divider/>
           {(()=>{const sub=formItems.reduce((a,fi)=>{return a+getEffectivePrice(selCust,fi.pid)*fi.qty;},0);const tax=calcSaleTax({items:formItems.map(fi=>({pid:fi.pid,qty:fi.qty})),cust_id:selCust,state:customers.find(c=>c.id===selCust)?.state||""}),gt=sub+tax,prof=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+(getEffectivePrice(selCust,fi.pid)-(p?.cost||0))*fi.qty;},0);return<div style={{background:"#f9fafb",borderRadius:7,padding:"11px 13px",marginBottom:12}}>{[{l:"Subtotal",v:fmt(sub),c:"#6b7280"},{l:"Tax (Tobacco only)",v:fmt(tax),c:"#7c3aed"},{l:"Grand Total",v:fmt(gt),c:"#7c3aed"},{l:"Your Profit",v:fmt(prof),c:"#059669"}].map(k=><div key={k.l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:k.l==="Grand Total"?16:13,color:k.c}}>{k.v}</span></div>)}</div>;})()}
-          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-            <button className="btn bgh" onClick={()=>{setModal(null);setScanning(false);setScanInput("");}}>Cancel</button>
-            <button className="btn bg" onClick={confirmSale} disabled={saving}>{ic.inv} Confirm & Invoice</button>
+          {/* Payment method selector */}
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:".08em",textTransform:"uppercase",display:"block",marginBottom:6}}>Payment Method</label>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {[{v:"unpaid",l:"📤 Collect Later"},{v:"cash",l:"💵 Cash"},{v:"check",l:"🖊 Check"},{v:"money_order",l:"📋 Money Order"},{v:"zelle",l:"💸 Zelle"},{v:"credit_card",l:"💳 Card"}].map(m=>(
+                <button key={m.v} onClick={()=>setSalePayMethod(m.v)}
+                  style={{padding:"6px 12px",borderRadius:7,border:`1.5px solid ${salePayMethod===m.v?"#7c3aed":"#e5e7eb"}`,background:salePayMethod===m.v?"#7c3aed":"#fff",color:salePayMethod===m.v?"#fff":"#374151",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Barlow',sans-serif"}}>
+                  {m.l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
+            <button className="btn bgh" onClick={()=>{setModal(null);setScanning(false);setScanInput("");setSalePayMethod("unpaid");}}>Cancel</button>
+            <button className="btn bg" onClick={confirmSale} disabled={saving}>
+              {saving?"Saving…":salePayMethod==="unpaid"?`📤 Invoice & Send`:`✅ Invoice + ${salePayMethod==="credit_card"?"Card":salePayMethod==="money_order"?"Money Order":salePayMethod.charAt(0).toUpperCase()+salePayMethod.slice(1)} — Send`}
+            </button>
           </div>
         </div>
       </Modal>}
