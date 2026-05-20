@@ -1526,9 +1526,44 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         ))}
       </div>}
       {msg&&<div style={{background:msg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${msg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:12,color:msg.t==="success"?"#065f46":"#dc2626",marginBottom:12}}>{msg.m}</div>}
-      <button onClick={confirmSale} disabled={saving} style={{width:"100%",background:"#0ea5e9",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-        {saving?"Creating Invoice…":"✓ Confirm Sale & Create Invoice"}
-      </button>
+      {(()=>{
+        const limit=parseFloat(selCustObj?.credit_limit||0);
+        const newTotal=gt+custUnpaidBalance;
+        const overLimit=limit>0&&newTotal>limit;
+        if(overLimit) return(
+          <div style={{borderRadius:10,overflow:"hidden",border:"2px solid #dc2626"}}>
+            <div style={{background:"#dc2626",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{color:"#fff",fontWeight:700,fontSize:13}}>🔴 CREDIT HOLD</span>
+              <span style={{color:"#fca5a5",fontSize:11}}>${newTotal.toFixed(2)} / ${limit.toFixed(2)} limit</span>
+            </div>
+            <div style={{background:"#fef2f2",padding:"12px 14px"}}>
+              <div style={{fontSize:12,color:"#dc2626",marginBottom:10}}>
+                This customer has exceeded their credit limit. Collect <strong>${(newTotal-limit).toFixed(2)}</strong> before selling, or request admin approval.
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setMsg({t:"error",m:"⛔ Sale blocked — credit limit exceeded. Collect payment first."})}
+                  style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#fee2e2",color:"#dc2626",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+                  ⛔ Blocked
+                </button>
+                <button onClick={async()=>{
+                  // Request admin override via audit log notification
+                  try{
+                    await supabase.from("audit_log").insert({company_id:co?.id||driverData?.co?.id,id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:driverData?.truck?.driver||"driver",action:"CREDIT_OVERRIDE_REQUEST",entity:"Customer",detail:`Driver requesting credit override for ${selCustObj?.name} — balance $${newTotal.toFixed(2)} exceeds limit $${limit.toFixed(2)}`,created_at:new Date().toISOString()});
+                    setMsg({t:"success",m:"✅ Override request sent to admin — wait for approval before selling."});
+                  }catch(e){setMsg({t:"error",m:e.message});}
+                }} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#fbbf24",color:"#78350f",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+                  📩 Request Override
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+        return(
+          <button onClick={confirmSale} disabled={saving} style={{width:"100%",background:"#0ea5e9",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+            {saving?"Creating Invoice…":"✓ Confirm Sale & Create Invoice"}
+          </button>
+        );
+      })()}
     </div>
   );
 }
@@ -1916,10 +1951,38 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       </div>
 
       {wiMsg&&<div style={{background:wiMsg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${wiMsg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:13,color:wiMsg.t==="success"?"#065f46":"#dc2626",marginBottom:10}}>{wiMsg.m}</div>}
-      <button onClick={createWiSale} disabled={wiSaving||!wiCust||sub===0} className="btn-primary"
-        style={{width:"100%",justifyContent:"center",padding:"13px",marginBottom:24,background:(!wiCust||sub===0)?"#9ca3af":"#0a1628"}}>
-        {wiSaving?<><span className="sp">⟳</span> Creating…</>:wiPay==="unpaid"?"📤 Create Invoice & Send":"🧾 Create Invoice & Record Payment"}
-      </button>
+      {(()=>{
+        const wiLimit=parseFloat(wiCustObj?.credit_limit||0);
+        const wiNewTotal=totalDue;
+        const wiOverLimit=wiLimit>0&&wiNewTotal>wiLimit;
+        if(wiOverLimit&&wiCust&&sub>0) return(
+          <div style={{borderRadius:10,overflow:"hidden",border:"2px solid #dc2626",marginBottom:24}}>
+            <div style={{background:"#dc2626",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{color:"#fff",fontWeight:700,fontSize:13}}>🔴 CREDIT HOLD</span>
+              <span style={{color:"#fca5a5",fontSize:11}}>${wiNewTotal.toFixed(2)} / ${wiLimit.toFixed(2)} limit</span>
+            </div>
+            <div style={{background:"#fef2f2",padding:"12px 14px"}}>
+              <div style={{fontSize:12,color:"#dc2626",marginBottom:10}}>
+                Credit limit exceeded by <strong>${(wiNewTotal-wiLimit).toFixed(2)}</strong>. Collect payment first or request admin override.
+              </div>
+              <button onClick={async()=>{
+                try{
+                  await supabase.from("audit_log").insert({company_id:co?.id,id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:"walk-in",action:"CREDIT_OVERRIDE_REQUEST",entity:"Customer",detail:`Walk-in credit override request for ${wiCustObj?.name} — balance $${wiNewTotal.toFixed(2)} exceeds limit $${wiLimit.toFixed(2)}`,created_at:new Date().toISOString()});
+                  setWiMsg({t:"success",m:"✅ Override request sent to admin."});
+                }catch(e){setWiMsg({t:"error",m:e.message});}
+              }} style={{width:"100%",padding:"10px",borderRadius:8,border:"none",background:"#fbbf24",color:"#78350f",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+                📩 Request Admin Override
+              </button>
+            </div>
+          </div>
+        );
+        return(
+          <button onClick={createWiSale} disabled={wiSaving||!wiCust||sub===0} className="btn-primary"
+            style={{width:"100%",justifyContent:"center",padding:"13px",marginBottom:24,background:(!wiCust||sub===0)?"#9ca3af":"#0a1628"}}>
+            {wiSaving?<><span className="sp">⟳</span> Creating…</>:wiPay==="unpaid"?"📤 Create Invoice & Send":"🧾 Create Invoice & Record Payment"}
+          </button>
+        );
+      })()}
     </div>
   );
 

@@ -4984,6 +4984,11 @@ export default function App(){
                   const c=customers.find(x=>x.id===p.cust_id);
                   if(c) notifs.push({type:"check",icon:"🚨",msg:`Returned check — ${c.name}`,severity:"high",tab:"returnedchecks"});
                 });
+                // Credit override requests
+                auditLog.filter(e=>e.action==="CREDIT_OVERRIDE_REQUEST").forEach(e=>{
+                  const custName=e.detail?.match(/for (.+?) —/)?.[1]||"Customer";
+                  notifs.push({type:"credit",icon:"🔴",msg:`Credit override request — ${custName}`,severity:"high",tab:"auditlog"});
+                });
                 if(!notifs.length) return(
                   <button className="btn bgh" style={{fontSize:11,position:"relative"}} onClick={()=>setTab("auditlog")} title="No new notifications">🔔</button>
                 );
@@ -6984,6 +6989,52 @@ export default function App(){
           {/* ══ SETTINGS ══ */}
           {/* ══ AUDIT LOG ══ */}
           {tab==="auditlog"&&isAdmin&&<div className="fu">
+            {/* ── CREDIT OVERRIDE REQUESTS ── */}
+            {(()=>{
+              const overrideRequests=auditLog.filter(e=>e.action==="CREDIT_OVERRIDE_REQUEST");
+              if(!overrideRequests.length) return null;
+              return(
+                <div style={{background:"#fffbeb",border:"2px solid #f59e0b",borderRadius:12,padding:16,marginBottom:20}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:16,color:"#92400e"}}>
+                      ⚠️ Credit Override Requests ({overrideRequests.length})
+                    </div>
+                    <div style={{fontSize:11,color:"#92400e"}}>Review and approve or deny below</div>
+                  </div>
+                  {overrideRequests.slice(0,5).map((e,i)=>{
+                    const custName=e.detail?.match(/for (.+?) —/)?.[1]||"Unknown";
+                    const custObj=customers.find(c=>c.name===custName);
+                    return(
+                      <div key={e.id||i} style={{background:"#fff",borderRadius:8,padding:"10px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:13,color:"#0a1628"}}>{custName}</div>
+                          <div style={{fontSize:11,color:"#6b7280"}}>{e.detail}</div>
+                          <div style={{fontSize:10,color:"#9ca3af",marginTop:2}}>{new Date(e.created_at).toLocaleString()} · by {e.user_email}</div>
+                        </div>
+                        <div style={{display:"flex",gap:6"}}>
+                          <button className="btn bg" style={{fontSize:11,padding:"5px 12px"}} onClick={async()=>{
+                            // Grant override: temporarily increase credit limit by 20% for this customer
+                            if(!custObj) return showToast("Customer not found","error");
+                            const newLimit=parseFloat(custObj.credit_limit||0)*1.2||500;
+                            await supabase.from("customers").update({credit_limit:newLimit}).eq("id",custObj.id);
+                            setCustomers(prev=>prev.map(c=>c.id===custObj.id?{...c,credit_limit:newLimit}:c));
+                            // Mark resolved in audit log
+                            await supabase.from("audit_log").insert({company_id:co?.id,id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:profile?.email||"admin",action:"CREDIT_OVERRIDE_GRANTED",entity:"Customer",detail:`Admin granted credit override for ${custName} — new limit $${newLimit.toFixed(2)}`,created_at:new Date().toISOString()});
+                            setAuditLog(prev=>prev.filter(x=>x.id!==e.id));
+                            showToast(`✅ Override granted for ${custName}`);
+                          }}>✅ Approve</button>
+                          <button className="btn br" style={{fontSize:11,padding:"5px 12px"}} onClick={async()=>{
+                            await supabase.from("audit_log").insert({company_id:co?.id,id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:profile?.email||"admin",action:"CREDIT_OVERRIDE_DENIED",entity:"Customer",detail:`Admin denied credit override for ${custName}`,created_at:new Date().toISOString()});
+                            setAuditLog(prev=>prev.filter(x=>x.id!==e.id));
+                            showToast(`Override denied for ${custName}`,"error");
+                          }}>✕ Deny</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,marginBottom:4}}>🔍 Audit Log</div>
             <div style={{fontSize:12,color:"#9ca3af",marginBottom:16}}>Every significant action taken in the system — who did it, what changed, and when.</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
@@ -7713,6 +7764,27 @@ export default function App(){
           </div>
           <Divider/>
           {(()=>{const sub=formItems.reduce((a,fi)=>{return a+getEffectivePrice(selCust,fi.pid)*fi.qty;},0);const tax=calcSaleTax({items:formItems.map(fi=>({pid:fi.pid,qty:fi.qty})),cust_id:selCust,state:customers.find(c=>c.id===selCust)?.state||""}),gt=sub+tax,prof=formItems.reduce((a,fi)=>{const p=getP(fi.pid);return a+(getEffectivePrice(selCust,fi.pid)-(p?.cost||0))*fi.qty;},0);return<div style={{background:"#f9fafb",borderRadius:7,padding:"11px 13px",marginBottom:12}}>{[{l:"Subtotal",v:fmt(sub),c:"#6b7280"},{l:"Tax (Tobacco only)",v:fmt(tax),c:"#7c3aed"},{l:"Grand Total",v:fmt(gt),c:"#7c3aed"},{l:"Your Profit",v:fmt(prof),c:"#059669"}].map(k=><div key={k.l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:"#6b7280"}}>{k.l}</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:k.l==="Grand Total"?16:13,color:k.c}}>{k.v}</span></div>)}</div>;})()}
+          {/* Credit hold warning for admin (warning only — admin can override) */}
+          {(()=>{
+            const limit=parseFloat(getC(selCust)?.credit_limit||0);
+            if(!limit||!selCust) return null;
+            const cust=getC(selCust);
+            const unpaid=sales.filter(s=>s.cust_id===selCust&&pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+            const newSaleTotal=formItems.reduce((a,fi)=>a+getEffectivePrice(selCust,fi.pid)*fi.qty,0);
+            const newTotal=unpaid+newSaleTotal;
+            const over=newTotal>limit;
+            if(!over) return null;
+            return(
+              <div style={{background:"#fffbeb",border:"1.5px solid #f59e0b",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
+                <div style={{fontWeight:700,fontSize:12,color:"#92400e",marginBottom:4}}>⚠️ Credit Limit Warning</div>
+                <div style={{fontSize:11,color:"#92400e"}}>
+                  {cust?.name} balance will be <strong>${newTotal.toFixed(2)}</strong> — exceeds limit of <strong>${limit.toFixed(2)}</strong> by ${(newTotal-limit).toFixed(2)}.
+                </div>
+                <div style={{fontSize:10,color:"#b45309",marginTop:4}}>As admin you can proceed, but consider collecting payment first.</div>
+              </div>
+            );
+          })()}
+
           {/* Payment method selector */}
           <div style={{marginBottom:12}}>
             <label style={{fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:".08em",textTransform:"uppercase",display:"block",marginBottom:6}}>Payment Method</label>
