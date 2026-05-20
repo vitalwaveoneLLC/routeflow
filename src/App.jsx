@@ -3836,6 +3836,11 @@ export default function App(){
   };
 
   const calcSaleGrandTotal = sale => sale.total + calcSaleTax(sale) + parseFloat(sale.previous_balance||0);
+  const getCreatedBy = sale => {
+    if(sale.truck_id){const d=getT(sale.truck_id)?.driver;return d?`🚚 ${d}`:"🚚 Driver";}
+    if(sale.id?.startsWith("ORD-")||sale.notes?.includes("portal")||sale.notes?.includes("Portal")) return "📱 Customer Portal";
+    return "🏪 Walk-in";
+  };
   const getSaleState = sale => {
     const cust = getC(sale.cust_id);
     return sale.state || cust?.state || "";
@@ -4854,7 +4859,7 @@ export default function App(){
             <div className="card">
               <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div className="sh" style={{marginBottom:0}}>Recent Invoices</div><button className="btn bgh" onClick={()=>setTab("sales")}>View All →</button></div>
               {visSales.length===0?<Empty icon="💳" msg="NO SALES YET"/>:(
-                <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Total</th><th>+Tax</th><th>Grand Total</th><th>Status</th><th></th></tr></thead>
+                <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Created By</th><th>Date</th><th>Total</th><th>+Tax</th><th>Grand Total</th><th>Status</th><th></th></tr></thead>
                 <tbody>{visSales.slice(0,10).map(s=>{
                   const pmt=pmtFor(s.id);
                   const isPaid=pmt?.status==="paid";
@@ -4863,6 +4868,7 @@ export default function App(){
                   <tr key={s.id}>
                     <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
                     <td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td>
+                    <td style={{color:"#6b7280",fontSize:11}}>{getCreatedBy(s)}</td>
                     <td style={{color:"#6b7280",fontSize:11}}>{s.date}</td>
                     <td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} {s.check_penalty_applied>0?"penalty":"prev"}</span>}</td>
                     <td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td>
@@ -5160,7 +5166,7 @@ export default function App(){
             <div className="card">
               <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>INVOICES — {visSales.length} TOTAL</div>
               {visSales.length===0?<Empty icon="📄" msg="NO INVOICES YET"/>:(
-                <div className="tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Driver</th><th>Subtotal</th><th>Tax</th><th>Grand Total</th><th>Profit</th><th>Status</th><th>Actions</th></tr></thead>
+                <div className="tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Created By</th><th>Subtotal</th><th>Tax</th><th>Grand Total</th><th>Profit</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody>{visSales.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id);
                   const isReturnedCheck=pmt?.status==="returned_check";
                   const isPaid=pmt?.status==="paid";
@@ -5172,7 +5178,7 @@ export default function App(){
                       {getC(s.cust_id)?.name}
                       {isReturnedCheck&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}
                     </td>
-                    <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver||"Walk-in"}</td>
+                    <td style={{color:"#6b7280",fontSize:11}}>{getCreatedBy(s)}</td>
                     <td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} {s.check_penalty_applied>0?"penalty":"prev"}</span>}</td>
                     <td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td>
                     <td><span className="bdg bb2">{fmt(gt)}</span></td>
@@ -5382,7 +5388,7 @@ export default function App(){
                               {isRC&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}
                             </td>
                             <td><span className="tag" style={{background:"#ede9fe",color:"#7c3aed"}}>{st}</span></td>
-                            <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver||"Walk-in"}</td>
+                            <td style={{color:"#6b7280"}}>{getCreatedBy(s)}</td>
                             <td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} {s.check_penalty_applied>0?"penalty":"prev"}</span>}</td>
                             <td style={{color:"#059669",fontWeight:600}}>{fmt(tax)}</td>
                             <td style={{fontWeight:700,color:"#7c3aed"}}>{fmt(gt)}</td>
@@ -5570,7 +5576,7 @@ export default function App(){
                             {cust?.name}
                             {isRC&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}
                           </td>
-                          <td style={{padding:"9px 13px",color:"#6b7280"}}>{getT(s.truck_id)?.driver||"Walk-in"}</td>
+                          <td style={{padding:"9px 13px",color:"#6b7280",fontSize:11}}>{getCreatedBy(s)}</td>
                           <td style={{padding:"9px 13px",fontWeight:700,color:"#dc2626"}}>{fmt(gt)}</td>
                           <td style={{padding:"9px 13px"}}>
                             {isRC

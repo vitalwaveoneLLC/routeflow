@@ -2361,15 +2361,25 @@ export default function OrderPortal() {
 
       const truckId = profile.truck_id;
 
-      const [truckR, custsR, loadsR, salesR, taxesR, pmtsR, coR] = await Promise.all([
+      const [truckR, custsR, loadsR, taxesR, pmtsR, coR] = await Promise.all([
         supabase.from("trucks").select("*").eq("id",truckId).single(),
         supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",truckId),
         supabase.from("loads").select("*").eq("truck_id",truckId).eq("status","out").order("created_at",{ascending:false}),
-        supabase.from("sales").select("*").eq("truck_id",truckId).order("created_at",{ascending:false}),
         supabase.from("state_taxes").select("*"),
         supabase.from("payments").select("sale_id,status,method,amount").eq("status","paid"),
         supabase.from("company").select("*").single(),
       ]);
+
+      if(!truckR.data) throw new Error("Truck not found. Run this SQL: update profiles set truck_id = 'CORRECT_TRUCK_ID' where id = '"+data.user.id+"'");
+
+      // Load ALL sales for customers assigned to this truck (not just truck_id)
+      // This includes walk-in sales, customer portal orders, and driver sales
+      const custIds=(custsR.data||[]).map(c=>c.id);
+      let salesR={data:[]};
+      if(custIds.length>0){
+        const{data:allCustSales}=await supabase.from("sales").select("*").in("cust_id",custIds).order("created_at",{ascending:false});
+        salesR.data=allCustSales||[];
+      }
 
       if(!truckR.data) throw new Error("Truck not found. Run this SQL: update profiles set truck_id = 'CORRECT_TRUCK_ID' where id = '"+data.user.id+"'");
 
@@ -3255,6 +3265,12 @@ export default function OrderPortal() {
                   :driverData.sales.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(s=>{
                     const cust=driverData.customers.find(c=>c.id===s.cust_id);
                     const isPaid=s._paid||false;
+                    const isRC=(s.check_penalty_applied||0)>0;
+                    // Determine who created this invoice
+                    const createdBy=s.truck_id===driverData.truck?.id?"🚚 You"
+                      :s.truck_id?`🚚 Driver`
+                      :s.id?.startsWith("INV-")&&!s.truck_id?"🏪 Walk-in"
+                      :"📱 Customer Portal";
                     const saleTax=(()=>{
                       const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));
                       const rate=st?.exempt?0:parseFloat(st?.rate||0);
@@ -3276,7 +3292,7 @@ export default function OrderPortal() {
                               }
                             </div>
                             <div style={{fontWeight:600,fontSize:13,marginTop:4}}>{cust?.name||"Unknown"}</div>
-                            <div style={{fontSize:11,color:"#9ca3af"}}>{s.date}</div>
+                            <div style={{fontSize:11,color:"#9ca3af"}}>{s.date} · <span style={{color:"#6b7280"}}>{createdBy}</span></div>
                           </div>
                           <div style={{textAlign:"right"}}>
                             <div style={{fontWeight:800,fontSize:18,color:isPaid?"#059669":"#7c3aed"}}>${gt.toFixed(2)}</div>
