@@ -231,25 +231,10 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
 }
 
 // -- DRIVER LOAD TAB -----------------------------------------------------------
-function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes=[]}){
+function CustomerAccountView({selCust,supabase,co,setStep,products=[]}){
   const[acctData,setAcctData]=useState(null);
   const[acctLoading,setAcctLoading]=useState(true);
   const[viewInv,setViewInv]=useState(null); // selected invoice to view
-
-  // Calculate tobacco tax for an invoice — mirrors App.jsx calcSaleTax
-  const _invProdMap = useMemo(()=>Object.fromEntries(products.map(p=>[p.id,p])),[products]);
-  const calcInvTax = (sale) => {
-    if(!co?.tax_enabled) return 0;
-    const stateId = sale.state || selCust?.state || "";
-    const stData = stateTaxes.find(s=>s.id===stateId);
-    const rate = stData?.exempt ? 0 : parseFloat(stData?.rate||co?.tax_rate||0);
-    if(!rate) return 0;
-    const taxable = (sale.items||[]).reduce((a,i)=>{
-      const p = _invProdMap[i.pid];
-      return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
-    },0);
-    return parseFloat((taxable*rate/100).toFixed(2));
-  };
 
   useEffect(()=>{
     supabase.from("sales").select("*").eq("cust_id",selCust.id).order("created_at",{ascending:false})
@@ -265,15 +250,8 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes
   if(acctLoading)return<div style={{padding:60,textAlign:"center",color:"#9ca3af"}}>Loading your account…</div>;
 
   const{invoices,payments}=acctData;
-  // totalDue = grand total of the LATEST unpaid invoice (it already chains all prior balances)
-  // Do NOT sum across invoices — previous_balance is cumulative/chained so that would double-count
-  const unpaidInvs=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid"))
-    .sort((a,b)=>new Date(b.created_at||b.date)-new Date(a.created_at||a.date));
-  const latestUnpaid=unpaidInvs[0]||null;
-  const totalDue=latestUnpaid
-    ? parseFloat(latestUnpaid.total||0)+calcInvTax(latestUnpaid)+parseFloat(latestUnpaid.previous_balance||0)
-    : 0;
-  const totalPaid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0)+calcInvTax(s),0);
+  const totalDue=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0)+parseFloat(s.previous_balance||0),0);
+  const totalPaid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0),0);
   const fmt=n=>`$${parseFloat(n||0).toFixed(2)}`;
 
   // Invoice detail view
@@ -282,7 +260,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes
     const prevBal=parseFloat(viewInv.previous_balance||0);
     const penalty=parseFloat(viewInv.check_penalty_applied||0);
     const itemsTotal=parseFloat(viewInv.total||0);
-    const grandTotal=itemsTotal+calcInvTax(viewInv)+prevBal;
+    const grandTotal=itemsTotal+prevBal;
     return(
       <div className="fu" style={{maxWidth:680,margin:"0 auto"}}>
         <button onClick={()=>setViewInv(null)} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:13,marginBottom:16,display:"flex",alignItems:"center",gap:6,padding:0}}>
@@ -436,7 +414,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes
                     <td style={{padding:"10px 14px",fontWeight:700,color:"#7c3aed",fontSize:12,textDecoration:"underline"}}>{s.id}</td>
                     <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{s.date}</td>
                     <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{(s.items||[]).length} item{(s.items||[]).length!==1?"s":""}</td>
-                    <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontSize:13}}>{fmt(parseFloat(s.total||0)+calcInvTax(s)+parseFloat(s.previous_balance||0))}</td>
+                    <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontSize:13}}>{fmt(parseFloat(s.total||0)+parseFloat(s.previous_balance||0))}</td>
                     <td style={{padding:"10px 14px"}}>
                       <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:6,background:paid?"#f0fdf4":"#fef2f2",color:paid?"#065f46":"#dc2626"}}>
                         {paid?"✓ PAID":"UNPAID"}
@@ -461,72 +439,6 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes
       <button onClick={()=>setStep("custchoice")} style={{display:"block",width:"100%",marginTop:16,background:"#0a1628",color:"#fff",border:"none",borderRadius:9,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
         🛒 Place an Order
       </button>
-
-      {/* ── PORTFOLIO HEALTH DASHBOARD ── */}
-      {invoices.length>=2&&(()=>{
-        const paid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid"));
-        const totalSpent=paid.reduce((a,s)=>a+parseFloat(s.total||0),0);
-        const avgOrder=paid.length?totalSpent/paid.length:0;
-        // Product frequency map
-        const pidCount={};
-        invoices.forEach(s=>(s.items||[]).forEach(i=>{pidCount[i.pid]=(pidCount[i.pid]||0)+i.qty;}));
-        const topProducts=Object.entries(pidCount).sort((a,b)=>b[1]-a[1]).slice(0,3);
-        // 90-day spend trend
-        const now=Date.now();
-        const last90=paid.filter(s=>now-new Date(s.created_at||s.date)<90*86400000).reduce((a,s)=>a+parseFloat(s.total||0),0);
-        const prev90=paid.filter(s=>{const d=now-new Date(s.created_at||s.date);return d>=90*86400000&&d<180*86400000;}).reduce((a,s)=>a+parseFloat(s.total||0),0);
-        const trend=prev90>0?((last90-prev90)/prev90*100).toFixed(0):null;
-        // Monthly orders
-        const ordersByMonth={};
-        invoices.forEach(s=>{const d=new Date(s.created_at||s.date);if(!isNaN(d)){const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;ordersByMonth[k]=(ordersByMonth[k]||0)+1;}});
-        const months=Object.keys(ordersByMonth).sort().slice(-6);
-        return(
-          <div style={{marginTop:20}}>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,color:"#0a1628",marginBottom:12}}>📊 Your Account Health</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
-              {[{l:"Total Spent",v:fmt(totalSpent),c:"#7c3aed"},{l:"Avg Order",v:fmt(avgOrder),c:"#059669"},{l:"90-Day Spend",v:fmt(last90),c:"#0a1628"}].map(k=>(
-                <div key={k.l} style={{background:"#f9fafb",borderRadius:10,padding:"12px",textAlign:"center",border:"1px solid #e5e7eb"}}>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:18,color:k.c}}>{k.v}</div>
-                  <div style={{fontSize:10,color:"#9ca3af",letterSpacing:".07em",marginTop:2}}>{k.l}</div>
-                </div>
-              ))}
-            </div>
-            {trend!==null&&<div style={{background:parseFloat(trend)>=0?"#f0fdf4":"#fef2f2",border:`1px solid ${parseFloat(trend)>=0?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"8px 14px",marginBottom:14,fontSize:12,color:parseFloat(trend)>=0?"#065f46":"#dc2626",display:"flex",alignItems:"center",gap:8}}>
-              {parseFloat(trend)>=0?"📈":"📉"} Your spending is <strong>{parseFloat(trend)>=0?"+":""}{trend}%</strong> vs the previous 90 days
-            </div>}
-            {topProducts.length>0&&<div style={{marginBottom:14}}>
-              <div style={{fontSize:11,color:"#9ca3af",fontWeight:700,letterSpacing:".08em",marginBottom:8}}>YOUR TOP PRODUCTS</div>
-              {topProducts.map(([pid,qty])=>{
-                const name=products.find(p=>p.id===pid)?.name||pid;
-                const maxQty=topProducts[0][1];
-                return(
-                  <div key={pid} style={{marginBottom:6}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}><span style={{fontWeight:600}}>{name}</span><span style={{color:"#7c3aed"}}>{qty} units</span></div>
-                    <div style={{height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",background:"#7c3aed",borderRadius:3,width:`${(qty/maxQty*100).toFixed(0)}%`}}/></div>
-                  </div>
-                );
-              })}
-            </div>}
-            {months.length>=2&&<div>
-              <div style={{fontSize:11,color:"#9ca3af",fontWeight:700,letterSpacing:".08em",marginBottom:8}}>ORDER FREQUENCY (LAST 6 MONTHS)</div>
-              <div style={{display:"flex",gap:4,alignItems:"flex-end",height:50}}>
-                {months.map(m=>{
-                  const cnt=ordersByMonth[m]||0;
-                  const maxCnt=Math.max(...months.map(x=>ordersByMonth[x]||0));
-                  const pct=maxCnt>0?(cnt/maxCnt*100):0;
-                  return(
-                    <div key={m} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                      <div style={{fontSize:9,color:"#9ca3af"}}>{cnt}</div>
-                      <div style={{width:"100%",background:"#7c3aed",borderRadius:"2px 2px 0 0",height:`${pct}%`,minHeight:4,transition:"height .3s"}}/>
-                      <div style={{fontSize:8,color:"#9ca3af",textAlign:"center"}}>{m.slice(5)}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>}
-          </div>
-        );
-      })()}
     </div>
   );
 }
@@ -762,7 +674,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
 
     setSaving(true);
     try{
-      const nl = {id:"LD-"+uid(),truck_id:driverData.truck?.id,date:nowStr(),items:loadItems,status:"out",created_at:new Date().toISOString()};
+      const nl = {id:"LD-"+uid(),truck_id:driverData.truck?.id,date:new Date().toLocaleDateString(),items:loadItems,status:"out",created_at:new Date().toISOString()};
       const {error} = await supabase.from("loads").insert(nl);
       if(error) throw error;
       await Promise.all(loadItems.map(item=>{
@@ -819,32 +731,7 @@ function DriverLoadTab({driverData, setDriverData, products, supabase, co}){
 
 
 // -- DRIVER SELL TAB -----------------------------------------------------------
-function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust, payForm, setPayForm, paymentSaving, setPaymentSaving, collectPayment, createdSale, setCreatedSale, showPayment, setShowPayment, sigData=null, setSigData=()=>{}}){
-  const sigRef = useRef(null);
-  const [sigDrawing, setSigDrawing] = useState(false);
-
-  // Send SMS via Twilio (uses co settings passed as prop)
-  // Send WhatsApp invoice via Meta Cloud API (free utility template)
-  const sendDriverSMS=async(to,params)=>{
-    if(!co?.meta_phone_id||!co?.meta_token)return;
-    const phone=(to||"").replace(/[^0-9]/g,"");
-    if(phone.length<10)return;
-    const e164=phone.startsWith("1")&&phone.length===11?phone:"1"+phone;
-    try{
-      const{data:{session:s}}=await supabase.auth.getSession();
-      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
-        body:JSON.stringify({
-          to:e164,
-          phone_number_id:co?.meta_phone_id,
-          access_token:co?.meta_token,
-          template_name:co.meta_template||"invoice_notification",
-          params:Array.isArray(params)?params:params.split("\n").filter(Boolean),
-        }),
-      });
-    }catch{}// silent — WhatsApp failures never block the sale
-  };
+function DriverSellTab({driverData, setDriverData, products, supabase, co, initCust, setDriverSaleCust, payForm, setPayForm, paymentSaving, setPaymentSaving, collectPayment, createdSale, setCreatedSale, showPayment, setShowPayment}){
   const [selCust, setSelCust] = useState(initCust||"");
   const [items, setItems] = useState({});
   const [saving, setSaving] = useState(false);
@@ -904,7 +791,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
       // Include tax and any nested previous balance in outstanding amount
       const totalUnpaid = allUnpaid.reduce((a,s)=>{
         const st = driverData?.stateTaxes?.find(x=>x.id===(s.state||""));
-        const rate = (!co?.tax_enabled || st?.exempt) ? 0 : parseFloat(st?.rate||co?.tax_rate||0);
+        const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
         const taxable = (s.items||[]).reduce((b,i)=>{
           const p = products.find(x=>x.id===i.pid);
           return isTaxableProd(p) ? b+(p?.price||0)*i.qty : b;
@@ -945,7 +832,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   const selCustObj = driverData.customers.find(c=>c.id===selCust);
   const custStateId = freshCustState || selCustObj?.state || driverData.truck?.state || "";
   const custStateTax = driverData.stateTaxes?.find(s=>s.id===custStateId);
-  const driverTaxRate = (!co?.tax_enabled || custStateTax?.exempt) ? 0 : parseFloat(custStateTax?.rate||co?.tax_rate||0);
+  const driverTaxRate = custStateTax?.exempt ? 0 : parseFloat(custStateTax?.rate||0);
   const sub = inStockProducts.reduce((a,p)=>{
     const qty=items[p.id]||0;if(!qty)return a;
     const caseQty=parseInt(p.case_qty)||1;
@@ -1012,7 +899,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         truck_id:driverData.truck?.id,
         cust_id:selCust,
         state:freshCustState||selCustObj?.state||driverData.truck?.state||"",
-        date:nowStr(),
+        date:new Date().toLocaleDateString(),
         items:saleItems,
         total:sub,
         profit,
@@ -1022,26 +909,11 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         created_at:new Date().toISOString()
       };
       await supabase.from("sales").insert(ns);
-      await supabase.from("payments").insert({company_id:co?.id||driverData?.co?.id,sale_id:ns.id,status:"unpaid"});
+      await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
       setDriverData(prev=>({...prev,sales:[ns,...prev.sales]}));
       setCreatedSale(ns);
       setShowPayment(true);
       setItems({});
-      // Auto-SMS invoice if enabled
-      if(co?.sms_invoices&&co?.meta_phone_id&&co?.meta_token){
-        const smsCust=driverData.customers.find(c=>c.id===selCust);
-        if(smsCust?.phone){
-          const smsSt=driverData.stateTaxes?.find(s=>s.id===(ns.state||""));
-          const smsRate=(!co?.tax_enabled||smsSt?.exempt)?0:parseFloat(smsSt?.rate||co?.tax_rate||0);
-          const smsTaxable=(ns.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
-          const smsTax=parseFloat((smsTaxable*smsRate/100).toFixed(2));
-          const smsGt=(ns.total+smsTax+parseFloat(ns.previous_balance||0)).toFixed(2);
-          const smsPortal=(co?.portal_url||window.location.origin).replace(/\/+$/,"");
-          // Template params: {{1}}=name {{2}}=invoiceId {{3}}=amount {{4}}=link
-          const smsParams=[smsCust.name,ns.id,smsGt,`${smsPortal}/?invoice=${ns.id}`];
-          sendDriverSMS(smsCust.phone,smsParams);
-        }
-      }
       setSelCust("");
       setFreshCustState("");
       if(setDriverSaleCust) setDriverSaleCust(null);
@@ -1053,7 +925,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
   if(showPayment && createdSale){
     const saleTax = (() => {
       const st = driverData.stateTaxes?.find(s=>s.id===(createdSale.state||""));
-      const rate = (!co?.tax_enabled || st?.exempt) ? 0 : parseFloat(st?.rate||co?.tax_rate||0);
+      const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
       if(!rate) return 0;
       const taxable = (createdSale.items||[]).reduce((a,i)=>{
         const p = products.find(x=>x.id===i.pid);
@@ -1142,7 +1014,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
                 <div style={{marginTop:10,background:"#faf5ff",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#7c3aed",fontWeight:700}}>
                   Amount to collect: ${(()=>{
                     const st=driverData.stateTaxes?.find(x=>x.id===(createdSale.state||""));
-                    const rate=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);
+                    const rate=st?.exempt?0:parseFloat(st?.rate||0);
                     const taxable=(createdSale.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
                     const tax=parseFloat((taxable*rate/100).toFixed(2));
                     const gt=createdSale.total+tax;
@@ -1169,27 +1041,6 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>NOTES (optional)</label>
           <input value={payForm.notes} onChange={e=>setPayForm(p=>({...p,notes:e.target.value}))}
             placeholder="Any notes..." style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,boxSizing:"border-box"}}/>
-        </div>
-
-        {/* E-Signature */}
-        <div style={{marginBottom:14}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <label style={{fontSize:11,fontWeight:700,color:"#6b7280",letterSpacing:".08em"}}>CUSTOMER SIGNATURE (optional)</label>
-            {sigData&&<button onClick={()=>{setSigData(null);const c=sigRef.current;if(c){const ctx=c.getContext("2d");ctx.clearRect(0,0,c.width,c.height);}}} style={{background:"transparent",border:"1px solid #e5e7eb",borderRadius:5,padding:"2px 8px",fontSize:10,color:"#6b7280",cursor:"pointer"}}>Clear</button>}
-          </div>
-          <div style={{border:`2px solid ${sigData?"#059669":"#e5e7eb"}`,borderRadius:10,background:"#fff",touchAction:"none",overflow:"hidden"}}>
-            <canvas ref={sigRef} width={360} height={90}
-              style={{display:"block",width:"100%",height:90,cursor:"crosshair"}}
-              onMouseDown={e=>{setSigDrawing(true);const c=sigRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");ctx.beginPath();ctx.moveTo((e.clientX-r.left)*(c.width/r.width),(e.clientY-r.top)*(c.height/r.height));}}
-              onMouseMove={e=>{if(!sigDrawing)return;const c=sigRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");ctx.strokeStyle="#0a1628";ctx.lineWidth=2;ctx.lineCap="round";ctx.lineTo((e.clientX-r.left)*(c.width/r.width),(e.clientY-r.top)*(c.height/r.height));ctx.stroke();}}
-              onMouseUp={()=>{setSigDrawing(false);setSigData(sigRef.current.toDataURL());}}
-              onTouchStart={e=>{e.preventDefault();setSigDrawing(true);const c=sigRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");const t=e.touches[0];ctx.beginPath();ctx.moveTo((t.clientX-r.left)*(c.width/r.width),(t.clientY-r.top)*(c.height/r.height));}}
-              onTouchMove={e=>{e.preventDefault();if(!sigDrawing)return;const c=sigRef.current;const r=c.getBoundingClientRect();const ctx=c.getContext("2d");ctx.strokeStyle="#0a1628";ctx.lineWidth=2;ctx.lineCap="round";const t=e.touches[0];ctx.lineTo((t.clientX-r.left)*(c.width/r.width),(t.clientY-r.top)*(c.height/r.height));ctx.stroke();}}
-              onTouchEnd={()=>{setSigDrawing(false);setSigData(sigRef.current.toDataURL());}}
-            />
-          </div>
-          {sigData&&<div style={{fontSize:10,color:"#059669",marginTop:3}}>✓ Signature captured</div>}
-          {!sigData&&<div style={{fontSize:10,color:"#9ca3af",marginTop:3}}>Ask customer to sign above with finger or stylus</div>}
         </div>
 
         {/* Action Buttons */}
@@ -1262,23 +1113,6 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           <option value="">— Select customer —</option>
           {driverData.customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-
-        {/* Payment risk warning for driver */}
-        {selCustObj&&(()=>{
-          const cs=driverData.sales.filter(s=>s.cust_id===selCust);
-          const unpaid=cs.filter(s=>!s._paid);
-          const rc=(selCustObj.notes||"").includes("RETURNED_CHECK:1");
-          const maxAge=unpaid.length?Math.max(...unpaid.map(s=>Math.floor((Date.now()-new Date(s.created_at||s.date))/(86400000)))):0;
-          const pts=(unpaid.length>=3?3:unpaid.length>=1?1:0)+(maxAge>=90?4:maxAge>=60?3:maxAge>=30?1:0)+(rc?4:0);
-          const score=pts>=6?"red":pts>=3?"yellow":null;
-          if(!score)return null;
-          const cfg={yellow:{bg:"#fffbeb",border:"#fde68a",color:"#92400e",icon:"⚠️",label:"Collect carefully — watch balance"},red:{bg:"#fef2f2",border:"#fecaca",color:"#dc2626",icon:"🔴",label:"High risk — cash or Zelle only recommended"}};
-          const s=cfg[score];
-          const reasons=[unpaid.length>0&&`${unpaid.length} unpaid invoice${unpaid.length>1?"s":""}`,maxAge>=30&&`${maxAge}d overdue`,rc&&"Returned check on file"].filter(Boolean);
-          return<div style={{marginTop:8,background:s.bg,border:`1px solid ${s.border}`,borderRadius:8,padding:"8px 12px",fontSize:12,color:s.color}}>
-            {s.icon} <strong>{s.label}</strong> — {reasons.join(" · ")}
-          </div>;
-        })()}
 
         {/* New Customer Button */}
         <button onClick={()=>{setShowNewCust(!showNewCust);setNewCustMsg(null);}}
@@ -1366,29 +1200,6 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
             </div>
           </div>
         </div>}
-        {selCustObj&&(()=>{
-          const cs=driverData.sales.filter(s=>s.cust_id===selCust&&s.created_at).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
-          if(cs.length<2)return null;
-          const pidMap={};
-          cs.forEach(s=>(s.items||[]).forEach(i=>{if(!pidMap[i.pid])pidMap[i.pid]=[];pidMap[i.pid].push({qty:i.qty,date:new Date(s.created_at)});}));
-          const alerts=Object.entries(pidMap).map(([pid,ords])=>{
-            if(ords.length<2)return null;
-            const total=ords.reduce((a,o)=>a+o.qty,0);
-            const span=Math.max(1,Math.floor((ords[ords.length-1].date-ords[0].date)/(86400000)));
-            const upd=total/span;
-            const sincelast=Math.floor((Date.now()-ords[ords.length-1].date)/(86400000));
-            const avgQ=total/ords.length;
-            const dl=upd>0?Math.max(0,Math.round((avgQ/upd)-sincelast)):null;
-            if(dl===null||dl>5)return null;
-            const p=products.find(x=>x.id===pid);
-            return p?{name:p.name,dl}:null;
-          }).filter(Boolean);
-          if(!alerts.length)return null;
-          return<div style={{marginTop:8,background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#92400e"}}>
-            <div style={{fontWeight:700,marginBottom:3}}>🔮 Restock predictions</div>
-            {alerts.map((a,i)=><div key={i}>{a.name}: ~{a.dl<=0?"likely out now":`${a.dl} day${a.dl!==1?"s":""} left`}</div>)}
-          </div>;
-        })()}
         {custUnpaidBalance>0&&<div style={{marginTop:8,background:"#fef9c3",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px"}}>
           <div style={{fontWeight:700,fontSize:12,color:"#854d0e",marginBottom:4}}>⚠️ Outstanding Balance</div>
           {custUnpaidInvs.map(s=>(
@@ -1526,44 +1337,9 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         ))}
       </div>}
       {msg&&<div style={{background:msg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${msg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:12,color:msg.t==="success"?"#065f46":"#dc2626",marginBottom:12}}>{msg.m}</div>}
-      {(()=>{
-        const limit=parseFloat(selCustObj?.credit_limit||0);
-        const newTotal=gt+custUnpaidBalance;
-        const overLimit=limit>0&&newTotal>limit;
-        if(overLimit) return(
-          <div style={{borderRadius:10,overflow:"hidden",border:"2px solid #dc2626"}}>
-            <div style={{background:"#dc2626",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{color:"#fff",fontWeight:700,fontSize:13}}>🔴 CREDIT HOLD</span>
-              <span style={{color:"#fca5a5",fontSize:11}}>${newTotal.toFixed(2)} / ${limit.toFixed(2)} limit</span>
-            </div>
-            <div style={{background:"#fef2f2",padding:"12px 14px"}}>
-              <div style={{fontSize:12,color:"#dc2626",marginBottom:10}}>
-                This customer has exceeded their credit limit. Collect <strong>${(newTotal-limit).toFixed(2)}</strong> before selling, or request admin approval.
-              </div>
-              <div style={{display:"flex",gap:8}}>
-                <button onClick={()=>setMsg({t:"error",m:"⛔ Sale blocked — credit limit exceeded. Collect payment first."})}
-                  style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#fee2e2",color:"#dc2626",fontWeight:700,fontSize:12,cursor:"pointer"}}>
-                  ⛔ Blocked
-                </button>
-                <button onClick={async()=>{
-                  // Request admin override via audit log notification
-                  try{
-                    await supabase.from("audit_log").insert({company_id:co?.id||driverData?.co?.id,id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:driverData?.truck?.driver||"driver",action:"CREDIT_OVERRIDE_REQUEST",entity:"Customer",detail:`Driver requesting credit override for ${selCustObj?.name} — balance $${newTotal.toFixed(2)} exceeds limit $${limit.toFixed(2)}`,created_at:new Date().toISOString()});
-                    setMsg({t:"success",m:"✅ Override request sent to admin — wait for approval before selling."});
-                  }catch(e){setMsg({t:"error",m:e.message});}
-                }} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#fbbf24",color:"#78350f",fontWeight:700,fontSize:12,cursor:"pointer"}}>
-                  📩 Request Override
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-        return(
-          <button onClick={confirmSale} disabled={saving} style={{width:"100%",background:"#0ea5e9",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-            {saving?"Creating Invoice…":"✓ Confirm Sale & Create Invoice"}
-          </button>
-        );
-      })()}
+      <button onClick={confirmSale} disabled={saving} style={{width:"100%",background:"#0ea5e9",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+        {saving?"Creating Invoice…":"✓ Confirm Sale & Create Invoice"}
+      </button>
     </div>
   );
 }
@@ -1572,7 +1348,6 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
 function DriverWalkInTab({driverData, setDriverData, products, supabase, initCust, setDriverViewInv=()=>{}}){
   const uid2 = ()=>Math.random().toString(36).slice(2,9).toUpperCase();
   const fmt2 = n=>`$${Number(n||0).toFixed(2)}`;
-  const co         = driverData.co||null;                     // company settings — in scope everywhere
   const stateTaxes = driverData.stateTaxes||[];
   const customers  = driverData.customers||[];
 
@@ -1646,10 +1421,10 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
   };
 
   const getTaxRate = (custObj)=>{
-    if(!custObj||!co?.tax_enabled) return 0;
+    if(!custObj) return 0;
     const cs=(custObj.state||"").trim();
     const st=stateTaxes.find(s=>s.id?.toUpperCase()===cs.toUpperCase()||s.name?.toLowerCase()===cs.toLowerCase());
-    return st?.exempt?0:parseFloat(st?.rate||co?.tax_rate||0);
+    return st?.exempt?0:parseFloat(st?.rate||0);
   };
 
   const taxRate2 = getTaxRate(wiCustObj);
@@ -1673,7 +1448,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     const bal=parseFloat(allUnpaid.reduce((a,s)=>{
       const custSt=(s.state||"").trim();
       const st=stateTaxes.find(x=>x.id?.toUpperCase()===custSt.toUpperCase()||x.name?.toLowerCase()===custSt.toLowerCase());
-      const rate=(co?.tax_enabled&&!st?.exempt)?parseFloat(st?.rate||co?.tax_rate||0):0;
+      const rate=st?.exempt?0:parseFloat(st?.rate||0);
       const taxableAmt=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);
       const stax=parseFloat((taxableAmt*rate/100).toFixed(2));
       return a+s.total+stax+parseFloat(s.previous_balance||0);
@@ -1701,23 +1476,9 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const {data:seq}=await supabase.rpc("next_invoice_number");
       const invId="INV-"+String(seq||1).padStart(4,"0");
       const profit=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(wiCust,i.pid)-(p?.cost||0))*i.qty;},0);
-      const ns={company_id:co?.id||driverData?.co?.id,id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:nowStr(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:0,created_at:new Date().toISOString()};
+      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:0,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await Promise.all(saleItems.map(i=>{const p=products.find(x=>x.id===i.pid);return p?supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id):Promise.resolve();}));
-      // Auto-send WhatsApp invoice if enabled
-      if(co?.sms_invoices&&co?.meta_phone_id&&co?.meta_token&&wiCustObj?.phone){
-        const wiPhone=(wiCustObj.phone||"").replace(/[^0-9]/g,"");
-        const wiE164=wiPhone.startsWith("1")&&wiPhone.length===11?wiPhone:"1"+wiPhone;
-        const wiGt=(sub+(()=>{const st=(driverData.stateTaxes||[]).find(s=>s.id===(wiCustObj.state||""));const r=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);const tx=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);return parseFloat((tx*r/100).toFixed(2));})()+(wiPrevBal||0)).toFixed(2);
-        const wiPortal=(co?.portal_url||window.location.origin).replace(/\/+$/,"");
-        supabase.auth.getSession().then(({data:{session:s}})=>{
-          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`,{
-            method:"POST",
-            headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
-            body:JSON.stringify({to:wiE164,phone_number_id:co?.meta_phone_id,access_token:co?.meta_token,template_name:co.meta_template||"invoice_notification",params:[wiCustObj.name,invId,wiGt,`${wiPortal}/?invoice=${invId}`]}),
-          }).catch(()=>{});// silent - never block the sale
-        });
-      }
       let wiRecUrl="";
       if(wiReceiptFile){
         const ext=wiReceiptFile.name.split(".").pop();
@@ -1725,20 +1486,11 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
         const {data:upD,error:upE}=await supabase.storage.from("receipts").upload(path,wiReceiptFile,{upsert:true});
         if(!upE) wiRecUrl=supabase.storage.from("receipts").getPublicUrl(path).data.publicUrl;
       }
-      const wiIsUnpaid = wiPay==="unpaid";
-      if(wiIsUnpaid){
-        // Save as unpaid — collect later
-        await supabase.from("payments").insert({company_id:co?.id||driverData?.co?.id,id:"PMT-"+uid2(),sale_id:invId,status:"unpaid",method:null,amount:null,note:"Walk-in — collect later"});
-        setDriverData(prev=>({...prev,sales:[{...ns,_paid:false},...prev.sales]}));
-        setWiSales(prev=>[{...ns,_paid:false},...prev]);
-      }else{
-        // Save as paid immediately
-        await supabase.from("payments").insert({company_id:co?.id||driverData?.co?.id,id:"PMT-"+uid2(),sale_id:invId,status:"paid",method:wiPay,amount:totalDue,check_number:wiCheck||"",zelle_ref:wiZelle||"",note:"Walk-in sale",receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
-        setDriverData(prev=>({...prev,sales:[{...ns,_paid:true},...prev.sales]}));
-        setWiSales(prev=>[{...ns,_paid:true},...prev]);
-      }
+      await supabase.from("payments").insert({id:"PMT-"+uid2(),sale_id:invId,status:"paid",method:wiPay,amount:totalDue,check_number:wiCheck||"",zelle_ref:wiZelle||"",note:"Walk-in sale",receipt_url:wiRecUrl,collected_at:new Date().toISOString()});
+      setDriverData(prev=>({...prev, sales:[{...ns,_paid:true},...prev.sales]}));
+      setWiSales(prev=>[{...ns,_paid:true},...prev]);
       setWiItems({});setWiPrevBal(0);setWiPrevInvs([]);setWiCheck("");setWiZelle("");setWiReceiptFile(null);setWiReceiptUrl("");
-      setWiMsg({t:"success",m:wiIsUnpaid?`📤 Invoice ${invId} sent via WhatsApp — collect payment later`:`✅ Invoice ${invId} created & payment recorded`});
+      setWiMsg({t:"success",m:`[OK] Invoice ${invId} created! View it in History.`});
     }catch(e){setWiMsg({t:"error",m:e.message});}
     setWiSaving(false);
   };
@@ -1918,7 +1670,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       <div className="card" style={{padding:"14px 16px",marginBottom:12}}>
         <label style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:".08em",display:"block",marginBottom:8}}>PAYMENT METHOD</label>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-          {[["cash","💵 Cash"],["check","🧾 Check"],["zelle","⚡ Zelle"],["money_order","📮 M.O."],["card","💳 Card"],["unpaid","📤 Collect Later"]].map(([id,label])=>(
+          {[["cash","💵 Cash"],["check","🧾 Check"],["zelle","⚡ Zelle"],["money_order","📮 M.O."],["card","💳 Card"]].map(([id,label])=>(
             <button key={id} onClick={()=>setWiPay(id)}
               style={{padding:"9px 8px",borderRadius:9,border:`1.5px solid ${wiPay===id?"#0a1628":"#e5e7eb"}`,background:wiPay===id?"#0a1628":"#fff",color:wiPay===id?"#fff":"#6b7280",fontSize:12,fontWeight:wiPay===id?700:400,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
               {label}
@@ -1951,38 +1703,10 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       </div>
 
       {wiMsg&&<div style={{background:wiMsg.t==="success"?"#f0fdf4":"#fef2f2",border:`1px solid ${wiMsg.t==="success"?"#a7f3d0":"#fecaca"}`,borderRadius:8,padding:"10px 14px",fontSize:13,color:wiMsg.t==="success"?"#065f46":"#dc2626",marginBottom:10}}>{wiMsg.m}</div>}
-      {(()=>{
-        const wiLimit=parseFloat(wiCustObj?.credit_limit||0);
-        const wiNewTotal=totalDue;
-        const wiOverLimit=wiLimit>0&&wiNewTotal>wiLimit;
-        if(wiOverLimit&&wiCust&&sub>0) return(
-          <div style={{borderRadius:10,overflow:"hidden",border:"2px solid #dc2626",marginBottom:24}}>
-            <div style={{background:"#dc2626",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{color:"#fff",fontWeight:700,fontSize:13}}>🔴 CREDIT HOLD</span>
-              <span style={{color:"#fca5a5",fontSize:11}}>${wiNewTotal.toFixed(2)} / ${wiLimit.toFixed(2)} limit</span>
-            </div>
-            <div style={{background:"#fef2f2",padding:"12px 14px"}}>
-              <div style={{fontSize:12,color:"#dc2626",marginBottom:10}}>
-                Credit limit exceeded by <strong>${(wiNewTotal-wiLimit).toFixed(2)}</strong>. Collect payment first or request admin override.
-              </div>
-              <button onClick={async()=>{
-                try{
-                  await supabase.from("audit_log").insert({company_id:co?.id,id:Math.random().toString(36).slice(2,10).toUpperCase(),user_email:"walk-in",action:"CREDIT_OVERRIDE_REQUEST",entity:"Customer",detail:`Walk-in credit override request for ${wiCustObj?.name} — balance $${wiNewTotal.toFixed(2)} exceeds limit $${wiLimit.toFixed(2)}`,created_at:new Date().toISOString()});
-                  setWiMsg({t:"success",m:"✅ Override request sent to admin."});
-                }catch(e){setWiMsg({t:"error",m:e.message});}
-              }} style={{width:"100%",padding:"10px",borderRadius:8,border:"none",background:"#fbbf24",color:"#78350f",fontWeight:700,fontSize:12,cursor:"pointer"}}>
-                📩 Request Admin Override
-              </button>
-            </div>
-          </div>
-        );
-        return(
-          <button onClick={createWiSale} disabled={wiSaving||!wiCust||sub===0} className="btn-primary"
-            style={{width:"100%",justifyContent:"center",padding:"13px",marginBottom:24,background:(!wiCust||sub===0)?"#9ca3af":"#0a1628"}}>
-            {wiSaving?<><span className="sp">⟳</span> Creating…</>:wiPay==="unpaid"?"📤 Create Invoice & Send":"🧾 Create Invoice & Record Payment"}
-          </button>
-        );
-      })()}
+      <button onClick={createWiSale} disabled={wiSaving||!wiCust||sub===0} className="btn-primary"
+        style={{width:"100%",justifyContent:"center",padding:"13px",marginBottom:24,background:(!wiCust||sub===0)?"#9ca3af":"#0a1628"}}>
+        {wiSaving?<><span className="sp">⟳</span> Creating…</>:"🧾 Create Invoice & Record Payment"}
+      </button>
     </div>
   );
 
@@ -2226,11 +1950,6 @@ export default function OrderPortal() {
   const [co,        setCo]        = useState(null);
   const [loading,   setLoading]   = useState(true);
 
-  // Check for ?invoice=INV-XXXX in URL on load
-  const [invoiceParam] = useState(()=>new URLSearchParams(window.location.search).get("invoice")||null);
-  const [invoiceView,  setInvoiceView]  = useState(null);   // invoice to show from URL
-  const [invoiceLoading,setInvoiceLoading] = useState(false);
-
   // Flow: "home" | "register" | "order" | "review" | "confirm"
   const [step,      setStep]      = useState("home");
   const [isNew,     setIsNew]     = useState(false);
@@ -2275,15 +1994,13 @@ export default function OrderPortal() {
   const [createdSale, setCreatedSale] = useState(null);
   const [showPayment, setShowPayment] = useState(false);
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
-  const [driverSigData, setDriverSigData] = useState(null);
-  const [driverSigDrawing, setDriverSigDrawing] = useState(false);
   const [paymentSaving, setPaymentSaving] = useState(false);
 
   const collectPayment = async (sale, method) => {
     setPaymentSaving(true);
     try{
       const st = driverData?.stateTaxes?.find(s=>s.id===(sale.state||""));
-      const rate = (!co?.tax_enabled || st?.exempt) ? 0 : parseFloat(st?.rate||co?.tax_rate||0);
+      const rate = st?.exempt ? 0 : parseFloat(st?.rate||0);
       const taxable = (sale.items||[]).reduce((a,i)=>{
         const p = products.find(x=>x.id===i.pid);
         return isTaxableProd(p) ? a+(p?.price||0)*i.qty : a;
@@ -2297,7 +2014,6 @@ export default function OrderPortal() {
       const payData = {
         status:"paid",
         method,
-        signature_data:driverSigData||null,
         amount:total,
         check_number:payForm.checkNum||"",
         bank_name:payForm.bankName||"",
@@ -2308,11 +2024,10 @@ export default function OrderPortal() {
       if(existing){
         await supabase.from("payments").update(payData).eq("sale_id",sale.id);
       } else {
-        await supabase.from("payments").insert({company_id:co?.id||driverData?.co?.id,sale_id:sale.id,...payData});
+        await supabase.from("payments").insert({sale_id:sale.id,...payData});
       }
       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>s.id===sale.id?{...s,_paid:true}:s)}));
       setPayForm({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
-      setDriverSigData(null); // clear signature after payment recorded
     }catch(e){console.error("Payment error:",e.message);}
     setPaymentSaving(false);
   };
@@ -2348,23 +2063,6 @@ export default function OrderPortal() {
   const sigCanvasRef = useRef(null);
 
   // Load data
-  // Auto-load invoice from URL ?invoice=INV-XXXX
-  useEffect(()=>{
-    if(!invoiceParam||invoiceLoading) return;
-    setInvoiceLoading(true);
-    (async()=>{
-      try{
-        const[sR,pmR]=await Promise.all([
-          supabase.from("sales").select("*").eq("id",invoiceParam).single(),
-          supabase.from("payments").select("*").eq("sale_id",invoiceParam).single(),
-        ]);
-        if(sR.data) setInvoiceView({sale:sR.data,payment:pmR.data||null});
-        else setInvoiceView({error:"Invoice not found"});
-      }catch(e){setInvoiceView({error:e.message});}
-      setInvoiceLoading(false);
-    })();
-  },[invoiceParam]);
-
   useEffect(()=>{
     (async()=>{
       try{
@@ -2571,25 +2269,6 @@ export default function OrderPortal() {
       };
       const {error} = await supabase.from("orders").insert(rec);
       if(error) throw error;
-      // Auto-send WhatsApp order confirmation if enabled
-      if(co?.sms_invoices&&co?.meta_phone_id&&co?.meta_token&&selCust?.phone){
-        const cpPhone=(selCust.phone||"").replace(/[^0-9]/g,"");
-        const cpE164=cpPhone.startsWith("1")&&cpPhone.length===11?cpPhone:"1"+cpPhone;
-        const cpPortal=(co?.portal_url||window.location.origin).replace(/\/+$/,"");
-        supabase.auth.getSession().then(({data:{session:s}})=>{
-          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`,{
-            method:"POST",
-            headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
-            body:JSON.stringify({
-              to:cpE164,
-              phone_number_id:co?.meta_phone_id,
-              access_token:co?.meta_token,
-              template_name:co.meta_template||"invoice_notification",
-              params:[selCust.name,id,grandTotal.toFixed(2),`${cpPortal}/?invoice=${id}`],
-            }),
-          }).catch(()=>{});
-        });
-      }
       setOrder({
         ...rec,
         businessName: selCust.name,
@@ -2743,21 +2422,16 @@ export default function OrderPortal() {
     const allUnpaid = (custSales||[]).filter(s=>unpaidIds.has(s.id)||!(pmts||[]).find(p=>p.sale_id===s.id));
     // Fetch state taxes for accurate balance calculation
     const {data:staxes} = await supabase.from("state_taxes").select("*");
-    // Use latest unpaid invoice grand total — previous_balance is chained/cumulative
-    // so summing across all invoices double-counts prior balances
-    const sortedUnpaid = allUnpaid.sort((a,b)=>new Date(b.created_at||b.date)-new Date(a.created_at||a.date));
-    const latestU = sortedUnpaid[0];
-    let bal = 0;
-    if(latestU){
-      const st = (staxes||[]).find(x=>x.id===(latestU.state||""));
-      const rate = (co?.tax_enabled && !st?.exempt) ? parseFloat(st?.rate||co?.tax_rate||0) : 0;
-      const taxable = (latestU.items||[]).reduce((b,i)=>{
+    const bal = parseFloat(allUnpaid.reduce((a,s)=>{
+      const st = (staxes||[]).find(x=>x.id===(s.state||""));
+      const rate = st?.exempt ? 0 : parseFloat(st?.rate||co?.tax_rate||0);
+      const taxable = (s.items||[]).reduce((b,i)=>{
         const p = products.find(x=>x.id===i.pid);
         return isTaxableProd(p) ? b+(p?.price||0)*i.qty : b;
       }, 0);
       const tax = parseFloat((taxable*rate/100).toFixed(2));
-      bal = parseFloat((latestU.total + tax + parseFloat(latestU.previous_balance||0)).toFixed(2));
-    }
+      return a + s.total + tax + parseFloat(s.previous_balance||0);
+    }, 0).toFixed(2));
     setCustPrevBalance(bal);
     setCustPrevInvs(allUnpaid);
 
@@ -2924,107 +2598,6 @@ export default function OrderPortal() {
     </div>
   );
 
-  // ── INVOICE LINK VIEW (?invoice=INV-XXXX) ───────────────────────────────────
-  if(invoiceParam){
-    const fmt=n=>`$${parseFloat(n||0).toFixed(2)}`;
-    return(
-      <div className="portal" style={{minHeight:"100vh",background:"#f8fafc"}}>
-        <GS/>
-        <div style={{maxWidth:480,margin:"0 auto",padding:"32px 16px"}}>
-          {/* Header */}
-          <div style={{textAlign:"center",marginBottom:24}}>
-            <img src="/logo-sidebar.png" style={{height:56,width:56,objectFit:"cover",borderRadius:10,marginBottom:8}}/>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628"}}>{co?.name||"VitalWaveOne"}</div>
-            <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Invoice</div>
-          </div>
-
-          {invoiceLoading&&<div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>Loading invoice…</div>}
-
-          {invoiceView?.error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:12,padding:24,textAlign:"center",color:"#dc2626"}}>
-            <div style={{fontSize:24,marginBottom:8}}>⚠️</div>
-            <div style={{fontWeight:600}}>{invoiceView.error}</div>
-            <div style={{fontSize:12,color:"#9ca3af",marginTop:8}}>Invoice ID: {invoiceParam}</div>
-          </div>}
-
-          {invoiceView?.sale&&(()=>{
-            const s=invoiceView.sale;
-            const pmt=invoiceView.payment;
-            const paid=pmt?.status==="paid";
-            const cust=customers.find(c=>c.id===s.cust_id);
-            const subtotal=parseFloat(s.total||0);
-            const tax=(()=>{
-              if(!co?.tax_enabled)return 0;
-              const st=(portalStateTaxes||[]).find(x=>x.id===(s.state||""));
-              const rate=st?.exempt?0:parseFloat(st?.rate||co?.tax_rate||0);
-              const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
-              return parseFloat((taxable*rate/100).toFixed(2));
-            })();
-            const prevBal=parseFloat(s.previous_balance||0);
-            const grandTotal=subtotal+tax+prevBal;
-            return(
-              <div style={{background:"#fff",borderRadius:16,boxShadow:"0 4px 24px #0000000d",overflow:"hidden"}}>
-                {/* Status banner */}
-                <div style={{background:paid?"#059669":"#f59e0b",padding:"12px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{color:"#fff",fontWeight:700,fontSize:14}}>{paid?"✓ PAID":"⏳ PAYMENT DUE"}</span>
-                  <span style={{color:"#fff",fontSize:12,opacity:.85}}>{s.id}</span>
-                </div>
-
-                {/* Customer & date */}
-                <div style={{padding:"16px 20px",borderBottom:"1px solid #f1f5f9"}}>
-                  <div style={{fontWeight:700,fontSize:15,color:"#0a1628"}}>{cust?.name||s.cust_id}</div>
-                  <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>{s.date}</div>
-                </div>
-
-                {/* Items */}
-                <div style={{padding:"12px 20px",borderBottom:"1px solid #f1f5f9"}}>
-                  {(s.items||[]).map((item,i)=>{
-                    const p=products.find(x=>x.id===item.pid);
-                    return(
-                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",fontSize:13}}>
-                        <span style={{color:"#374151"}}>{p?.name||item.pid} × {item.qty}</span>
-                        <span style={{fontWeight:600,color:"#0a1628"}}>{fmt((p?.price||0)*item.qty)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Totals */}
-                <div style={{padding:"12px 20px",borderBottom:"1px solid #f1f5f9"}}>
-                  {[[`Subtotal`,fmt(subtotal),"#374151"],tax>0?[`Tax`,fmt(tax),"#7c3aed"]:null,prevBal>0?[`Previous Balance`,fmt(prevBal),"#dc2626"]:null].filter(Boolean).map(([l,v,c],i)=>(
-                    <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:4}}>
-                      <span style={{color:"#6b7280"}}>{l}</span><span style={{color:c}}>{v}</span>
-                    </div>
-                  ))}
-                  <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:18,marginTop:8,paddingTop:8,borderTop:"1px solid #e5e7eb"}}>
-                    <span style={{color:"#0a1628"}}>Total Due</span>
-                    <span style={{color:paid?"#059669":"#dc2626"}}>{fmt(grandTotal)}</span>
-                  </div>
-                </div>
-
-                {/* Payment status or pay button */}
-                <div style={{padding:"16px 20px"}}>
-                  {paid?(
-                    <div style={{textAlign:"center",color:"#059669",fontWeight:700,fontSize:15}}>✓ Payment received — Thank you!</div>
-                  ):(
-                    <div style={{textAlign:"center"}}>
-                      <div style={{fontSize:12,color:"#9ca3af",marginBottom:12}}>Contact your supplier to pay by cash, check, or Zelle</div>
-                      {co?.phone&&<a href={`tel:${co.phone}`} style={{display:"block",background:"#0a1628",color:"#fff",borderRadius:10,padding:"13px",textAlign:"center",fontWeight:700,fontSize:14,textDecoration:"none"}}>📞 Call {co.name||"Supplier"}</a>}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          <div style={{textAlign:"center",marginTop:20}}>
-            <a href="/" style={{fontSize:12,color:"#9ca3af",textDecoration:"none"}}>← Place a new order</a>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  // ─────────────────────────────────────────────────────────────────────────────
-
   return (
     <div className="portal">
       <GS/>
@@ -3183,7 +2756,7 @@ export default function OrderPortal() {
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:10,color:"#4b6080",marginBottom:4}}>TODAY'S REVENUE</div>
                   <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0ea5e9"}}>
-                    ${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=(!driverData.co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||driverData.co?.tax_rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)} collected
+                    ${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)} collected
                   </div>
                   <button onClick={async()=>{
                     const truckId = driverData.truck?.id;
@@ -3354,7 +2927,7 @@ export default function OrderPortal() {
                           </div>
                           <button onClick={()=>{
                             if(!window.confirm("Request inventory reset?\n\nThis will ask your admin to:\n- Return "+totalRemaining+" units to warehouse\n- Close your current load\n\nYou cannot undo this request.")) return;
-                            supabase.from("truck_resets").insert({company_id:co?.id||driverData?.co?.id,
+                            supabase.from("truck_resets").insert({
                               id:"RST-"+Math.random().toString(36).slice(2,8).toUpperCase(),
                               truck_id:driverData.truck?.id,
                               driver_name:driverData.truck?.driver,
@@ -3384,7 +2957,7 @@ export default function OrderPortal() {
                   {[
                     {l:"Customers",v:driverData.customers.length,e:"⛽",c:"#0ea5e9"},
                     {l:"Today's Sales",v:driverData.sales.filter(s=>new Date(s.created_at).toDateString()===new Date().toDateString()).length,e:"📄",c:"#7c3aed"},
-                    {l:"Collected Today",v:`$${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=(!driverData.co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||driverData.co?.tax_rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)}`,e:"💰",c:"#059669"},{l:"Balance Due",v:(()=>{const lastUnpaid=driverData.sales.filter(s=>!s._paid).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];if(!lastUnpaid)return "$0.00";const st=driverData.stateTaxes?.find(x=>x.id===(lastUnpaid.state||""));const rate=(!driverData.co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||driverData.co?.tax_rate||0);const taxable=(lastUnpaid.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return "$"+(lastUnpaid.total+tax+parseFloat(lastUnpaid.previous_balance||0)).toFixed(2);})(),e:"⏳",c:"#f59e0b"},
+                    {l:"Collected Today",v:`$${driverData.sales.filter(s=>s._paid&&new Date(s.created_at).toDateString()===new Date().toDateString()).reduce((a,s)=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return a+s.total+tax+parseFloat(s.previous_balance||0);},0).toFixed(2)}`,e:"💰",c:"#059669"},{l:"Balance Due",v:(()=>{const lastUnpaid=driverData.sales.filter(s=>!s._paid).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];if(!lastUnpaid)return "$0.00";const st=driverData.stateTaxes?.find(x=>x.id===(lastUnpaid.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);const taxable=(lastUnpaid.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0);const tax=parseFloat((taxable*rate/100).toFixed(2));return "$"+(lastUnpaid.total+tax+parseFloat(lastUnpaid.previous_balance||0)).toFixed(2);})(),e:"⏳",c:"#f59e0b"},
                   ].map(k=>(
                     <div key={k.l} className="card" style={{padding:"12px",textAlign:"center"}}>
                       <div style={{fontSize:20,marginBottom:3}}>{k.e}</div>
@@ -3408,7 +2981,7 @@ export default function OrderPortal() {
                       if(!newCustForm.name.trim()) return;
                       setNewCustSaving(true);
                       try{
-                        const rec={company_id:co?.id||driverData?.co?.id,id:"C"+uid(),name:newCustForm.name.trim(),address:newCustForm.address.trim(),phone:newCustForm.phone.trim(),email:newCustForm.email.trim(),state:newCustForm.state.trim(),notes:"",truck_id:driverData.truck?.id};
+                        const rec={id:"C"+uid(),name:newCustForm.name.trim(),address:newCustForm.address.trim(),phone:newCustForm.phone.trim(),email:newCustForm.email.trim(),state:newCustForm.state.trim(),notes:"",truck_id:driverData.truck?.id};
                         const{error}=await supabase.from("customers").insert(rec);
                         if(error)throw error;
                         setDriverData(prev=>({...prev,customers:[rec,...prev.customers]}));
@@ -3581,7 +3154,7 @@ export default function OrderPortal() {
               {driverTab==="load"&&<DriverLoadTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={co}/>}
 
               {/* ── SELL TAB ── */}
-              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={driverData.co||co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust} payForm={payForm} setPayForm={setPayForm} paymentSaving={paymentSaving} setPaymentSaving={setPaymentSaving} collectPayment={collectPayment} createdSale={createdSale} setCreatedSale={setCreatedSale} showPayment={showPayment} setShowPayment={setShowPayment} sigData={driverSigData} setSigData={setDriverSigData}/>}
+              {driverTab==="sell"&&<DriverSellTab driverData={driverData} setDriverData={setDriverData} products={products} supabase={supabase} co={driverData.co||co} initCust={driverSaleCust} setDriverSaleCust={setDriverSaleCust} payForm={payForm} setPayForm={setPayForm} paymentSaving={paymentSaving} setPaymentSaving={setPaymentSaving} collectPayment={collectPayment} createdSale={createdSale} setCreatedSale={setCreatedSale} showPayment={showPayment} setShowPayment={setShowPayment}/>}
 
               {/* ── EXPENSES TAB ── */}
               {driverTab==="expenses"&&<DriverExpensesTab driverData={driverData} supabase={supabase}/>}
@@ -3596,7 +3169,7 @@ export default function OrderPortal() {
                     const isPaid=s._paid||false;
                     const saleTax=(()=>{
                       const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));
-                      const rate=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);
+                      const rate=st?.exempt?0:parseFloat(st?.rate||0);
                       if(!rate)return 0;
                       const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
                       return parseFloat((taxable*rate/100).toFixed(2));
@@ -3666,7 +3239,7 @@ export default function OrderPortal() {
               {/* History Payment Modal */}
               {showHistoryPayment&&createdSaleForHistory&&(()=>{
                 const s=createdSaleForHistory;
-                const saleTax=(()=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);if(!rate)return 0;const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);return parseFloat((taxable*rate/100).toFixed(2));})();
+                const saleTax=(()=>{const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));const rate=st?.exempt?0:parseFloat(st?.rate||0);if(!rate)return 0;const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);return parseFloat((taxable*rate/100).toFixed(2));})();
                 const gt=parseFloat((s.total+saleTax).toFixed(2));
                 const cardTotal=parseFloat((gt*(1+CARD_FEE/100)).toFixed(2));
                 const methods=[{id:"cash",label:"💵 Cash",color:"#059669"},{id:"check",label:"🧾 Check",color:"#0369a1"},{id:"money_order",label:"📮 Money Order",color:"#7c3aed"},{id:"zelle",label:"⚡ Zelle",color:"#6366f1"},{id:"card",label:`💳 Card (+${CARD_FEE}%)`,color:"#dc2626"}];
@@ -4063,7 +3636,7 @@ export default function OrderPortal() {
       </div>}
 
       {/* ══ MY ACCOUNT ══ */}
-      {step==="myaccount"&&selCust&&<CustomerAccountView selCust={selCust} supabase={supabase} co={co} setStep={setStep} products={products} stateTaxes={portalStateTaxes}/>}
+      {step==="myaccount"&&selCust&&<CustomerAccountView selCust={selCust} supabase={supabase} co={co} setStep={setStep} products={products}/>}
 
       {/* ══ ORDER FORM ══ */}
       {step==="order"&&<div className="fu">
