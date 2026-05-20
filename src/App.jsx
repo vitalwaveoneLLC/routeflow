@@ -3275,6 +3275,72 @@ export default function App(){
   };
 
   useEffect(()=>{if(authReady&&session&&profile)loadAll();},[authReady,session,profile]);
+
+  // Auto-generate recurring orders that are due today — runs once after data loads
+  useEffect(()=>{
+    if(!recurringOrders.length||!isAdmin)return;
+    const todayName=new Date().toLocaleDateString("en-US",{weekday:"long"});
+    const uid5=()=>Math.random().toString(36).slice(2,8).toUpperCase();
+
+    const isDue=r=>{
+      if(!r.active)return false;
+      if(r.frequency==="Daily")return true;
+      if(r.frequency==="Weekly")return r.day===todayName;
+      if(r.frequency==="Bi-weekly"){
+        if(r.day!==todayName)return false;
+        if(!r.last_run)return true;
+        return Math.floor((new Date()-new Date(r.last_run))/(1000*60*60*24))>=14;
+      }
+      if(r.frequency==="Monthly"){
+        if(r.day!==todayName)return false;
+        if(!r.last_run)return true;
+        return Math.floor((new Date()-new Date(r.last_run))/(1000*60*60*24))>=28;
+      }
+      return false;
+    };
+
+    const dueOrders=recurringOrders.filter(isDue);
+    if(!dueOrders.length)return;
+
+    // Auto-generate silently in background
+    (async()=>{
+      const generated=[];
+      for(const r of dueOrders){
+        try{
+          const cust=customers.find(c=>c.id===r.cust_id);
+          const total=r.items.reduce((a,it)=>{const p=products.find(x=>x.id===it.pid);return a+(p?.price||0)*it.qty;},0);
+          const rec={
+            id:"ORD-"+uid5(),
+            cust_id:r.cust_id,
+            customer_name:cust?.name||r.cust_name,
+            customer_address:cust?.address||"",
+            customer_phone:cust?.phone||"",
+            date:new Date().toLocaleDateString(),
+            items:r.items,
+            subtotal:total,
+            tax:0,
+            total,
+            notes:`Auto-generated from recurring order ${r.id}${r.notes?` — ${r.notes}`:""}`,
+            status:"approved",
+            payment_method:"delivery",
+            truck_id:r.truck_id||null,
+            created_at:new Date().toISOString(),
+          };
+          const{error}=await supabase.from("orders").insert(rec);
+          if(!error){
+            await supabase.from("recurring_orders").update({last_run:new Date().toISOString()}).eq("id",r.id);
+            setRecurringOrders(prev=>prev.map(x=>x.id===r.id?{...x,last_run:new Date().toISOString()}:x));
+            setOrders(prev=>[rec,...prev]);
+            generated.push(cust?.name||r.cust_name);
+          }
+        }catch{}
+      }
+      if(generated.length>0){
+        showToast(`🔁 Auto-generated ${generated.length} recurring order${generated.length!==1?"s":""}: ${generated.join(", ")}`);
+        logAudit("AUTO-GENERATE","RecurringOrders",`Generated ${generated.length} orders: ${generated.join(", ")}`);
+      }
+    })();
+  },[recurringOrders.length,isAdmin]); // only re-run if count changes
   useEffect(()=>{if(co?.check_penalty!=null)setPenaltyEdit(String(co.check_penalty));},[co?.check_penalty]);
 
   // -- LEAFLET MAP --------------------------------------------------------------

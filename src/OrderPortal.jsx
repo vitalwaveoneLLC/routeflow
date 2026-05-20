@@ -891,10 +891,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
 
     setSaving(true);
     try{
-      const {data:seqData} = await supabase.rpc("next_invoice_number");
-      const invId = "INV-" + String(seqData||1).padStart(4,"0");
       const ns = {
-        id:invId,
         load_id:driverData.activeLoad?.id,
         truck_id:driverData.truck?.id,
         cust_id:selCust,
@@ -908,15 +905,31 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         check_penalty_applied: 0,
         created_at:new Date().toISOString()
       };
-      await supabase.from("sales").insert(ns);
-      await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
-      setDriverData(prev=>({...prev,sales:[ns,...prev.sales]}));
-      setCreatedSale(ns);
-      setShowPayment(true);
-      setItems({});
-      setSelCust("");
-      setFreshCustState("");
-      if(setDriverSaleCust) setDriverSaleCust(null);
+
+      if(!navigator.onLine){
+        // Save offline draft
+        const draftId="DRAFT-"+Math.random().toString(36).slice(2,8).toUpperCase();
+        const draft={...ns,id:draftId,_draftId:draftId,_truckId:driverData.truck?.id,_offline:true};
+        addDraft(draft);
+        setDriverData(prev=>({...prev,sales:[draft,...prev.sales]}));
+        const fakeCreatedSale={...draft,id:draftId};
+        setCreatedSale(fakeCreatedSale);
+        setShowPayment(true);
+        setItems({});setSelCust("");setFreshCustState("");
+        if(setDriverSaleCust)setDriverSaleCust(null);
+        setMsg({t:"success",m:`📵 Sale saved offline (${draftId}) — will sync when online`});
+      } else {
+        const {data:seqData} = await supabase.rpc("next_invoice_number");
+        const invId = "INV-" + String(seqData||1).padStart(4,"0");
+        const saleRecord={...ns,id:invId};
+        await supabase.from("sales").insert(saleRecord);
+        await supabase.from("payments").insert({sale_id:saleRecord.id,status:"unpaid"});
+        setDriverData(prev=>({...prev,sales:[saleRecord,...prev.sales]}));
+        setCreatedSale(saleRecord);
+        setShowPayment(true);
+        setItems({});setSelCust("");setFreshCustState("");
+        if(setDriverSaleCust)setDriverSaleCust(null);
+      }
     }catch(e){setMsg({t:"error",m:e.message});}
     setSaving(false);
   };
@@ -1955,6 +1968,13 @@ export default function OrderPortal() {
   const [isNew,     setIsNew]     = useState(false);
   const [isExisting,setIsExisting]= useState(false);
   const [isDriver,  setIsDriver]  = useState(false);
+  const [isOnline,  setIsOnline]  = useState(navigator.onLine);
+  const [draftQueue,setDraftQueue]= useState(()=>{
+    try{return JSON.parse(localStorage.getItem("vw_draft_queue")||"[]");}catch{return[];}
+  });
+  const saveDrafts=drafts=>{setDraftQueue(drafts);try{localStorage.setItem("vw_draft_queue",JSON.stringify(drafts));}catch{}};
+  const addDraft=draft=>{const d=[...draftQueue,draft];saveDrafts(d);return d;};
+  const removeDraft=id=>saveDrafts(draftQueue.filter(d=>d._draftId!==id));
   const [isWalkIn,       setIsWalkIn]       = useState(false);
   const [isCustPortal,   setIsCustPortal]   = useState(false);
   const [custPortalUser, setCustPortalUser] = useState(null); // logged-in customer
@@ -2120,6 +2140,36 @@ export default function OrderPortal() {
 
   const cats = useMemo(()=>["All",...new Set(products.map(p=>p.cat))],[products]);
   // Tax rate from customer's state - uses the same state_taxes table as all other platforms
+  // Online/offline detection + auto-sync on reconnect
+  useEffect(()=>{
+    const goOnline=async()=>{
+      setIsOnline(true);
+      // Auto-sync any pending drafts for current driver
+      const drafts=JSON.parse(localStorage.getItem("vw_draft_queue")||"[]");
+      if(!drafts.length)return;
+      let synced=0;
+      const remaining=[];
+      for(const draft of drafts){
+        try{
+          const{data:seqData}=await supabase.rpc("next_invoice_number");
+          const invId="INV-"+String(seqData||1).padStart(4,"0");
+          const ns={...draft,id:invId};
+          delete ns._draftId;delete ns._truckId;delete ns._offline;
+          await supabase.from("sales").insert(ns);
+          await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
+          synced++;
+        }catch{remaining.push(draft);}
+      }
+      localStorage.setItem("vw_draft_queue",JSON.stringify(remaining));
+      setDraftQueue(remaining);
+      if(synced>0)alert(`✅ Back online — synced ${synced} offline sale${synced!==1?"s":""}`);
+    };
+    const goOffline=()=>setIsOnline(false);
+    window.addEventListener("online",goOnline);
+    window.addEventListener("offline",goOffline);
+    return()=>{window.removeEventListener("online",goOnline);window.removeEventListener("offline",goOffline);};
+  },[]);
+
   const taxRate = useMemo(()=>{
     if(!selCust?.state) return 0;
     const st = portalStateTaxes.find(s=>s.id===selCust.state);
@@ -2822,6 +2872,44 @@ export default function OrderPortal() {
 
               {/* ── HOME TAB ── */}
               {driverTab==="dashboard"&&<div>
+                {/* Offline Banner */}
+                {!isOnline&&<div style={{background:"#1a0505",border:"2px solid #dc2626",borderRadius:10,padding:"12px 16px",marginBottom:12,display:"flex",gap:10,alignItems:"center"}}>
+                  <span style={{fontSize:22}}>📵</span>
+                  <div>
+                    <div style={{fontWeight:800,fontSize:13,color:"#dc2626"}}>YOU ARE OFFLINE</div>
+                    <div style={{fontSize:11,color:"#f87171",marginTop:2}}>Sales will be saved locally and synced when you reconnect.</div>
+                  </div>
+                </div>}
+                {/* Pending drafts banner */}
+                {draftQueue.filter(d=>d._truckId===driverData.truck?.id).length>0&&<div style={{background:"#fffbeb",border:"2px solid #f59e0b",borderRadius:10,padding:"12px 16px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                  <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                    <span style={{fontSize:22}}>⏳</span>
+                    <div>
+                      <div style={{fontWeight:800,fontSize:13,color:"#92400e"}}>{draftQueue.filter(d=>d._truckId===driverData.truck?.id).length} DRAFT SALE{draftQueue.filter(d=>d._truckId===driverData.truck?.id).length!==1?"S":""} PENDING SYNC</div>
+                      <div style={{fontSize:11,color:"#92400e",marginTop:2}}>Recorded offline — will sync automatically when online</div>
+                    </div>
+                  </div>
+                  {isOnline&&<button onClick={async()=>{
+                    const myDrafts=draftQueue.filter(d=>d._truckId===driverData.truck?.id);
+                    let synced=0;
+                    for(const draft of myDrafts){
+                      try{
+                        const{data:seqData}=await supabase.rpc("next_invoice_number");
+                        const invId="INV-"+String(seqData||1).padStart(4,"0");
+                        const ns={...draft,id:invId};
+                        delete ns._draftId;delete ns._truckId;delete ns._offline;
+                        await supabase.from("sales").insert(ns);
+                        await supabase.from("payments").insert({sale_id:ns.id,status:"unpaid"});
+                        setDriverData(prev=>({...prev,sales:[ns,...prev.sales]}));
+                        removeDraft(draft._draftId);
+                        synced++;
+                      }catch{}
+                    }
+                    if(synced>0)alert(`✅ Synced ${synced} offline sale${synced!==1?"s":""} successfully`);
+                  }} style={{background:"#059669",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                    ↑ Sync Now
+                  </button>}
+                </div>}
                 {/* Today's Route Quick Banner */}
                 {(()=>{
                   const today=new Date().toLocaleDateString("en-US",{weekday:"long"});
