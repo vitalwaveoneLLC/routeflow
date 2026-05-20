@@ -2147,6 +2147,11 @@ export default function OrderPortal() {
   const [co,        setCo]        = useState(null);
   const [loading,   setLoading]   = useState(true);
 
+  // Check for ?invoice=INV-XXXX in URL on load
+  const [invoiceParam] = useState(()=>new URLSearchParams(window.location.search).get("invoice")||null);
+  const [invoiceView,  setInvoiceView]  = useState(null);   // invoice to show from URL
+  const [invoiceLoading,setInvoiceLoading] = useState(false);
+
   // Flow: "home" | "register" | "order" | "review" | "confirm"
   const [step,      setStep]      = useState("home");
   const [isNew,     setIsNew]     = useState(false);
@@ -2264,6 +2269,23 @@ export default function OrderPortal() {
   const sigCanvasRef = useRef(null);
 
   // Load data
+  // Auto-load invoice from URL ?invoice=INV-XXXX
+  useEffect(()=>{
+    if(!invoiceParam||invoiceLoading) return;
+    setInvoiceLoading(true);
+    (async()=>{
+      try{
+        const[sR,pmR]=await Promise.all([
+          supabase.from("sales").select("*").eq("id",invoiceParam).single(),
+          supabase.from("payments").select("*").eq("sale_id",invoiceParam).single(),
+        ]);
+        if(sR.data) setInvoiceView({sale:sR.data,payment:pmR.data||null});
+        else setInvoiceView({error:"Invoice not found"});
+      }catch(e){setInvoiceView({error:e.message});}
+      setInvoiceLoading(false);
+    })();
+  },[invoiceParam]);
+
   useEffect(()=>{
     (async()=>{
       try{
@@ -2817,6 +2839,107 @@ export default function OrderPortal() {
       </div>
     </div>
   );
+
+  // ── INVOICE LINK VIEW (?invoice=INV-XXXX) ───────────────────────────────────
+  if(invoiceParam){
+    const fmt=n=>`$${parseFloat(n||0).toFixed(2)}`;
+    return(
+      <div className="portal" style={{minHeight:"100vh",background:"#f8fafc"}}>
+        <GS/>
+        <div style={{maxWidth:480,margin:"0 auto",padding:"32px 16px"}}>
+          {/* Header */}
+          <div style={{textAlign:"center",marginBottom:24}}>
+            <img src="/logo-sidebar.png" style={{height:56,width:56,objectFit:"cover",borderRadius:10,marginBottom:8}}/>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628"}}>{co?.name||"VitalWaveOne"}</div>
+            <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Invoice</div>
+          </div>
+
+          {invoiceLoading&&<div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>Loading invoice…</div>}
+
+          {invoiceView?.error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:12,padding:24,textAlign:"center",color:"#dc2626"}}>
+            <div style={{fontSize:24,marginBottom:8}}>⚠️</div>
+            <div style={{fontWeight:600}}>{invoiceView.error}</div>
+            <div style={{fontSize:12,color:"#9ca3af",marginTop:8}}>Invoice ID: {invoiceParam}</div>
+          </div>}
+
+          {invoiceView?.sale&&(()=>{
+            const s=invoiceView.sale;
+            const pmt=invoiceView.payment;
+            const paid=pmt?.status==="paid";
+            const cust=customers.find(c=>c.id===s.cust_id);
+            const subtotal=parseFloat(s.total||0);
+            const tax=(()=>{
+              if(!co?.tax_enabled)return 0;
+              const st=(portalStateTaxes||[]).find(x=>x.id===(s.state||""));
+              const rate=st?.exempt?0:parseFloat(st?.rate||co?.tax_rate||0);
+              const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
+              return parseFloat((taxable*rate/100).toFixed(2));
+            })();
+            const prevBal=parseFloat(s.previous_balance||0);
+            const grandTotal=subtotal+tax+prevBal;
+            return(
+              <div style={{background:"#fff",borderRadius:16,boxShadow:"0 4px 24px #0000000d",overflow:"hidden"}}>
+                {/* Status banner */}
+                <div style={{background:paid?"#059669":"#f59e0b",padding:"12px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{color:"#fff",fontWeight:700,fontSize:14}}>{paid?"✓ PAID":"⏳ PAYMENT DUE"}</span>
+                  <span style={{color:"#fff",fontSize:12,opacity:.85}}>{s.id}</span>
+                </div>
+
+                {/* Customer & date */}
+                <div style={{padding:"16px 20px",borderBottom:"1px solid #f1f5f9"}}>
+                  <div style={{fontWeight:700,fontSize:15,color:"#0a1628"}}>{cust?.name||s.cust_id}</div>
+                  <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>{s.date}</div>
+                </div>
+
+                {/* Items */}
+                <div style={{padding:"12px 20px",borderBottom:"1px solid #f1f5f9"}}>
+                  {(s.items||[]).map((item,i)=>{
+                    const p=products.find(x=>x.id===item.pid);
+                    return(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",fontSize:13}}>
+                        <span style={{color:"#374151"}}>{p?.name||item.pid} × {item.qty}</span>
+                        <span style={{fontWeight:600,color:"#0a1628"}}>{fmt((p?.price||0)*item.qty)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Totals */}
+                <div style={{padding:"12px 20px",borderBottom:"1px solid #f1f5f9"}}>
+                  {[[`Subtotal`,fmt(subtotal),"#374151"],tax>0?[`Tax`,fmt(tax),"#7c3aed"]:null,prevBal>0?[`Previous Balance`,fmt(prevBal),"#dc2626"]:null].filter(Boolean).map(([l,v,c],i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:4}}>
+                      <span style={{color:"#6b7280"}}>{l}</span><span style={{color:c}}>{v}</span>
+                    </div>
+                  ))}
+                  <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:18,marginTop:8,paddingTop:8,borderTop:"1px solid #e5e7eb"}}>
+                    <span style={{color:"#0a1628"}}>Total Due</span>
+                    <span style={{color:paid?"#059669":"#dc2626"}}>{fmt(grandTotal)}</span>
+                  </div>
+                </div>
+
+                {/* Payment status or pay button */}
+                <div style={{padding:"16px 20px"}}>
+                  {paid?(
+                    <div style={{textAlign:"center",color:"#059669",fontWeight:700,fontSize:15}}>✓ Payment received — Thank you!</div>
+                  ):(
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:12,color:"#9ca3af",marginBottom:12}}>Contact your supplier to pay by cash, check, or Zelle</div>
+                      {co?.phone&&<a href={`tel:${co.phone}`} style={{display:"block",background:"#0a1628",color:"#fff",borderRadius:10,padding:"13px",textAlign:"center",fontWeight:700,fontSize:14,textDecoration:"none"}}>📞 Call {co.name||"Supplier"}</a>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          <div style={{textAlign:"center",marginTop:20}}>
+            <a href="/" style={{fontSize:12,color:"#9ca3af",textDecoration:"none"}}>← Place a new order</a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
 
   return (
     <div className="portal">
