@@ -1657,6 +1657,7 @@ function DriverPerformance({trucks,sales,payments,customers,returns,expenses,loa
   const stats=trucks.map(t=>{
     const ts=sales.filter(s=>s.truck_id===t.id&&inPeriod(s.created_at||s.date));
     const revenue=ts.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+    const subtotal=ts.reduce((a,s)=>a+s.total,0);
     const profit=ts.reduce((a,s)=>a+parseFloat(s.profit||0),0);
     const collected=ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0);
     const collectionRate=revenue>0?((collected/revenue)*100).toFixed(0):0;
@@ -1664,7 +1665,7 @@ function DriverPerformance({trucks,sales,payments,customers,returns,expenses,loa
     const tLoads=loads.filter(l=>l.truck_id===t.id&&inPeriod(l.created_at));
     const tExp=expenses.filter(e=>e.truck_id===t.id&&inPeriod(e.created_at)).reduce((a,e)=>a+parseFloat(e.amount||0),0);
     const netProfit=profit-tExp;
-    const avgOrderVal=ts.length>0?(revenue/ts.length):0;
+    const avgOrderVal=ts.length>0?(subtotal/ts.length):0; // use subtotal for avg to exclude penalties/tax
     const returnCount=returns.filter(r=>r.truck_id===t.id&&inPeriod(r.created_at)).length;
     return{t,revenue,profit,collected,collectionRate,custCount,invoices:ts.length,loads:tLoads.length,expenses:tExp,netProfit,avgOrderVal,returnCount};
   }).sort((a,b)=>b.revenue-a.revenue);
@@ -3748,16 +3749,20 @@ export default function App(){
     }catch{}// silent — audit failures should never break the app
   };
 
-  // Lookups
-  const getP=id=>products.find(p=>p.id===id);
-  const getT=id=>trucks.find(t=>t.id===id);
-  const getC=id=>customers.find(c=>c.id===id);
-  const activeLoads=tid=>loads.filter(l=>l.truck_id===tid&&l.status==="out");
-  const activeLoad=tid=>activeLoads(tid).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0];
-  const pmtFor=sid=>payments.find(p=>p.sale_id===sid);
+  // -- O(1) LOOKUP MAPS (major performance fix) ----------------------------------
+  const productMap=useMemo(()=>new Map(products.map(p=>[p.id,p])),[products]);
+  const truckMap=useMemo(()=>new Map(trucks.map(t=>[t.id,t])),[trucks]);
+  const customerMap=useMemo(()=>new Map(customers.map(c=>[c.id,c])),[customers]);
+  const paymentMap=useMemo(()=>new Map(payments.map(p=>[p.sale_id,p])),[payments]);
+  const getP=useCallback(id=>productMap.get(id),[productMap]);
+  const getT=useCallback(id=>truckMap.get(id),[truckMap]);
+  const getC=useCallback(id=>customerMap.get(id),[customerMap]);
+  const pmtFor=useCallback(sid=>paymentMap.get(sid),[paymentMap]);
+  const activeLoads=useCallback(tid=>loads.filter(l=>l.truck_id===tid&&l.status==="out"),[loads]);
+  const activeLoad=useCallback(tid=>activeLoads(tid).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0],[activeLoads]);
 
   // -- CUSTOM PRICING -----------------------------------------------------------------------------
-  const parseCustomPrices=cust=>{try{const m=(cust?.notes||"").match(/CUSTOM_PRICES:({.*?})/);return m?JSON.parse(m[1]):{};}catch{return{};}};
+  const parseCustomPrices=useCallback(cust=>{try{const m=(cust?.notes||"").match(/CUSTOM_PRICES:({.*?})/);return m?JSON.parse(m[1]):{};}catch{return{};}},[]);
   const hasReturnedCheck=cust=>!!(cust?.notes||"").includes("RETURNED_CHECK:1");
   const RETURNED_CHECK_FEE=parseFloat(co?.check_penalty||50);
   const markCheckReturned=async(custId)=>{
@@ -3836,7 +3841,7 @@ export default function App(){
     }catch(e){showToast(e.message,"error");}
     setRcUploading(false);
   };
-  const getEffectivePrice=(custId,pid)=>{const cust=getC(custId);const cp=parseCustomPrices(cust);const custom=cp[pid];return(custom&&parseFloat(custom)>0)?parseFloat(custom):(getP(pid)?.price||0);};
+  const getEffectivePrice=useCallback((custId,pid)=>{const cust=getC(custId);const cp=parseCustomPrices(cust);const custom=cp[pid];return(custom&&parseFloat(custom)>0)?parseFloat(custom):(getP(pid)?.price||0);},[getC,getP,parseCustomPrices]);
   const saveCustomPrices=async(custId,newPrices)=>{
     const cust=getC(custId);if(!cust)return;
     const baseNotes=(cust.notes||"").replace(/CUSTOM_PRICES:\{[^{}]*\}/g,"").trim();
@@ -3849,96 +3854,85 @@ export default function App(){
   };
 
   // -- STATE TAX HELPERS ------------------------------------------------------
-  // isTaxableProd defined at module level - used consistently everywhere
-
-  const getStateTaxRate = stateId => {
+  const getStateTaxRate=useCallback(stateId=>{
     if(!stateId) return parseFloat(co?.tax_rate||0);
-    const st = stateTaxes.find(s=>s.id===stateId);
+    const st=stateTaxes.find(s=>s.id===stateId);
     if(!st) return parseFloat(co?.tax_rate||0);
-    return st.exempt ? 0 : parseFloat(st.rate||0);
-  };
+    return st.exempt?0:parseFloat(st.rate||0);
+  },[co,stateTaxes]);
 
-  // Calculate tax for a sale - only on taxable products
-  const calcSaleTax = (sale) => {
-    // Global tax toggle - if disabled return 0
+  // Calculate tax for a sale - only on taxable products, using actual sale price
+  const calcSaleTax = useCallback((sale) => {
     if(!co?.tax_enabled) return 0;
     const cust = getC(sale.cust_id);
     const stateId = sale.state || cust?.state || "";
     const rate = getStateTaxRate(stateId);
     if(rate === 0) return 0;
-    // Sum only taxable items (tobacco/nicotine only)
+    // Use effective price (respects custom pricing) not standard price
     const taxableSubtotal = (sale.items||[]).reduce((a,item)=>{
       const p = getP(item.pid);
-      return isTaxableProd(p) ? a + (p?.price||0)*item.qty : a;
+      if(!isTaxableProd(p)) return a;
+      const effPrice = getEffectivePrice(sale.cust_id, item.pid);
+      return a + effPrice * item.qty;
     }, 0);
     return parseFloat((taxableSubtotal * rate / 100).toFixed(2));
-  };
+  },[co,getC,getP,getStateTaxRate,getEffectivePrice]);
 
-  const calcSaleGrandTotal = sale => sale.total + calcSaleTax(sale) + parseFloat(sale.previous_balance||0);
-  const getCreatedBy = sale => {
+  const calcSaleGrandTotal=useCallback(sale=>parseFloat((sale.total+calcSaleTax(sale)+parseFloat(sale.previous_balance||0)).toFixed(2)),[calcSaleTax]);
+  const getCreatedBy=useCallback(sale=>{
     if(sale.truck_id){const d=getT(sale.truck_id)?.driver;return d?`🚚 ${d}`:"🚚 Driver";}
     if(sale.id?.startsWith("ORD-")||sale.notes?.includes("portal")||sale.notes?.includes("Portal")) return "📱 Customer Portal";
     return "🏪 Walk-in";
-  };
-  const getSaleState = sale => {
-    const cust = getC(sale.cust_id);
-    return sale.state || cust?.state || "";
-  };
+  },[getT]);
+  const getSaleState=useCallback(sale=>{const cust=getC(sale.cust_id);return sale.state||cust?.state||"";},[getC]);
 
-  // truckInv: aggregate ALL active loads for a truck (driver may load multiple times)
-  const truckInv=tid=>{
-    const allLoads=loads.filter(l=>l.truck_id===tid&&l.status==="out");
-    if(!allLoads.length) return [];
-    const allLoadIds=new Set(allLoads.map(l=>l.id));
-
-    // Aggregate loaded qty per product across all active loads
-    const loadedMap={};
-    allLoads.forEach(load=>(load.items||[]).forEach(i=>{
-      loadedMap[i.pid]=(loadedMap[i.pid]||0)+i.qty;
-    }));
-
-    // Aggregate sold qty per product across all sales tied to these loads
-    const soldMap={};
-    sales.filter(s=>allLoadIds.has(s.load_id)).forEach(s=>
-      (s.items||[]).forEach(i=>{soldMap[i.pid]=(soldMap[i.pid]||0)+i.qty;})
-    );
-
-    // Aggregate returned qty
-    const retMap={};
-    returns.filter(r=>allLoadIds.has(r.load_id)).forEach(r=>
-      (r.items||[]).forEach(i=>{retMap[i.pid]=(retMap[i.pid]||0)+i.qty;})
-    );
-
-    return Object.entries(loadedMap)
-      .map(([pid,loaded])=>({
-        pid,
-        loaded,
-        sold:soldMap[pid]||0,
-        returned:retMap[pid]||0,
-        remaining:Math.max(0,loaded-(soldMap[pid]||0)-(retMap[pid]||0)),
-      }))
-      .filter(i=>i.loaded>0);
-  };
+  // Fix #9: truckInv memoized per truck using a single map computation
+  const truckInvMap=useMemo(()=>{
+    const map={};
+    trucks.forEach(t=>{
+      const allLoads=loads.filter(l=>l.truck_id===t.id&&l.status==="out");
+      if(!allLoads.length){map[t.id]=[];return;}
+      const allLoadIds=new Set(allLoads.map(l=>l.id));
+      const loadedMap={};allLoads.forEach(load=>(load.items||[]).forEach(i=>{loadedMap[i.pid]=(loadedMap[i.pid]||0)+i.qty;}));
+      const soldMap={};sales.filter(s=>allLoadIds.has(s.load_id)).forEach(s=>(s.items||[]).forEach(i=>{soldMap[i.pid]=(soldMap[i.pid]||0)+i.qty;}));
+      const retMap={};returns.filter(r=>allLoadIds.has(r.load_id)).forEach(r=>(r.items||[]).forEach(i=>{retMap[i.pid]=(retMap[i.pid]||0)+i.qty;}));
+      map[t.id]=Object.entries(loadedMap).map(([pid,loaded])=>({pid,loaded,sold:soldMap[pid]||0,returned:retMap[pid]||0,remaining:Math.max(0,loaded-(soldMap[pid]||0)-(retMap[pid]||0))})).filter(i=>i.loaded>0);
+    });
+    return map;
+  },[trucks,loads,sales,returns]);
+  const truckInv=useCallback(tid=>truckInvMap[tid]||[],[truckInvMap]);
 
   const myTruckId=isAdmin?null:profile?.truck_id;
-  const visTrucks=isAdmin?trucks:trucks.filter(t=>t.id===myTruckId);
-  const visSales=isAdmin?sales:sales.filter(s=>s.truck_id===myTruckId);
-  const visCustomers=isAdmin?customers:customers.filter(c=>c.truck_id===myTruckId);
+  const visTrucks=useMemo(()=>isAdmin?trucks:trucks.filter(t=>t.id===myTruckId),[isAdmin,trucks,myTruckId]);
+  const visSales=useMemo(()=>isAdmin?sales:sales.filter(s=>s.truck_id===myTruckId),[isAdmin,sales,myTruckId]);
+  const visCustomers=useMemo(()=>isAdmin?customers:customers.filter(c=>c.truck_id===myTruckId),[isAdmin,customers,myTruckId]);
 
   const totalRevenue=useMemo(()=>visSales.reduce((a,s)=>a+s.total,0),[visSales]);
-  const totalProfit=useMemo(()=>visSales.reduce((a,s)=>a+s.profit,0),[visSales]);
-  const totalTax=useMemo(()=>visSales.reduce((a,s)=>a+calcSaleTax(s),0),[visSales,stateTaxes,products,customers]);
-  const totalAR=useMemo(()=>visSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),[visSales,payments,stateTaxes,products,customers]);
+  const totalProfit=useMemo(()=>visSales.reduce((a,s)=>a+(s.profit||0),0),[visSales]);
+  const totalTax=useMemo(()=>visSales.reduce((a,s)=>a+calcSaleTax(s),0),[visSales,stateTaxes,productMap,customerMap,co]);
+  const totalAR=useMemo(()=>visSales.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),[visSales,paymentMap,stateTaxes,productMap,customerMap,co]);
   // Collected (paid only)
-  const paidSales=useMemo(()=>visSales.filter(s=>pmtFor(s.id)?.status==="paid"),[visSales,payments]);
+  const paidSales=useMemo(()=>visSales.filter(s=>pmtFor(s.id)?.status==="paid"),[visSales,paymentMap]);
   const collectedRevenue=useMemo(()=>paidSales.reduce((a,s)=>a+s.total,0),[paidSales]);
-  const collectedProfit=useMemo(()=>paidSales.reduce((a,s)=>a+s.profit,0),[paidSales]);
+  const collectedProfit=useMemo(()=>paidSales.reduce((a,s)=>a+(s.profit||0),0),[paidSales]);
+  const collectedTax=useMemo(()=>paidSales.reduce((a,s)=>a+calcSaleTax(s),0),[paidSales,stateTaxes,productMap,customerMap,co]);
 
-  const settlementData=tid=>{
+  // Fix #7: settlementData — consistent use of calcSaleGrandTotal for all monetary totals
+  const settlementData=useCallback(tid=>{
     const ts=sales.filter(s=>s.truck_id===tid),tr=returns.filter(r=>r.truck_id===tid),al=loads.filter(l=>l.truck_id===tid);
-    const rev=ts.reduce((a,s)=>a+s.total,0),prof=ts.reduce((a,s)=>a+s.profit,0);
-    return{truckSales:ts,loadedUnits:al.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+i.qty,0),0),soldUnits:ts.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>b+i.qty,0),0),retUnits:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0),rev,prof,cogs:rev-prof,tax:ts.reduce((a,s)=>a+calcSaleTax(s),0),collected:ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),outstanding:ts.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0)};
-  };
+    const rev=ts.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+    const prof=ts.reduce((a,s)=>a+(s.profit||0),0);
+    return{
+      truckSales:ts,
+      loadedUnits:al.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+i.qty,0),0),
+      soldUnits:ts.reduce((a,s)=>a+(s.items||[]).reduce((b,i)=>b+i.qty,0),0),
+      retUnits:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0),
+      rev,prof,cogs:ts.reduce((a,s)=>a+s.total,0)-prof,
+      tax:ts.reduce((a,s)=>a+calcSaleTax(s),0),
+      collected:ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),
+      outstanding:ts.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),
+    };
+  },[sales,returns,loads,calcSaleGrandTotal,calcSaleTax,pmtFor]);
 
   // -- CSV IMPORT -------------------------------------------------------------
   const[csvPreview,setCsvPreview]=useState([]);
@@ -4546,6 +4540,20 @@ export default function App(){
           await supabase.from("payments").insert({sale_id:ns.id,status:pmtStatus,method:order.payment_method||"cash"});
           setSales(prev=>[ns,...prev]);
           setPayments(prev=>[...prev,{sale_id:ns.id,status:pmtStatus}]);
+          // Auto-WhatsApp invoice if enabled
+          if(co?.whatsapp_invoices&&co?.meta_phone_id&&co?.meta_token){
+            const cust=getC(ns.cust_id);
+            const phone=(cust?.phone||"").replace(/\D/g,"");
+            if(phone.length>=10){
+              const to=phone.length===10?"1"+phone:phone;
+              const portalUrl=`${window.location.origin}/?invoice=${ns.id}`;
+              supabase.functions.invoke("send-whatsapp",{body:{
+                to,phone_number_id:co.meta_phone_id,access_token:co.meta_token,
+                template_name:co.meta_template||"invoice_notification",
+                params:[cust.name,ns.id,ns.total.toFixed(2),portalUrl],
+              }});
+            }
+          }
         }catch(e){console.error("Auto-process error:",e);}
       }
     };
@@ -4817,7 +4825,7 @@ export default function App(){
           {/* ══ DASHBOARD ══ */}
           {tab==="dashboard"&&<div className="fu">
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:18}}>
-              {[{l:"Collected",v:fmt(collectedRevenue),c:"#059669",s:`${paidSales.length} paid / ${visSales.length} total`},{l:"Gross Profit",v:fmt(collectedProfit),c:"#7c3aed",s:collectedRevenue>0?`${((collectedProfit/collectedRevenue)*100).toFixed(1)}% margin`:"—"},{l:"Tax Collected",v:fmt(paidSales.reduce((a,s)=>a+calcSaleTax(s),0)),c:"#7c3aed",s:"tobacco only"},{l:"AR Outstanding",v:fmt(totalAR),c:"#dc2626",s:"unpaid"}].map(k=>(
+              {[{l:"Collected",v:fmt(collectedRevenue),c:"#059669",s:`${paidSales.length} paid / ${visSales.length} total`},{l:"Gross Profit",v:fmt(collectedProfit),c:"#7c3aed",s:collectedRevenue>0?`${((collectedProfit/collectedRevenue)*100).toFixed(1)}% margin`:"—"},{l:"Tax Collected",v:fmt(collectedTax),c:"#7c3aed",s:"tobacco only"},{l:"AR Outstanding",v:fmt(totalAR),c:"#dc2626",s:"unpaid"}].map(k=>(
                 <div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div><div style={{fontSize:10,color:"#9ca3af",marginTop:4}}>{k.s}</div></div>
               ))}
             </div>
@@ -5956,12 +5964,19 @@ export default function App(){
               </div>
               <div className="card" style={{padding:22}}>
                 <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:19,color:"#212121",marginBottom:16}}>DRIVER P&L</div>
-                {trucks.map(t=>{const ts=sales.filter(s=>s.truck_id===t.id);const rev=ts.reduce((a,s)=>a+s.total,0),prof=ts.reduce((a,s)=>a+s.profit,0);const mg=rev>0?((prof/rev)*100).toFixed(1):0;return(<div key={t.id} style={{marginBottom:14,paddingBottom:14,borderBottom:"1px solid #e5e7eb"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>{t.driver}</span><span className="bdg bb2">{t.route||t.plate}</span></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>{[{l:"Revenue",v:fmt(rev),c:"#059669"},{l:"Profit",v:fmt(prof),c:"#7c3aed"},{l:"Margin",v:`${mg}%`,c:"#7c3aed"},{l:"Invoices",v:ts.length,c:"#7c3aed"}].map(k=><div key={k.l} style={{padding:"5px 8px",background:"#f9fafb",borderRadius:5}}><div style={{fontSize:9,color:"#9ca3af",letterSpacing:".08em"}}>{k.l}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:k.c}}>{k.v}</div></div>)}</div></div>);})}
+                {trucks.map(t=>{const ts=sales.filter(s=>s.truck_id===t.id);const rev=ts.reduce((a,s)=>a+calcSaleGrandTotal(s),0),prof=ts.reduce((a,s)=>a+(s.profit||0),0);const mg=rev>0?((prof/rev)*100).toFixed(1):0;return(<div key={t.id} style={{marginBottom:14,paddingBottom:14,borderBottom:"1px solid #e5e7eb"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>{t.driver}</span><span className="bdg bb2">{t.route||t.plate}</span></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>{[{l:"Revenue",v:fmt(rev),c:"#059669"},{l:"Profit",v:fmt(prof),c:"#7c3aed"},{l:"Margin",v:`${mg}%`,c:"#7c3aed"},{l:"Invoices",v:ts.length,c:"#7c3aed"}].map(k=><div key={k.l} style={{padding:"5px 8px",background:"#f9fafb",borderRadius:5}}><div style={{fontSize:9,color:"#9ca3af",letterSpacing:".08em"}}>{k.l}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:k.c}}>{k.v}</div></div>)}</div></div>);})}
               </div>
             </div>
             <div className="card"><div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>PRODUCT BREAKDOWN</div>
             <div className="tw"><table><thead><tr><th>Product</th><th>Cat</th><th>Sold</th><th>Revenue</th><th>COGS</th><th>Profit</th><th>Margin</th><th>Shelf</th></tr></thead>
-            <tbody>{products.map(p=>{const ps=sales.flatMap(s=>(s.items||[]).filter(i=>i.pid===p.id));const units=ps.reduce((a,i)=>a+i.qty,0),rev=units*p.price,cogs=units*p.cost,prof=rev-cogs;const mg=rev>0?((prof/rev)*100).toFixed(1):((p.price-p.cost)/p.price*100).toFixed(1);return(<tr key={p.id}><td style={{color:"#212121",fontWeight:600}}>{p.name}</td><td><span className="bdg bt">{p.cat}</span></td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:"#6b7280"}}>{units}</td><td><span className="bdg bg2">{fmt(rev)}</span></td><td style={{color:"#dc2626"}}>{fmt(cogs)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(prof)}</td><td><span className="bdg ba2">{mg}%</span></td><td style={{color:"#6b7280"}}>{p.shelf}</td></tr>);})}</tbody></table></div>
+            <tbody>{products.map(p=>{
+              const ps=sales.flatMap(s=>(s.items||[]).filter(i=>i.pid===p.id).map(i=>({...i,saleId:s.id,custId:s.cust_id})));
+              const units=ps.reduce((a,i)=>a+i.qty,0);
+              const rev=ps.reduce((a,i)=>a+getEffectivePrice(i.custId,p.id)*i.qty,0);
+              const cogs=units*p.cost,prof=rev-cogs;
+              const mg=rev>0?((prof/rev)*100).toFixed(1):((p.price-p.cost)/Math.max(p.price,0.01)*100).toFixed(1);
+              return(<tr key={p.id}><td style={{color:"#212121",fontWeight:600}}>{p.name}</td><td><span className="bdg bt">{p.cat}</span></td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:15,color:"#6b7280"}}>{units}</td><td><span className="bdg bg2">{fmt(rev)}</span></td><td style={{color:"#dc2626"}}>{fmt(cogs)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(prof)}</td><td><span className="bdg ba2">{mg}%</span></td><td style={{color:"#6b7280"}}>{p.shelf}</td></tr>);
+            })}</tbody></table></div>
             </div>
           </div>}
 

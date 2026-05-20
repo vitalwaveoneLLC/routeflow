@@ -949,6 +949,20 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         setShowPayment(true);
         setItems({});setSelCust("");setFreshCustState("");
         if(setDriverSaleCust)setDriverSaleCust(null);
+        // Auto-WhatsApp invoice if enabled
+        if(co?.whatsapp_invoices&&co?.meta_phone_id&&co?.meta_token){
+          const cust=(driverData.customers||[]).find(c=>c.id===saleRecord.cust_id);
+          const phone=(cust?.phone||"").replace(/\D/g,"");
+          if(phone.length>=10){
+            const to=phone.length===10?"1"+phone:phone;
+            const portalUrl=`${window.location.origin}/?invoice=${saleRecord.id}`;
+            supabase.functions.invoke("send-whatsapp",{body:{
+              to,phone_number_id:co.meta_phone_id,access_token:co.meta_token,
+              template_name:co.meta_template||"invoice_notification",
+              params:[cust.name,saleRecord.id,saleRecord.total.toFixed(2),portalUrl],
+            }});
+          }
+        }
       }
     }catch(e){setMsg({t:"error",m:e.message});}
     setSaving(false);
@@ -1524,6 +1538,21 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       setWiSales(prev=>[{...ns,_paid:true},...prev]);
       setWiItems({});setWiPrevBal(0);setWiPrevInvs([]);setWiCheck("");setWiZelle("");setWiReceiptFile(null);setWiReceiptUrl("");
       setWiMsg({t:"success",m:`[OK] Invoice ${invId} created! View it in History.`});
+      // Auto-WhatsApp invoice if enabled
+      const wiCo=driverData?.co;
+      if(wiCo?.whatsapp_invoices&&wiCo?.meta_phone_id&&wiCo?.meta_token){
+        const wiCustObj2=(driverData?.customers||[]).find(c=>c.id===wiCust);
+        const phone=(wiCustObj2?.phone||"").replace(/\D/g,"");
+        if(phone.length>=10){
+          const to=phone.length===10?"1"+phone:phone;
+          const portalUrl=`${window.location.origin}/?invoice=${invId}`;
+          supabase.functions.invoke("send-whatsapp",{body:{
+            to,phone_number_id:wiCo.meta_phone_id,access_token:wiCo.meta_token,
+            template_name:wiCo.meta_template||"invoice_notification",
+            params:[wiCustObj2.name,invId,sub.toFixed(2),portalUrl],
+          }});
+        }
+      }
     }catch(e){setWiMsg({t:"error",m:e.message});}
     setWiSaving(false);
   };
@@ -2035,6 +2064,7 @@ export default function OrderPortal() {
   const [showPayment, setShowPayment] = useState(false);
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
   const [paymentSaving, setPaymentSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
 
   const collectPayment = async (sale, method) => {
     setPaymentSaving(true);
