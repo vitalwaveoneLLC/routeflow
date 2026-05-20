@@ -5307,7 +5307,7 @@ export default function App(){
                 </div>
                 <div className="tw">
                   <table>
-                    <thead><tr><th>Customer</th><th>State</th><th>Driver</th><th>Invoices</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Paid</th><th>Outstanding</th></tr></thead>
+                    <thead><tr><th>Customer</th><th>State</th><th>Created By</th><th>Invoices</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Paid</th><th>Outstanding</th></tr></thead>
                     <tbody>
                       {customers.map(c=>{
                         const custSales=sumSales.filter(s=>s.cust_id===c.id);
@@ -5353,7 +5353,7 @@ export default function App(){
                     🧾 INVOICES — {invSales.length} TOTAL
                   </div>
                   <button className="btn bpr" onClick={()=>{
-                    const rows=[["Invoice","Date","Customer","State","Driver","Subtotal","Tax (Tobacco)","Grand Total","Status"]];
+                    const rows=[["Invoice","Date","Customer","State","Created By","Subtotal","Tax (Tobacco)","Grand Total","Status"]];
                     invSales.forEach(s=>{
                       const cust=getC(s.cust_id);
                       const st=cust?.state||"TX";
@@ -5368,7 +5368,7 @@ export default function App(){
                 </div>
                 <div className="tw">
                   <table>
-                    <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>State</th><th>Driver</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>State</th><th>Created By</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Status</th></tr></thead>
                     <tbody>
                       {invSales.map(s=>{
                         const cust=getC(s.cust_id);
@@ -5559,7 +5559,7 @@ export default function App(){
                 :<div style={{overflowX:"auto"}}>
                   <table style={{width:"100%",borderCollapse:"collapse"}}>
                     <thead><tr style={{background:"#0a1628",color:"#fff"}}>
-                      {["Invoice","Date","Customer","Driver","Grand Total","Status","Actions"].map(h=>(
+                      {["Invoice","Date","Customer","Created By","Grand Total","Status","Actions"].map(h=>(
                         <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
                       ))}
                     </tr></thead>
@@ -5610,13 +5610,13 @@ export default function App(){
               </div>
               {paymentsLog.length===0?<Empty icon="💳" msg="NO PAYMENTS RECORDED YET"/>:(
                 <div className="tw"><table>
-                  <thead><tr><th>ID</th><th>Date</th><th>Customer</th><th>Driver</th><th>Method</th><th>Amount</th><th>Ref #</th><th>Invoices</th><th>Note</th><th></th></tr></thead>
+                  <thead><tr><th>ID</th><th>Date</th><th>Customer</th><th>Created By</th><th>Method</th><th>Amount</th><th>Ref #</th><th>Invoices</th><th>Note</th><th></th></tr></thead>
                   <tbody>{paymentsLog.map(p=>(
                     <tr key={p.id}>
                       <td><span className="tag" style={{background:"#f0fdf4",color:"#065f46"}}>{p.id}</span></td>
                       <td style={{fontSize:11,color:"#6b7280"}}>{p.date}</td>
                       <td style={{fontWeight:600}}>{getC(p.cust_id)?.name}</td>
-                      <td style={{color:"#6b7280"}}>{p.collected_by}</td>
+                      <td style={{color:"#6b7280",fontSize:11}}>{(()=>{const sale=sales.find(s=>s.id===p.sale_id||((p.invoice_ids||[]).includes(s.id)));return sale?getCreatedBy(sale):p.collected_by||"—";})()}</td>
                       <td>
                         <span className={`bdg ${p.method==="cash"?"bg2":p.method==="check"?"bb2":"ba2"}`}>
                           {methodIcon(p.method)} {methodLabel(p.method)}
@@ -6615,7 +6615,7 @@ export default function App(){
                 :<div className="card" style={{overflow:"hidden"}}>
                   <table>
                     <thead><tr>
-                      {["Invoice","Customer","Driver","Date","Check Image","Penalty Applied"].map(h=><th key={h}>{h}</th>)}
+                      {["Invoice","Customer","Created By","Date","Check Image","Penalty Applied"].map(h=><th key={h}>{h}</th>)}
                     </tr></thead>
                     <tbody>
                       {rcPayments.map(p=>{
@@ -6627,7 +6627,7 @@ export default function App(){
                           <tr key={p.sale_id}>
                             <td><span style={{fontWeight:700,color:"#7c3aed"}}>{p.sale_id}</span></td>
                             <td>{cust?.name||"—"}</td>
-                            <td style={{color:"#6b7280"}}>{truck?.driver||"Walk-in"}</td>
+                            <td style={{color:"#6b7280",fontSize:11}}>{getCreatedBy(sale||{truck_id:truck?.id})}</td>
                             <td style={{color:"#6b7280",fontSize:11}}>{sale?.date||"—"}</td>
                             <td>
                               {p.returned_check_url
