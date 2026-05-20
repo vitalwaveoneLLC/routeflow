@@ -1029,7 +1029,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           const smsTaxable=(ns.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
           const smsTax=parseFloat((smsTaxable*smsRate/100).toFixed(2));
           const smsGt=(ns.total+smsTax+parseFloat(ns.previous_balance||0)).toFixed(2);
-          const smsPortal=window.location.origin;
+          const smsPortal=(co?.portal_url||window.location.origin).replace(/\/+$/,"");
           // Template params: {{1}}=name {{2}}=invoiceId {{3}}=amount {{4}}=link
           const smsParams=[smsCust.name,ns.id,smsGt,`${smsPortal}/?invoice=${ns.id}`];
           sendDriverSMS(smsCust.phone,smsParams);
@@ -1667,7 +1667,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
         const wiPhone=(wiCustObj.phone||"").replace(/[^0-9]/g,"");
         const wiE164=wiPhone.startsWith("1")&&wiPhone.length===11?wiPhone:"1"+wiPhone;
         const wiGt=(sub+(()=>{const st=(driverData.stateTaxes||[]).find(s=>s.id===(wiCustObj.state||""));const r=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);const tx=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);return parseFloat((tx*r/100).toFixed(2));})()+(wiPrevBal||0)).toFixed(2);
-        const wiPortal=window.location.origin;
+        const wiPortal=(co?.portal_url||window.location.origin).replace(/\/+$/,"");
         supabase.auth.getSession().then(({data:{session:s}})=>{
           fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`,{
             method:"POST",
@@ -2496,7 +2496,7 @@ export default function OrderPortal() {
       if(co?.sms_invoices&&co?.meta_phone_id&&co?.meta_token&&selCust?.phone){
         const cpPhone=(selCust.phone||"").replace(/[^0-9]/g,"");
         const cpE164=cpPhone.startsWith("1")&&cpPhone.length===11?cpPhone:"1"+cpPhone;
-        const cpPortal=window.location.origin;
+        const cpPortal=(co?.portal_url||window.location.origin).replace(/\/+$/,"");
         supabase.auth.getSession().then(({data:{session:s}})=>{
           fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`,{
             method:"POST",

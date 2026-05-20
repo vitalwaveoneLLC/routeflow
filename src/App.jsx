@@ -3850,7 +3850,7 @@ export default function App(){
   // Template: "Hi {{1}}, invoice {{2}} for ${{3}} is ready. View: {{4}}"
   const buildSMSInvoice=(sale,cust)=>{
     const gt=calcSaleGrandTotal(sale);
-    const portalUrl=window.location.origin;
+    const portalUrl=(co?.portal_url||window.location.origin).replace(/\/+$/,"");
     return [
       cust?.name||"Customer",
       sale.id,
@@ -7057,6 +7057,20 @@ export default function App(){
                           ✅ Configured — emails will send from <strong>{coEdit.gmail_user}</strong>
                         </div>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Customer Portal URL */}
+                  <div>
+                    <label>Customer Portal URL <span style={{fontWeight:400,color:"#9ca3af"}}>(link sent in WhatsApp invoices)</span></label>
+                    <input
+                      placeholder="https://yourapp.com"
+                      value={coEdit.portal_url||""}
+                      onChange={e=>setCoEdit(prev=>({...prev,portal_url:e.target.value.trim()}))}
+                    />
+                    <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>
+                      This is the URL customers click in their WhatsApp invoice. Must be your customer-facing portal, not the admin app.
+                      Current: <strong>{window.location.origin}</strong>
                     </div>
                   </div>
 
