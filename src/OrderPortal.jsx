@@ -1662,6 +1662,20 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:0,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await Promise.all(saleItems.map(i=>{const p=products.find(x=>x.id===i.pid);return p?supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id):Promise.resolve();}));
+      // Auto-send WhatsApp invoice if enabled
+      if(co?.sms_invoices&&co?.meta_phone_id&&co?.meta_token&&wiCustObj?.phone){
+        const wiPhone=(wiCustObj.phone||"").replace(/[^0-9]/g,"");
+        const wiE164=wiPhone.startsWith("1")&&wiPhone.length===11?wiPhone:"1"+wiPhone;
+        const wiGt=(sub+(()=>{const st=(driverData.stateTaxes||[]).find(s=>s.id===(wiCustObj.state||""));const r=(!co?.tax_enabled||st?.exempt)?0:parseFloat(st?.rate||co?.tax_rate||0);const tx=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);return parseFloat((tx*r/100).toFixed(2));})()+(wiPrevBal||0)).toFixed(2);
+        const wiPortal=window.location.origin;
+        supabase.auth.getSession().then(({data:{session:s}})=>{
+          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`,{
+            method:"POST",
+            headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
+            body:JSON.stringify({to:wiE164,phone_number_id:co.meta_phone_id,access_token:co.meta_token,template_name:co.meta_template||"invoice_notification",params:[wiCustObj.name,invId,wiGt,`${wiPortal}/?invoice=${invId}`]}),
+          }).catch(()=>{});// silent - never block the sale
+        });
+      }
       let wiRecUrl="";
       if(wiReceiptFile){
         const ext=wiReceiptFile.name.split(".").pop();
@@ -2456,6 +2470,25 @@ export default function OrderPortal() {
       };
       const {error} = await supabase.from("orders").insert(rec);
       if(error) throw error;
+      // Auto-send WhatsApp order confirmation if enabled
+      if(co?.sms_invoices&&co?.meta_phone_id&&co?.meta_token&&selCust?.phone){
+        const cpPhone=(selCust.phone||"").replace(/[^0-9]/g,"");
+        const cpE164=cpPhone.startsWith("1")&&cpPhone.length===11?cpPhone:"1"+cpPhone;
+        const cpPortal=window.location.origin;
+        supabase.auth.getSession().then(({data:{session:s}})=>{
+          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`,{
+            method:"POST",
+            headers:{"Content-Type":"application/json","Authorization":`Bearer ${s?.access_token}`},
+            body:JSON.stringify({
+              to:cpE164,
+              phone_number_id:co.meta_phone_id,
+              access_token:co.meta_token,
+              template_name:co.meta_template||"invoice_notification",
+              params:[selCust.name,id,grandTotal.toFixed(2),`${cpPortal}/?invoice=${id}`],
+            }),
+          }).catch(()=>{});
+        });
+      }
       setOrder({
         ...rec,
         businessName: selCust.name,

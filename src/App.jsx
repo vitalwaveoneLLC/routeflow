@@ -5287,8 +5287,8 @@ export default function App(){
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:6}}>
                         {[
-                          {l:"Collected",v:fmt(ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+s.total,0)),c:"#059669"},
-                          {l:"Invoiced",v:fmt(ts.reduce((a,s)=>a+s.total,0)),c:"#9ca3af"},
+                          {l:"Collected",v:fmt(ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0)),c:"#059669"},
+                          {l:"Invoiced",v:fmt(ts.reduce((a,s)=>a+calcSaleGrandTotal(s),0)),c:"#9ca3af"},
                           {l:"Profit",v:fmt(ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+s.profit,0)),c:"#7c3aed"},
                           {l:"Tax",v:fmt(ts.reduce((a,s)=>a+calcSaleTax(s),0)),c:"#7c3aed"},
                           {l:"Invoices",v:ts.length,c:"#7c3aed"},
