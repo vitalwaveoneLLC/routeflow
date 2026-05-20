@@ -4298,6 +4298,20 @@ export default function App(){
             .then(r=>r.ok?showToast(`✅ Invoice emailed to ${cust.email}`):null);
         }
       }
+      // Auto-WhatsApp invoice if enabled
+      if(co?.whatsapp_invoices&&co?.meta_phone_id&&co?.meta_token){
+        const cust=getC(ns.cust_id);
+        const phone=(cust?.phone||"").replace(/\D/g,"");
+        if(phone.length>=10){
+          const to=phone.length===10?"1"+phone:phone;
+          const portalUrl=`${window.location.origin}/?invoice=${ns.id}`;
+          supabase.functions.invoke("send-whatsapp",{body:{
+            to,phone_number_id:co.meta_phone_id,access_token:co.meta_token,
+            template_name:co.meta_template||"invoice_notification",
+            params:[cust.name,ns.id,ns.total.toFixed(2),portalUrl],
+          }}).then(({error})=>error?null:showToast(`💬 WhatsApp sent to ${cust.name}`));
+        }
+      }
     }catch(e){showToast(e.message,"error");}
     setSaving(false);
   };
@@ -6939,6 +6953,35 @@ export default function App(){
                       {coEdit.gmail_user&&coEdit.gmail_app_password&&(
                         <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,padding:"8px 12px",fontSize:11,color:"#065f46"}}>
                           ✅ Configured — emails will send from <strong>{coEdit.gmail_user}</strong>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* WhatsApp Notifications — Meta Cloud API (free) */}
+                  <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"#0369a1",marginBottom:6}}>💬 WhatsApp Invoice Notifications (Free)</div>
+                    <div style={{fontSize:11,color:"#6b7280",marginBottom:10,lineHeight:1.7}}>
+                      Sends invoice links to customers via WhatsApp after every sale using the <strong>Meta Cloud API</strong> — free for the first 1,000 conversations/month.
+                      Get credentials at <a href="https://developers.facebook.com" target="_blank" rel="noreferrer" style={{color:"#0369a1"}}>developers.facebook.com</a> → Your App → WhatsApp → API Setup.
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      <div><label>Phone Number ID <span style={{fontWeight:400,color:"#9ca3af"}}>(from WhatsApp API Setup page)</span></label>
+                        <input type="password" placeholder="123456789012345" value={coEdit.meta_phone_id||""} onChange={e=>setCoEdit(prev=>({...prev,meta_phone_id:e.target.value.trim()}))}/>
+                      </div>
+                      <div><label>Access Token <span style={{fontWeight:400,color:"#9ca3af"}}>(Permanent token from System User)</span></label>
+                        <input type="password" placeholder="EAAxxxxxxxxxxxxxxxx..." value={coEdit.meta_token||""} onChange={e=>setCoEdit(prev=>({...prev,meta_token:e.target.value.trim()}))}/>
+                      </div>
+                      <div><label>Template Name <span style={{fontWeight:400,color:"#9ca3af"}}>(approved template, default: invoice_notification)</span></label>
+                        <input placeholder="invoice_notification" value={coEdit.meta_template||""} onChange={e=>setCoEdit(prev=>({...prev,meta_template:e.target.value.trim()}))}/>
+                      </div>
+                      <label style={{margin:0,fontWeight:500,fontSize:12,display:"flex",alignItems:"center",gap:6}}>
+                        <input type="checkbox" checked={!!coEdit.whatsapp_invoices} onChange={e=>setCoEdit(prev=>({...prev,whatsapp_invoices:e.target.checked}))} style={{marginRight:2}}/>
+                        Auto-send WhatsApp invoice to customer after every sale
+                      </label>
+                      {coEdit.meta_phone_id&&coEdit.meta_token&&(
+                        <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,padding:"8px 12px",fontSize:11,color:"#065f46"}}>
+                          ✅ Configured — WhatsApp messages will send via Meta Cloud API
                         </div>
                       )}
                     </div>
