@@ -265,7 +265,14 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[],stateTaxes
   if(acctLoading)return<div style={{padding:60,textAlign:"center",color:"#9ca3af"}}>Loading your account…</div>;
 
   const{invoices,payments}=acctData;
-  const totalDue=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0)+calcInvTax(s)+parseFloat(s.previous_balance||0),0);
+  // totalDue = grand total of the LATEST unpaid invoice (it already chains all prior balances)
+  // Do NOT sum across invoices — previous_balance is cumulative/chained so that would double-count
+  const unpaidInvs=invoices.filter(s=>!payments.find(p=>p.sale_id===s.id&&p.status==="paid"))
+    .sort((a,b)=>new Date(b.created_at||b.date)-new Date(a.created_at||a.date));
+  const latestUnpaid=unpaidInvs[0]||null;
+  const totalDue=latestUnpaid
+    ? parseFloat(latestUnpaid.total||0)+calcInvTax(latestUnpaid)+parseFloat(latestUnpaid.previous_balance||0)
+    : 0;
   const totalPaid=invoices.filter(s=>payments.find(p=>p.sale_id===s.id&&p.status==="paid")).reduce((a,s)=>a+parseFloat(s.total||0)+calcInvTax(s),0);
   const fmt=n=>`$${parseFloat(n||0).toFixed(2)}`;
 
@@ -2673,16 +2680,21 @@ export default function OrderPortal() {
     const allUnpaid = (custSales||[]).filter(s=>unpaidIds.has(s.id)||!(pmts||[]).find(p=>p.sale_id===s.id));
     // Fetch state taxes for accurate balance calculation
     const {data:staxes} = await supabase.from("state_taxes").select("*");
-    const bal = parseFloat(allUnpaid.reduce((a,s)=>{
-      const st = (staxes||[]).find(x=>x.id===(s.state||""));
+    // Use latest unpaid invoice grand total — previous_balance is chained/cumulative
+    // so summing across all invoices double-counts prior balances
+    const sortedUnpaid = allUnpaid.sort((a,b)=>new Date(b.created_at||b.date)-new Date(a.created_at||a.date));
+    const latestU = sortedUnpaid[0];
+    let bal = 0;
+    if(latestU){
+      const st = (staxes||[]).find(x=>x.id===(latestU.state||""));
       const rate = (co?.tax_enabled && !st?.exempt) ? parseFloat(st?.rate||co?.tax_rate||0) : 0;
-      const taxable = (s.items||[]).reduce((b,i)=>{
+      const taxable = (latestU.items||[]).reduce((b,i)=>{
         const p = products.find(x=>x.id===i.pid);
         return isTaxableProd(p) ? b+(p?.price||0)*i.qty : b;
       }, 0);
       const tax = parseFloat((taxable*rate/100).toFixed(2));
-      return a + s.total + tax + parseFloat(s.previous_balance||0);
-    }, 0).toFixed(2));
+      bal = parseFloat((latestU.total + tax + parseFloat(latestU.previous_balance||0)).toFixed(2));
+    }
     setCustPrevBalance(bal);
     setCustPrevInvs(allUnpaid);
 
