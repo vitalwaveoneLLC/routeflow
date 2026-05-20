@@ -4814,12 +4814,29 @@ export default function App(){
               })}
             </div>
             <div className="card">
-              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div className="sh" style={{marginBottom:0}}>Recent Invoices</div><button className="btn bgh" onClick={()=>setTab("sales")}>View All</button></div>
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div className="sh" style={{marginBottom:0}}>Recent Invoices</div><button className="btn bgh" onClick={()=>setTab("sales")}>View All →</button></div>
               {visSales.length===0?<Empty icon="💳" msg="NO SALES YET"/>:(
                 <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Total</th><th>+Tax</th><th>Grand Total</th><th>Status</th><th></th></tr></thead>
-                <tbody>{visSales.slice(0,6).map(s=>(
-                  <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td><td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{fmt(s.total)}</td><td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td><td><span className="bdg bg2">{fmt(calcSaleGrandTotal(s))}</span></td><td><span className={`bdg ${pmtFor(s.id)?.status==="paid"?"bg2":"br2"}`}>{pmtFor(s.id)?.status==="paid"?"PAID":"UNPAID"}</span></td><td><button className="btn bb" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt}</button></td>
-                </tr>))}</tbody></table></div>
+                <tbody>{visSales.slice(0,10).map(s=>{
+                  const pmt=pmtFor(s.id);
+                  const isPaid=pmt?.status==="paid";
+                  const isRC=pmt?.status==="returned_check";
+                  return(
+                  <tr key={s.id}>
+                    <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
+                    <td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td>
+                    <td style={{color:"#6b7280",fontSize:11}}>{s.date}</td>
+                    <td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} {s.check_penalty_applied>0?"penalty":"prev"}</span>}</td>
+                    <td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td>
+                    <td><span className="bdg bb2">{fmt(calcSaleGrandTotal(s))}</span></td>
+                    <td>
+                      {isPaid?<span className="bdg bg2">✅ PAID</span>
+                      :isRC?<span className="bdg br2">🔴 RETURNED CHECK</span>
+                      :<span className="bdg ba2">⏳ UNPAID</span>}
+                    </td>
+                    <td><button className="btn bb" style={{fontSize:10,padding:"4px 9px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.prt}</button></td>
+                  </tr>);})}
+                </tbody></table></div>
               )}
             </div>
           </div>}
@@ -5315,18 +5332,27 @@ export default function App(){
                         const stData=stateTaxes.find(x=>x.id===st);
                         const tax=calcSaleTax(s);
                         const gt=calcSaleGrandTotal(s);
-                        const paid=pmtFor(s.id)?.status==="paid";
+                        const pmt=pmtFor(s.id);
+                        const paid=pmt?.status==="paid";
+                        const isRC=pmt?.status==="returned_check";
                         return(
-                          <tr key={s.id}>
+                          <tr key={s.id} style={{background:isRC?"#fff5f5":""}}>
                             <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
                             <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
-                            <td style={{fontWeight:600,color:"#212121"}}>{cust?.name}</td>
+                            <td style={{fontWeight:600,color:"#212121"}}>
+                              {cust?.name}
+                              {isRC&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}
+                            </td>
                             <td><span className="tag" style={{background:"#ede9fe",color:"#7c3aed"}}>{st}</span></td>
-                            <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td>
-                            <td>{fmt(s.total)}</td>
+                            <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver||"Walk-in"}</td>
+                            <td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} {s.check_penalty_applied>0?"penalty":"prev"}</span>}</td>
                             <td style={{color:"#059669",fontWeight:600}}>{fmt(tax)}</td>
                             <td style={{fontWeight:700,color:"#7c3aed"}}>{fmt(gt)}</td>
-                            <td><span className={`bdg ${paid?"bg2":"br2"}`}>{paid?"PAID":"UNPAID"}</span></td>
+                            <td>
+                              <span className={`bdg ${paid?"bg2":isRC?"br2":"ba2"}`}>
+                                {paid?"✅ PAID":isRC?"🔴 RETURNED CHECK":"⏳ UNPAID"}
+                              </span>
+                            </td>
                           </tr>
                         );
                       })}
@@ -5486,31 +5512,50 @@ export default function App(){
               </div>
               {visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length===0
                 ?<Empty icon="✅" msg="ALL INVOICES PAID"/>
-                :<div className="tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Driver</th><th>Grand Total</th><th>Balance Due</th><th>Actions</th></tr></thead>
-                <tbody>{visSales.filter(s=>pmtFor(s.id)?.status!=="paid").map(s=>{
-                  const gt=calcSaleGrandTotal(s);
-                  const cust=getC(s.cust_id);
-                  return(
-                    <tr key={s.id}>
-                      <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
-                      <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
-                      <td style={{fontWeight:600}}>{cust?.name}</td>
-                      <td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td>
-                      <td style={{fontWeight:700}}>${gt.toFixed(2)}</td>
-                      <td><span style={{fontWeight:700,color:"#dc2626"}}>${gt.toFixed(2)}</span></td>
-                      <td>
-                        <div style={{display:"flex",gap:4}}>
-                          <button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{
-                            setPmForm(f=>({...f,cust_id:s.cust_id,truck_id:s.truck_id,amount:gt.toFixed(2),invoice_ids:[s.id]}));
-                            setPmModal(true);
-                          }}>💵 Cash/Check</button>
-                          <button className="btn bp" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>setStripeModal({sale:s,customer:getC(s.cust_id),driver:getT(s.truck_id)?.driver})}>💳 Card</button>
-                          <button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>View</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}</tbody></table></div>
+                :<div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                      {["Invoice","Date","Customer","Driver","Grand Total","Status","Actions"].map(h=>(
+                        <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>{visSales.filter(s=>pmtFor(s.id)?.status!=="paid").map(s=>{
+                      const pmt=pmtFor(s.id);
+                      const gt=calcSaleGrandTotal(s);
+                      const cust=getC(s.cust_id);
+                      const isRC=pmt?.status==="returned_check";
+                      return(
+                        <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6",background:isRC?"#fff5f5":"#fff"}}>
+                          <td style={{padding:"9px 13px"}}><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
+                          <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{s.date}</td>
+                          <td style={{padding:"9px 13px",fontWeight:600}}>
+                            {cust?.name}
+                            {isRC&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}
+                          </td>
+                          <td style={{padding:"9px 13px",color:"#6b7280"}}>{getT(s.truck_id)?.driver||"Walk-in"}</td>
+                          <td style={{padding:"9px 13px",fontWeight:700,color:"#dc2626"}}>{fmt(gt)}</td>
+                          <td style={{padding:"9px 13px"}}>
+                            {isRC
+                              ?<span className="bdg br2">🔴 RETURNED CHECK</span>
+                              :<span className="bdg ba2">⏳ UNPAID</span>
+                            }
+                          </td>
+                          <td style={{padding:"9px 13px"}}>
+                            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                              {!isRC&&<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{
+                                setPmForm(f=>({...f,cust_id:s.cust_id,truck_id:s.truck_id,amount:gt.toFixed(2),invoice_ids:[s.id]}));
+                                setPmModal(true);
+                              }}>💵 Cash/Check</button>}
+                              {!isRC&&<button className="btn bp" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>setStripeModal({sale:s,customer:cust,driver:getT(s.truck_id)?.driver})}>💳 Card</button>}
+                              {isRC&&<button onClick={()=>setRcModal({saleId:s.id,custId:s.cust_id})} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"4px 8px",fontSize:10,fontWeight:700,cursor:"pointer"}}>📄 View Check</button>}
+                              <button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>View</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}</tbody>
+                  </table>
+                </div>
               }
             </div>}
 
