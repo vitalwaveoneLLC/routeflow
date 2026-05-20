@@ -955,7 +955,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           const phone=(cust?.phone||"").replace(/\D/g,"");
           if(phone.length>=10){
             const to=phone.length===10?"1"+phone:phone;
-            const portalUrl=`${window.location.origin}/?invoice=${saleRecord.id}`;
+            const portalUrl=`${co?.portal_url||window.location.origin}/?invoice=${saleRecord.id}`;
             supabase.functions.invoke("send-whatsapp",{body:{
               to,phone_number_id:co.meta_phone_id,access_token:co.meta_token,
               template_name:co.meta_template||"invoice_notification",
@@ -1545,7 +1545,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
         const phone=(wiCustObj2?.phone||"").replace(/\D/g,"");
         if(phone.length>=10){
           const to=phone.length===10?"1"+phone:phone;
-          const portalUrl=`${window.location.origin}/?invoice=${invId}`;
+          const portalUrl=`${wiCo?.portal_url||window.location.origin}/?invoice=${invId}`;
           supabase.functions.invoke("send-whatsapp",{body:{
             to,phone_number_id:wiCo.meta_phone_id,access_token:wiCo.meta_token,
             template_name:wiCo.meta_template||"invoice_notification",
@@ -2066,7 +2066,45 @@ export default function OrderPortal() {
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [msg, setMsg] = useState(null);
 
-  const collectPayment = async (sale, method) => {
+  // -- INVOICE LINK HANDLER (from WhatsApp) ------------------------------------
+  const [invoiceLink, setInvoiceLink] = useState(()=>{
+    const p=new URLSearchParams(window.location.search);
+    return p.get("invoice")||null;
+  });
+  const [invoiceLinkData, setInvoiceLinkData] = useState(null); // {sale, customer, payment, co}
+  const [invoiceLinkPhone, setInvoiceLinkPhone] = useState("");
+  const [invoiceLinkVerified, setInvoiceLinkVerified] = useState(false);
+  const [invoiceLinkLoading, setInvoiceLinkLoading] = useState(false);
+  const [invoiceLinkError, setInvoiceLinkError] = useState("");
+
+  useEffect(()=>{
+    if(!invoiceLink) return;
+    // Pre-load invoice data (sale + products for display after phone verify)
+    (async()=>{
+      const {data:sale}=await supabase.from("sales").select("*").eq("id",invoiceLink).maybeSingle();
+      if(!sale){setInvoiceLinkError("Invoice not found.");return;}
+      const {data:cust}=await supabase.from("customers").select("*").eq("id",sale.cust_id).maybeSingle();
+      const {data:pmt}=await supabase.from("payments").select("*").eq("sale_id",sale.id).maybeSingle();
+      const {data:coData}=await supabase.from("company").select("*").maybeSingle();
+      const pids=[...new Set((sale.items||[]).map(i=>i.pid))];
+      const {data:prods}=await supabase.from("products").select("*").in("id",pids);
+      setInvoiceLinkData({sale,customer:cust,payment:pmt,co:coData,products:prods||[]});
+    })();
+  },[invoiceLink]);
+
+  const verifyInvoicePhone=async()=>{
+    if(!invoiceLinkData) return;
+    setInvoiceLinkLoading(true);setInvoiceLinkError("");
+    const phone=invoiceLinkPhone.replace(/\D/g,"");
+    const custPhone=(invoiceLinkData.customer?.phone||"").replace(/\D/g,"");
+    // Match last 10 digits
+    if(phone.length>=10 && custPhone.slice(-10)===phone.slice(-10)){
+      setInvoiceLinkVerified(true);
+    } else {
+      setInvoiceLinkError("Phone number doesn't match. Please enter the phone number on this account.");
+    }
+    setInvoiceLinkLoading(false);
+  };
     setPaymentSaving(true);
     try{
       const st = driverData?.stateTaxes?.find(s=>s.id===(sale.state||""));
@@ -2696,6 +2734,137 @@ export default function OrderPortal() {
       setStripeError(e.message);
     }
   };
+
+  // -- PUBLIC INVOICE VIEW (from WhatsApp link) ---------------------------------
+  if(invoiceLink && !loading) return (
+    <div className="portal" style={{minHeight:"100vh",background:"#f8f5f0"}}>
+      <GS/>
+      <div style={{background:"#0a1628",padding:"0 24px",height:62,display:"flex",alignItems:"center",gap:12}}>
+        <img src="/logo-sidebar.png" style={{height:44,width:44,objectFit:"cover",borderRadius:8,background:"#fff",padding:2}}/>
+        <div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#fff",lineHeight:1}}>{invoiceLinkData?.co?.name||"VitalWaveOne"}</div>
+          <div style={{fontSize:9,color:"#4b6080",letterSpacing:".1em",marginTop:1}}>INVOICE PORTAL</div>
+        </div>
+      </div>
+      <div style={{maxWidth:560,margin:"0 auto",padding:"32px 16px"}}>
+        {invoiceLinkError&&!invoiceLinkVerified&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"14px 18px",marginBottom:16,color:"#dc2626",fontSize:13}}>{invoiceLinkError}</div>}
+
+        {!invoiceLinkVerified?(
+          /* Phone verification gate */
+          <div style={{background:"#fff",borderRadius:16,padding:32,boxShadow:"0 4px 24px #0a162814",textAlign:"center"}}>
+            <div style={{fontSize:48,marginBottom:16}}>📄</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,color:"#0a1628",marginBottom:8}}>Invoice {invoiceLink}</div>
+            <div style={{fontSize:13,color:"#6b7280",marginBottom:28,lineHeight:1.6}}>
+              To view your invoice, please enter the phone number on your account to verify your identity.
+            </div>
+            <input
+              type="tel"
+              value={invoiceLinkPhone}
+              onChange={e=>setInvoiceLinkPhone(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&verifyInvoicePhone()}
+              placeholder="Your phone number"
+              style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:10,padding:"13px 16px",fontSize:16,marginBottom:12,fontFamily:"'Inter',sans-serif",outline:"none",textAlign:"center"}}
+            />
+            {invoiceLinkError&&<div style={{color:"#dc2626",fontSize:12,marginBottom:10}}>{invoiceLinkError}</div>}
+            <button onClick={verifyInvoicePhone} disabled={invoiceLinkLoading||invoiceLinkPhone.length<7}
+              style={{width:"100%",background:"#0a1628",color:"#fff",border:"none",borderRadius:10,padding:"14px",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+              {invoiceLinkLoading?"Verifying…":"View My Invoice →"}
+            </button>
+          </div>
+        ):(()=>{
+          /* Verified — show invoice */
+          const {sale,customer,payment,co:iCo,products:iProds}=invoiceLinkData;
+          const isPaid=payment?.status==="paid";
+          const sub=parseFloat(sale.total||0);
+          const prev=parseFloat(sale.previous_balance||0);
+          const grand=sub+prev;
+          const stripeLink=iCo?.stripe_payment_link;
+          return(
+            <div>
+              {/* Status banner */}
+              <div style={{background:isPaid?"#f0fdf4":"#fef2f2",border:`1px solid ${isPaid?"#a7f3d0":"#fecaca"}`,borderRadius:12,padding:"14px 18px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+                <span style={{fontSize:28}}>{isPaid?"✅":"⏳"}</span>
+                <div>
+                  <div style={{fontWeight:700,fontSize:15,color:isPaid?"#065f46":"#dc2626"}}>{isPaid?"PAID — Thank you!":"PAYMENT DUE"}</div>
+                  <div style={{fontSize:12,color:isPaid?"#065f46":"#991b1b",marginTop:2}}>{isPaid?`Paid on ${payment.collected_at?new Date(payment.collected_at).toLocaleDateString():"record"}`:`Balance: $${grand.toFixed(2)}`}</div>
+                </div>
+              </div>
+
+              {/* Invoice card */}
+              <div style={{background:"#fff",borderRadius:16,padding:24,boxShadow:"0 2px 16px #0a162810",marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+                  <div>
+                    <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628"}}>{iCo?.name||"VitalWaveOne"}</div>
+                    {iCo?.address&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{iCo.address}</div>}
+                    {iCo?.phone&&<div style={{fontSize:11,color:"#9ca3af"}}>{iCo.phone}</div>}
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#0a1628"}}>{sale.id}</div>
+                    <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{sale.date}</div>
+                  </div>
+                </div>
+                <div style={{background:"#f8f5f0",borderRadius:8,padding:"12px 14px",marginBottom:16}}>
+                  <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,marginBottom:4}}>BILLED TO</div>
+                  <div style={{fontWeight:700,color:"#0a1628"}}>{customer?.name}</div>
+                  {customer?.address&&<div style={{fontSize:12,color:"#6b7280"}}>{customer.address}</div>}
+                  {customer?.phone&&<div style={{fontSize:12,color:"#6b7280"}}>{customer.phone}</div>}
+                </div>
+                {/* Items */}
+                <table style={{width:"100%",borderCollapse:"collapse",marginBottom:16}}>
+                  <thead><tr style={{borderBottom:"2px solid #0a1628"}}>
+                    {["Product","Qty","Unit Price","Amount"].map(h=><th key={h} style={{textAlign:h==="Product"?"left":"right",padding:"7px 6px",fontSize:10,color:"#6b7280",fontWeight:700}}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>{(sale.items||[]).map((item,i)=>{
+                    const p=iProds.find(x=>x.id===item.pid);
+                    const price=sub/(sale.items||[]).reduce((a,it)=>a+it.qty,0)||p?.price||0;
+                    // Use stored item amount if available, otherwise calculate
+                    const lineAmt=item.amount||(item.price?item.price*item.qty:p?(sub/((sale.items||[]).reduce((a2,it2)=>a2+(p2=>p2?it2.qty:0)(iProds.find(x=>x.id===it2.pid)),0)||1)*item.qty:0));
+                    const unitP=item.price||(p?.price||0);
+                    return(
+                      <tr key={i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                        <td style={{padding:"9px 6px",fontSize:13,color:"#0a1628",fontWeight:500}}>{p?.name||item.pid}</td>
+                        <td style={{padding:"9px 6px",fontSize:13,textAlign:"right",color:"#6b7280"}}>{item.qty}</td>
+                        <td style={{padding:"9px 6px",fontSize:13,textAlign:"right",color:"#6b7280"}}>${unitP.toFixed(2)}</td>
+                        <td style={{padding:"9px 6px",fontSize:13,textAlign:"right",fontWeight:600,color:"#0a1628"}}>${(unitP*item.qty).toFixed(2)}</td>
+                      </tr>
+                    );
+                  })}</tbody>
+                </table>
+                {/* Totals */}
+                <div style={{borderTop:"1px solid #e5e7eb",paddingTop:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                    <span style={{fontSize:13,color:"#6b7280"}}>Subtotal</span>
+                    <span style={{fontSize:13,fontWeight:600}}>${sub.toFixed(2)}</span>
+                  </div>
+                  {prev>0&&<div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                    <span style={{fontSize:13,color:"#dc2626"}}>{sale.check_penalty_applied>0?"🚨 Returned Check Penalty":"Previous Balance"}</span>
+                    <span style={{fontSize:13,fontWeight:600,color:"#dc2626"}}>+${prev.toFixed(2)}</span>
+                  </div>}
+                  <div style={{display:"flex",justifyContent:"space-between",borderTop:"2px solid #0a1628",marginTop:8,paddingTop:8}}>
+                    <span style={{fontSize:15,fontWeight:700,color:"#0a1628"}}>TOTAL DUE</span>
+                    <span style={{fontSize:18,fontWeight:900,color:"#0a1628",fontFamily:"'Playfair Display',serif"}}>${grand.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pay button */}
+              {!isPaid&&stripeLink&&(
+                <a href={`${stripeLink}?amount=${Math.round(grand*100)}`} target="_blank" rel="noreferrer"
+                  style={{display:"block",background:"#0a1628",color:"#fff",borderRadius:12,padding:"16px",textAlign:"center",textDecoration:"none",fontWeight:700,fontSize:16,fontFamily:"'Inter',sans-serif",marginBottom:12,boxShadow:"0 4px 16px #0a162830"}}>
+                  💳 Pay Now — ${grand.toFixed(2)}
+                </a>
+              )}
+              {!isPaid&&!stripeLink&&(
+                <div style={{background:"#fff",borderRadius:12,padding:"16px",textAlign:"center",border:"1px solid #e5e7eb",fontSize:13,color:"#6b7280"}}>
+                  📞 To pay, please contact us at <strong>{iCo?.phone||"your driver"}</strong>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
 
   // -- LOADING ----------------------------------------------------------------
   if(loading) return (
