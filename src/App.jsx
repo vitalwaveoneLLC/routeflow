@@ -119,6 +119,24 @@ const downloadCSV=(rows,fn)=>{const a=document.createElement("a");a.href=URL.cre
 
 const Divider=()=><div style={{height:1,background:"#e5e7eb",margin:"12px 0"}}/>;
 const Empty=({icon,msg})=>(<div style={{textAlign:"center",padding:"32px 16px",color:"#1a3040"}}><div style={{fontSize:28,marginBottom:6}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,letterSpacing:".05em"}}>{msg}</div></div>);
+const PaginationBar=({page,totalPages,total,perPage,setPage,label=""})=>{
+  if(totalPages<=1)return null;
+  const start=page*perPage+1,end=Math.min((page+1)*perPage,total);
+  const pages=Array.from({length:totalPages},(_,i)=>i).filter(i=>i===0||i===totalPages-1||Math.abs(i-page)<=1).reduce((acc,i,idx,arr)=>{if(idx>0&&i-arr[idx-1]>1)acc.push("…");acc.push(i);return acc;},[]);
+  return(
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 16px",borderTop:"1px solid #f3f4f6",background:"#fafafa",flexWrap:"wrap",gap:8}}>
+      <div style={{fontSize:11,color:"#6b7280"}}>Showing {start}–{end} of {total}{label?" "+label:""}</div>
+      <div style={{display:"flex",gap:5,alignItems:"center"}}>
+        <button className="btn bgh" style={{padding:"4px 10px",fontSize:11}} disabled={page===0} onClick={()=>setPage(p=>p-1)}>← Prev</button>
+        {pages.map((i,k)=>i==="…"
+          ?<span key={k} style={{fontSize:11,color:"#9ca3af",padding:"0 3px"}}>…</span>
+          :<button key={k} className="btn" style={{padding:"4px 8px",fontSize:11,minWidth:28,background:i===page?"#7c3aed":"transparent",color:i===page?"#fff":"#374151",borderRadius:6,border:i===page?"none":"1px solid #e5e7eb"}} onClick={()=>setPage(i)}>{i+1}</button>
+        )}
+        <button className="btn bgh" style={{padding:"4px 10px",fontSize:11}} disabled={page>=totalPages-1} onClick={()=>setPage(p=>p+1)}>Next →</button>
+      </div>
+    </div>
+  );
+};
 const Spinner=({msg=""})=>(<div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,padding:60,color:"#9ca3af",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:".08em",fontSize:14}}><svg className="spin" width="18" height="18" fill="none" stroke="#7c3aed" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>{msg||"LOADING…"}</div>);
 const Modal=({title,onClose,children,wide,xwide})=>(<div className="mo" onClick={e=>e.target===e.currentTarget&&onClose()}><div className={`mb fu${wide?" w":""}${xwide?" xw":""}`}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>{title?<div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:19,textTransform:"uppercase",letterSpacing:".04em",color:"#212121"}}>{title}</div>:<div/>}<button className="btn bgh" onClick={onClose}>{ic.X} Close</button></div>{children}</div></div>);
 
@@ -3223,6 +3241,27 @@ export default function App(){
   const[penaltySaving,setPenaltySaving]=useState(false);
   const[confirmDialog,setConfirmDialog]=useState(null); // {msg, onConfirm}
 
+  // Search + pagination states
+  const[invSearch,setInvSearch]=useState("");
+  const[invPage,setInvPage]=useState(0);
+  const[custSearch,setCustSearch]=useState("");
+  const[custPage,setCustPage]=useState(0);
+  const[salesSearch,setSalesSearch]=useState("");
+  const[salesPage,setSalesPage]=useState(0);
+  const[ordersSearch,setOrdersSearch]=useState("");
+  const[ordersPage,setOrdersPage]=useState(0);
+  const[arSearch,setArSearch]=useState("");
+  const[arPageSt,setArPage]=useState(0);
+  const[pmLogSearch,setPmLogSearch]=useState("");
+  const[pmLogPage,setPmLogPage]=useState(0);
+  const[pmUnpaidSearch,setPmUnpaidSearch]=useState("");
+  const[pmUnpaidPage,setPmUnpaidPage]=useState(0);
+  const[auditSearch,setAuditSearch]=useState("");
+  const[auditPage,setAuditPage]=useState(0);
+  const INV_PER_PAGE=25;
+  const CUST_PER_PAGE=24;
+  const ROWS_PER_PAGE=25;
+
   const showConfirm=(msg,onConfirm)=>setConfirmDialog({msg,onConfirm});
   const[scanning,setScanning]=useState(false);
   const[rcModal,setRcModal]=useState(null); // {saleId, custId} for returned check upload
@@ -4911,17 +4950,32 @@ export default function App(){
 
             {/* WAREHOUSE SECTION */}
             <div className="card" style={{marginBottom:16}}>
-              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
                 <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:"#212121"}}>🏭 WAREHOUSE — Shelf Stock</div>
-                <div style={{fontSize:11,color:"#6b7280"}}>{products.length} products · {products.reduce((a,p)=>a+p.shelf,0)} total units</div>
+                <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <input
+                    value={invSearch}
+                    onChange={e=>{setInvSearch(e.target.value);setInvPage(0);}}
+                    placeholder="🔍 Search products…"
+                    style={{width:200,padding:"6px 10px",fontSize:12,border:"1px solid #d1d5db",borderRadius:7,outline:"none"}}
+                  />
+                  <div style={{fontSize:11,color:"#6b7280"}}>{products.length} products · {products.reduce((a,p)=>a+p.shelf,0)} total units</div>
+                </div>
               </div>
+              {(()=>{
+                const q=invSearch.toLowerCase();
+                const filtered=q?products.filter(p=>(p.name||"").toLowerCase().includes(q)||(p.sku||"").toLowerCase().includes(q)||(p.cat||"").toLowerCase().includes(q)):products;
+                const totalPages=Math.ceil(filtered.length/INV_PER_PAGE);
+                const page=Math.min(invPage,Math.max(0,totalPages-1));
+                const pageProds=filtered.slice(page*INV_PER_PAGE,(page+1)*INV_PER_PAGE);
+                return(<>
               <div className="tw"><table>
                 <thead><tr>
                   <th>Product</th><th>SKU</th><th>Category</th><th>Sell By</th><th>Case Qty</th>
                   <th>Cost</th><th>Price</th><th>Unit Price</th><th>Margin</th><th>Shelf</th><th>Reorder At</th><th>Status</th>
                   {isAdmin&&<th>Actions</th>}
                 </tr></thead>
-                <tbody>{products.map(p=>{
+                <tbody>{pageProds.map(p=>{
                   const isE=editingPid===p.id;
                   const margin=p.price>0?((p.price-p.cost)/p.price*100).toFixed(0):0;
                   const low=p.shelf<=(p.reorder_point||5)&&p.shelf>0;
@@ -4973,6 +5027,8 @@ export default function App(){
                   );
                 })}</tbody>
               </table></div>
+              <PaginationBar page={page} totalPages={totalPages} total={filtered.length} perPage={INV_PER_PAGE} setPage={setInvPage}/>
+              </>);})()}
             </div>
 
             {/* TRUCKS SECTION */}
@@ -5101,15 +5157,22 @@ export default function App(){
               <span style={{fontSize:18}}>✅</span>
               <span><strong>Auto-approved:</strong> All orders are processed instantly. Invoices created automatically.</span>
             </div>
-            <div style={{display:"flex",gap:7,marginBottom:14}}>
+            <div style={{display:"flex",gap:7,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
               {[{k:"all",l:"All Orders"},{k:"card",l:"💳 Paid Online"},{k:"delivery",l:"💵 Pay on Delivery"}].map(f=>(
-                <button key={f.k} className={`btn ${ordFilter===f.k?"ba":"bgh"}`} style={{padding:"6px 14px"}} onClick={()=>setOrdFilter(f.k)}>{f.l}</button>
+                <button key={f.k} className={`btn ${ordFilter===f.k?"ba":"bgh"}`} style={{padding:"6px 14px"}} onClick={()=>{setOrdFilter(f.k);setOrdersPage(0);}}>{f.l}</button>
               ))}
+              <input value={ordersSearch} onChange={e=>{setOrdersSearch(e.target.value);setOrdersPage(0);}} placeholder="🔍 Search orders…" style={{width:200,padding:"6px 10px",fontSize:12,border:"1px solid #d1d5db",borderRadius:7,outline:"none",marginLeft:"auto"}}/>
             </div>
-            {orders.filter(o=>ordFilter==="all"||(ordFilter==="card"&&o.payment_method==="card")||(ordFilter==="delivery"&&o.payment_method!=="card")).length===0
-              ?<Empty icon="📦" msg="NO ORDERS YET"/>
-              :<div style={{display:"flex",flexDirection:"column",gap:12}}>
-                {orders.filter(o=>ordFilter==="all"||(ordFilter==="card"&&o.payment_method==="card")||(ordFilter==="delivery"&&o.payment_method!=="card")).map(o=>{
+            {(()=>{
+              const oq=ordersSearch.toLowerCase();
+              const oBase=orders.filter(o=>ordFilter==="all"||(ordFilter==="card"&&o.payment_method==="card")||(ordFilter==="delivery"&&o.payment_method!=="card"));
+              const oFilt=oq?oBase.filter(o=>(o.customer_name||"").toLowerCase().includes(oq)||(o.id||"").toLowerCase().includes(oq)||(o.customer_phone||"").toLowerCase().includes(oq)):oBase;
+              const oTotalPages=Math.ceil(oFilt.length/ROWS_PER_PAGE);
+              const oPage=Math.min(ordersPage,Math.max(0,oTotalPages-1));
+              const oRows=oFilt.slice(oPage*ROWS_PER_PAGE,(oPage+1)*ROWS_PER_PAGE);
+              return oFilt.length===0?<Empty icon="📦" msg="NO ORDERS YET"/>:(<>
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {oRows.map(o=>{
                   const isPaid=o.payment_method==="card";
                   return(
                     <div key={o.id} className="card" style={{padding:18,borderLeft:`4px solid ${isPaid?"#7c3aed":"#f59e0b"}`}}>
@@ -5154,7 +5217,9 @@ export default function App(){
                   );
                 })}
               </div>
-            }
+              <div style={{marginTop:8}}><PaginationBar page={oPage} totalPages={oTotalPages} total={oFilt.length} perPage={ROWS_PER_PAGE} setPage={setOrdersPage} label="orders"/></div>
+              </>);
+            })()}
           </div>}
 
           {/* ══ SALES & INVOICES ══ */}
@@ -5164,10 +5229,19 @@ export default function App(){
             </div>
             <div style={{display:"flex",gap:7,marginBottom:14}}><button className="btn bpr" onClick={exportInvoices}>{ic.dl} Export CSV</button></div>
             <div className="card">
-              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>INVOICES — {visSales.length} TOTAL</div>
-              {visSales.length===0?<Empty icon="📄" msg="NO INVOICES YET"/>:(
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>INVOICES — {visSales.length} TOTAL</div>
+                <input value={salesSearch} onChange={e=>{setSalesSearch(e.target.value);setSalesPage(0);}} placeholder="🔍 Search invoices…" style={{width:200,padding:"6px 10px",fontSize:12,border:"1px solid #d1d5db",borderRadius:7,outline:"none"}}/>
+              </div>
+              {visSales.length===0?<Empty icon="📄" msg="NO INVOICES YET"/>:(()=>{
+                const sq=salesSearch.toLowerCase();
+                const sfilt=sq?visSales.filter(s=>(s.id||"").toLowerCase().includes(sq)||(getC(s.cust_id)?.name||"").toLowerCase().includes(sq)||(s.date||"").includes(sq)):visSales;
+                const sTotalPages=Math.ceil(sfilt.length/ROWS_PER_PAGE);
+                const sPage=Math.min(salesPage,Math.max(0,sTotalPages-1));
+                const sRows=sfilt.slice(sPage*ROWS_PER_PAGE,(sPage+1)*ROWS_PER_PAGE);
+                return(<>
                 <div className="tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Created By</th><th>Subtotal</th><th>Tax</th><th>Grand Total</th><th>Profit</th><th>Status</th><th>Actions</th></tr></thead>
-                <tbody>{visSales.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id);
+                <tbody>{sRows.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id);
                   const isReturnedCheck=pmt?.status==="returned_check";
                   const isPaid=pmt?.status==="paid";
                   return(
@@ -5202,7 +5276,8 @@ export default function App(){
                     </div></td>
                   </tr>);})}
                 </tbody></table></div>
-              )}
+                <PaginationBar page={sPage} totalPages={sTotalPages} total={sfilt.length} perPage={ROWS_PER_PAGE} setPage={setSalesPage} label="invoices"/>
+                </>);})()}
             </div>
           </div>}
 
@@ -5462,7 +5537,8 @@ export default function App(){
               {[{l:"Total Billed",v:fmt(visSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0)),c:"#7c3aed"},{l:"Collected",v:fmt(visSales.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0)),c:"#059669"},{l:"Outstanding",v:fmt(totalAR),c:"#dc2626"}].map(k=><div key={k.l} className="kpi"><div className="kv" style={{color:k.c}}>{k.v}</div><div className="kl">{k.l}</div></div>)}
             </div>
             <div style={{display:"flex",gap:7,marginBottom:14,flexWrap:"wrap"}}>
-              {["all","unpaid","paid"].map(f=><button key={f} className={`btn ${arFilter===f?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>setArFilter(f)}>{f}</button>)}
+              {["all","unpaid","paid"].map(f=><button key={f} className={`btn ${arFilter===f?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>{setArFilter(f);setArPage(0);}}>{f}</button>)}
+              <input value={arSearch} onChange={e=>{setArSearch(e.target.value);setArPage(0);}} placeholder="🔍 Search AR…" style={{width:190,padding:"6px 10px",fontSize:12,border:"1px solid #d1d5db",borderRadius:7,outline:"none"}}/>
               <button className="btn bpr" style={{marginLeft:"auto"}} onClick={exportAR}>{ic.dl} Export CSV</button>
               {co?.email_reminders&&co?.gmail_user&&co?.gmail_app_password&&(
                 <button className="btn bb" style={{fontSize:11}} onClick={async()=>{
@@ -5498,10 +5574,15 @@ export default function App(){
                 const now=new Date();
                 const ageDays=s=>{const d=new Date(s.created_at||s.date);return isNaN(d)?0:Math.floor((now-d)/(1000*60*60*24));};
                 const ageBadge=days=>days<=30?<span className="bdg bg2">0–30d</span>:days<=60?<span className="bdg ba2">31–60d</span>:days<=90?<span className="bdg" style={{background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa"}}>61–90d</span>:<span className="bdg br2">90+d</span>;
-                const filtered=visSales.filter(s=>arFilter==="all"||(arFilter==="unpaid"&&pmtFor(s.id)?.status!=="paid")||(arFilter==="paid"&&pmtFor(s.id)?.status==="paid"));
-                return filtered.length===0?<Empty icon="🔍" msg="NO RECORDS MATCH"/>:(
+                const arBase=visSales.filter(s=>arFilter==="all"||(arFilter==="unpaid"&&pmtFor(s.id)?.status!=="paid")||(arFilter==="paid"&&pmtFor(s.id)?.status==="paid"));
+                const aq=arSearch.toLowerCase();
+                const filtered=aq?arBase.filter(s=>(s.id||"").toLowerCase().includes(aq)||(getC(s.cust_id)?.name||"").toLowerCase().includes(aq)||(getT(s.truck_id)?.driver||"").toLowerCase().includes(aq)):arBase;
+                const arTotalPages=Math.ceil(filtered.length/ROWS_PER_PAGE);
+                const arPage=Math.min(arPageSt,Math.max(0,arTotalPages-1));
+                const arRows=filtered.slice(arPage*ROWS_PER_PAGE,(arPage+1)*ROWS_PER_PAGE);
+                return filtered.length===0?<Empty icon="🔍" msg="NO RECORDS MATCH"/>:(<>
                   <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Age</th><th>Driver</th><th>Grand Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
-                  <tbody>{filtered.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid,days=ageDays(s);return(
+                  <tbody>{arRows.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid,days=ageDays(s);return(
                     <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{pmt?.status==="paid"?<span className="bdg bg2">Paid</span>:ageBadge(days)}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
                     <td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}{pmt?.status!=="paid"&&isAdmin&&(()=>{const cust=getC(s.cust_id);const alreadyFlagged=hasReturnedCheck(cust);return<button className="btn br" style={{fontSize:10,padding:"4px 8px",whiteSpace:"nowrap"}} title={alreadyFlagged?"Customer already flagged":"Flag as returned check"} onClick={async()=>{if(alreadyFlagged)return showToast("Customer already flagged for returned check","error");showConfirm(`Flag ${cust?.name} for a returned check on invoice ${s.id}?\n\nThis will:\n• Add $${RETURNED_CHECK_FEE} penalty to their last unpaid invoice\n• Add RETURNED CHECK warning to all platforms`,async()=>{
                       // 1. Flag the customer
@@ -5522,7 +5603,8 @@ export default function App(){
                     });}}>{alreadyFlagged?"🔴 Flagged":"🔴 Flag Check"}</button>;})()}<button className="btn bb" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{ic.inv}</button>{isAdmin&&<button className="btn bp" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>openAmend(s)}>✏️</button>}{isAdmin&&<button className="btn br" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>deleteInvoice(s.id)}>{ic.X}</button>}</div></td>
                   </tr>);})}
                   </tbody></table></div>
-                );
+                  <PaginationBar page={arPage} totalPages={arTotalPages} total={filtered.length} perPage={ROWS_PER_PAGE} setPage={setArPage} label="invoices"/>
+                </>);
               })()}
             </div>
           </div>}
@@ -5551,19 +5633,28 @@ export default function App(){
 
             {/* Unpaid invoices list */}
             {pmTab==="unpaid"&&<div className="card">
-              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>
-                UNPAID INVOICES — {visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length}
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>
+                  UNPAID INVOICES — {visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length}
+                </div>
+                <input value={pmUnpaidSearch} onChange={e=>{setPmUnpaidSearch(e.target.value);setPmUnpaidPage(0);}} placeholder="🔍 Search…" style={{width:180,padding:"6px 10px",fontSize:12,border:"1px solid #d1d5db",borderRadius:7,outline:"none"}}/>
               </div>
-              {visSales.filter(s=>pmtFor(s.id)?.status!=="paid").length===0
-                ?<Empty icon="✅" msg="ALL INVOICES PAID"/>
-                :<div style={{overflowX:"auto"}}>
+              {(()=>{
+                const uBase=visSales.filter(s=>pmtFor(s.id)?.status!=="paid");
+                const uq=pmUnpaidSearch.toLowerCase();
+                const uFilt=uq?uBase.filter(s=>(s.id||"").toLowerCase().includes(uq)||(getC(s.cust_id)?.name||"").toLowerCase().includes(uq)):uBase;
+                const uTotalPages=Math.ceil(uFilt.length/ROWS_PER_PAGE);
+                const uPage=Math.min(pmUnpaidPage,Math.max(0,uTotalPages-1));
+                const uRows=uFilt.slice(uPage*ROWS_PER_PAGE,(uPage+1)*ROWS_PER_PAGE);
+                return uFilt.length===0?<Empty icon="✅" msg="ALL INVOICES PAID"/>:(<>
+                <div style={{overflowX:"auto"}}>
                   <table style={{width:"100%",borderCollapse:"collapse"}}>
                     <thead><tr style={{background:"#0a1628",color:"#fff"}}>
                       {["Invoice","Date","Customer","Created By","Grand Total","Status","Actions"].map(h=>(
                         <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
                       ))}
                     </tr></thead>
-                    <tbody>{visSales.filter(s=>pmtFor(s.id)?.status!=="paid").map(s=>{
+                    <tbody>{uRows.map(s=>{
                       const pmt=pmtFor(s.id);
                       const gt=calcSaleGrandTotal(s);
                       const cust=getC(s.cust_id);
@@ -5600,18 +5691,27 @@ export default function App(){
                     })}</tbody>
                   </table>
                 </div>
-              }
+                <PaginationBar page={uPage} totalPages={uTotalPages} total={uFilt.length} perPage={ROWS_PER_PAGE} setPage={setPmUnpaidPage} label="unpaid invoices"/>
+                </>);
+              })()}
             </div>}
 
             {/* Payment log */}
             {pmTab==="log"&&<div className="card">
-              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>
-                PAYMENT LOG — {paymentsLog.length} ENTRIES
+              <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:13,color:"#212121"}}>PAYMENT LOG — {paymentsLog.length} ENTRIES</div>
+                <input value={pmLogSearch} onChange={e=>{setPmLogSearch(e.target.value);setPmLogPage(0);}} placeholder="🔍 Search payments…" style={{width:190,padding:"6px 10px",fontSize:12,border:"1px solid #d1d5db",borderRadius:7,outline:"none"}}/>
               </div>
-              {paymentsLog.length===0?<Empty icon="💳" msg="NO PAYMENTS RECORDED YET"/>:(
+              {paymentsLog.length===0?<Empty icon="💳" msg="NO PAYMENTS RECORDED YET"/>:(()=>{
+                const lq=pmLogSearch.toLowerCase();
+                const lFilt=lq?paymentsLog.filter(p=>(getC(p.cust_id)?.name||"").toLowerCase().includes(lq)||(p.id||"").toLowerCase().includes(lq)||(p.method||"").toLowerCase().includes(lq)||(p.check_number||"").toLowerCase().includes(lq)):paymentsLog;
+                const lTotalPages=Math.ceil(lFilt.length/ROWS_PER_PAGE);
+                const lPage=Math.min(pmLogPage,Math.max(0,lTotalPages-1));
+                const lRows=lFilt.slice(lPage*ROWS_PER_PAGE,(lPage+1)*ROWS_PER_PAGE);
+                return(<>
                 <div className="tw"><table>
                   <thead><tr><th>ID</th><th>Date</th><th>Customer</th><th>Created By</th><th>Method</th><th>Amount</th><th>Ref #</th><th>Invoices</th><th>Note</th><th></th></tr></thead>
-                  <tbody>{paymentsLog.map(p=>(
+                  <tbody>{lRows.map(p=>(
                     <tr key={p.id}>
                       <td><span className="tag" style={{background:"#f0fdf4",color:"#065f46"}}>{p.id}</span></td>
                       <td style={{fontSize:11,color:"#6b7280"}}>{p.date}</td>
@@ -5634,7 +5734,8 @@ export default function App(){
                     </tr>
                   ))}</tbody>
                 </table></div>
-              )}
+                <PaginationBar page={lPage} totalPages={lTotalPages} total={lFilt.length} perPage={ROWS_PER_PAGE} setPage={setPmLogPage} label="payments"/>
+                </>);})()}
             </div>}
 
             {/* Bank Reconciliation Tab */}
@@ -5890,7 +5991,15 @@ export default function App(){
           {/* ══ CUSTOMERS ══ */}
           {tab==="customers"&&<div className="fu">
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
-              <div style={{fontSize:12,color:"#6b7280"}}>{visCustomers.length} customer account{visCustomers.length!==1?"s":""}{!isAdmin?" on your route":""}</div>
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <div style={{fontSize:12,color:"#6b7280"}}>{visCustomers.length} customer account{visCustomers.length!==1?"s":""}{!isAdmin?" on your route":""}</div>
+                <input
+                  value={custSearch}
+                  onChange={e=>{setCustSearch(e.target.value);setCustPage(0);}}
+                  placeholder="🔍 Search customers…"
+                  style={{width:210,padding:"6px 10px",fontSize:12,border:"1px solid #d1d5db",borderRadius:7,outline:"none"}}
+                />
+              </div>
               <button className="btn ba" onClick={()=>setModal("addCustomer")}>{ic.plus} Open New Account</button>
             </div>
             {editingCid&&<div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:10,padding:"18px 20px",marginBottom:16}}>
@@ -5989,8 +6098,15 @@ export default function App(){
                 )}
               </div>
             </div>}
+            {(()=>{
+              const cq=custSearch.toLowerCase();
+              const filteredC=cq?visCustomers.filter(c=>(c.name||"").toLowerCase().includes(cq)||(c.address||"").toLowerCase().includes(cq)||(c.phone||"").toLowerCase().includes(cq)||(c.email||"").toLowerCase().includes(cq)):visCustomers;
+              const totalPagesC=Math.ceil(filteredC.length/CUST_PER_PAGE);
+              const pageC=Math.min(custPage,Math.max(0,totalPagesC-1));
+              const pageCustomers=filteredC.slice(pageC*CUST_PER_PAGE,(pageC+1)*CUST_PER_PAGE);
+              return(<>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
-              {visCustomers.map(c=>{
+              {pageCustomers.map(c=>{
                 const cs=visSales.filter(s=>s.cust_id===c.id);
                 const rev=cs.reduce((a,s)=>a+s.total,0),prof=cs.reduce((a,s)=>a+s.profit,0);
                 const unpaid=cs.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0);
@@ -6072,9 +6188,9 @@ export default function App(){
                 );
               })}
             </div>
+            <PaginationBar page={pageC} totalPages={totalPagesC} total={filteredC.length} perPage={CUST_PER_PAGE} setPage={setCustPage} label="customers"/>
+            </>);})()}
           </div>}
-
-          {/* ══ TRUCK MANAGEMENT ══ */}
           {tab==="truckmanagement"&&isAdmin&&<div className="fu">{(()=>{
 
             // -- helpers ------------------------------------------------------
@@ -6747,29 +6863,43 @@ export default function App(){
                   <div style={{fontSize:12,marginTop:4}}>Events are recorded automatically as you use the system</div>
                 </div>
               :<div className="card" style={{overflow:"hidden"}}>
-                <div style={{overflowX:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse"}}>
-                    <thead><tr style={{background:"#0a1628",color:"#fff"}}>
-                      {["Time","User","Action","Entity","Detail"].map(h=>(
-                        <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
-                      ))}
-                    </tr></thead>
-                    <tbody>
-                      {auditLog.map((e,i)=>{
-                        const actionColor={ADD:"#059669",EDIT:"#7c3aed",DELETE:"#dc2626",PAY:"#0ea5e9",UNPAY:"#f59e0b"}[e.action]||"#6b7280";
-                        return(
-                          <tr key={e.id||i} style={{borderBottom:"1px solid #f3f4f6",background:i%2===0?"#fff":"#fafafa"}}>
-                            <td style={{padding:"8px 13px",fontSize:11,color:"#6b7280",whiteSpace:"nowrap"}}>{new Date(e.created_at).toLocaleString()}</td>
-                            <td style={{padding:"8px 13px",fontSize:11,fontWeight:600,color:"#0a1628"}}>{e.user_email}</td>
-                            <td style={{padding:"8px 13px"}}><span style={{background:`${actionColor}18`,color:actionColor,padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:700}}>{e.action}</span></td>
-                            <td style={{padding:"8px 13px",fontSize:11,color:"#6b7280"}}>{e.entity}</td>
-                            <td style={{padding:"8px 13px",fontSize:11,color:"#6b7280",maxWidth:300,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.detail}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                <div style={{padding:"10px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                  <div style={{fontSize:12,color:"#6b7280"}}>{auditLog.length} total events</div>
+                  <input value={auditSearch} onChange={e=>{setAuditSearch(e.target.value);setAuditPage(0);}} placeholder="🔍 Search logs…" style={{width:190,padding:"6px 10px",fontSize:12,border:"1px solid #d1d5db",borderRadius:7,outline:"none"}}/>
                 </div>
+                {(()=>{
+                  const auq=auditSearch.toLowerCase();
+                  const auFilt=auq?auditLog.filter(e=>(e.user_email||"").toLowerCase().includes(auq)||(e.action||"").toLowerCase().includes(auq)||(e.entity||"").toLowerCase().includes(auq)||(e.detail||"").toLowerCase().includes(auq)):auditLog;
+                  const auTotalPages=Math.ceil(auFilt.length/ROWS_PER_PAGE);
+                  const auPage=Math.min(auditPage,Math.max(0,auTotalPages-1));
+                  const auRows=auFilt.slice(auPage*ROWS_PER_PAGE,(auPage+1)*ROWS_PER_PAGE);
+                  return(<>
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                        {["Time","User","Action","Entity","Detail"].map(h=>(
+                          <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>
+                        ))}
+                      </tr></thead>
+                      <tbody>
+                        {auRows.map((e,i)=>{
+                          const actionColor={ADD:"#059669",EDIT:"#7c3aed",DELETE:"#dc2626",PAY:"#0ea5e9",UNPAY:"#f59e0b"}[e.action]||"#6b7280";
+                          return(
+                            <tr key={e.id||i} style={{borderBottom:"1px solid #f3f4f6",background:i%2===0?"#fff":"#fafafa"}}>
+                              <td style={{padding:"8px 13px",fontSize:11,color:"#6b7280",whiteSpace:"nowrap"}}>{new Date(e.created_at).toLocaleString()}</td>
+                              <td style={{padding:"8px 13px",fontSize:11,fontWeight:600,color:"#0a1628"}}>{e.user_email}</td>
+                              <td style={{padding:"8px 13px"}}><span style={{background:`${actionColor}18`,color:actionColor,padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:700}}>{e.action}</span></td>
+                              <td style={{padding:"8px 13px",fontSize:11,color:"#6b7280"}}>{e.entity}</td>
+                              <td style={{padding:"8px 13px",fontSize:11,color:"#6b7280",maxWidth:300,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.detail}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <PaginationBar page={auPage} totalPages={auTotalPages} total={auFilt.length} perPage={ROWS_PER_PAGE} setPage={setAuditPage} label="events"/>
+                  </>);
+                })()}
               </div>
             }
           </div>}

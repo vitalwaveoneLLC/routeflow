@@ -235,6 +235,8 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[]}){
   const[acctData,setAcctData]=useState(null);
   const[acctLoading,setAcctLoading]=useState(true);
   const[viewInv,setViewInv]=useState(null); // selected invoice to view
+  const[invPage,setInvPage]=useState(0);
+  const INV_PER_PAGE=15;
 
   useEffect(()=>{
     supabase.from("sales").select("*").eq("cust_id",selCust.id).order("created_at",{ascending:false})
@@ -398,33 +400,51 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[]}){
           </div>
         :<div style={{background:"#fff",borderRadius:10,overflow:"hidden",border:"1px solid #e5e7eb"}}>
           <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:12,color:"#6b7280"}}>INVOICE HISTORY — tap an invoice to view details</div>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{background:"#0a1628",color:"#fff"}}>
-              {["Invoice #","Date","Items","Total","Status"].map(h=>(
-                <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {invoices.map(s=>{
-                const paid=payments.find(p=>p.sale_id===s.id&&p.status==="paid");
-                return(
-                  <tr key={s.id} onClick={()=>setViewInv(s)} style={{borderBottom:"1px solid #f3f4f6",cursor:"pointer",transition:"background .15s"}}
-                    onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
-                    onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
-                    <td style={{padding:"10px 14px",fontWeight:700,color:"#7c3aed",fontSize:12,textDecoration:"underline"}}>{s.id}</td>
-                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{s.date}</td>
-                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{(s.items||[]).length} item{(s.items||[]).length!==1?"s":""}</td>
-                    <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontSize:13}}>{fmt(parseFloat(s.total||0)+parseFloat(s.previous_balance||0))}</td>
-                    <td style={{padding:"10px 14px"}}>
-                      <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:6,background:paid?"#f0fdf4":"#fef2f2",color:paid?"#065f46":"#dc2626"}}>
-                        {paid?"✓ PAID":"UNPAID"}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          {(()=>{
+            const totalPages=Math.ceil(invoices.length/INV_PER_PAGE);
+            const page=Math.min(invPage,Math.max(0,totalPages-1));
+            const pageInvs=invoices.slice(page*INV_PER_PAGE,(page+1)*INV_PER_PAGE);
+            return(<>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                {["Invoice #","Date","Items","Total","Status"].map(h=>(
+                  <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:11,fontWeight:700}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {pageInvs.map(s=>{
+                  const paid=payments.find(p=>p.sale_id===s.id&&p.status==="paid");
+                  return(
+                    <tr key={s.id} onClick={()=>setViewInv(s)} style={{borderBottom:"1px solid #f3f4f6",cursor:"pointer",transition:"background .15s"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                      onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                      <td style={{padding:"10px 14px",fontWeight:700,color:"#7c3aed",fontSize:12,textDecoration:"underline"}}>{s.id}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{s.date}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{(s.items||[]).length} item{(s.items||[]).length!==1?"s":""}</td>
+                      <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontSize:13}}>{fmt(parseFloat(s.total||0)+parseFloat(s.previous_balance||0))}</td>
+                      <td style={{padding:"10px 14px"}}>
+                        <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:6,background:paid?"#f0fdf4":"#fef2f2",color:paid?"#065f46":"#dc2626"}}>
+                          {paid?"✓ PAID":"UNPAID"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {totalPages>1&&<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 16px",borderTop:"1px solid #f3f4f6",background:"#fafafa",flexWrap:"wrap",gap:8}}>
+              <div style={{fontSize:11,color:"#6b7280"}}>Showing {page*INV_PER_PAGE+1}–{Math.min((page+1)*INV_PER_PAGE,invoices.length)} of {invoices.length} invoices</div>
+              <div style={{display:"flex",gap:5}}>
+                <button onClick={()=>setInvPage(p=>p-1)} disabled={page===0} style={{padding:"4px 10px",fontSize:11,border:"1px solid #d1d5db",borderRadius:6,background:"#fff",cursor:page===0?"not-allowed":"pointer",color:page===0?"#9ca3af":"#374151"}}>← Prev</button>
+                {Array.from({length:totalPages},(_,i)=>i).filter(i=>i===0||i===totalPages-1||Math.abs(i-page)<=1).reduce((acc,i,idx,arr)=>{if(idx>0&&i-arr[idx-1]>1)acc.push("…");acc.push(i);return acc;},[]).map((i,k)=>
+                  i==="…"?<span key={k} style={{fontSize:11,color:"#9ca3af",padding:"0 3px",lineHeight:"26px"}}>…</span>:
+                  <button key={k} onClick={()=>setInvPage(i)} style={{padding:"4px 8px",fontSize:11,minWidth:28,border:i===page?"none":"1px solid #e5e7eb",borderRadius:6,background:i===page?"#0a1628":"#fff",color:i===page?"#fff":"#374151",cursor:"pointer"}}>{i+1}</button>
+                )}
+                <button onClick={()=>setInvPage(p=>p+1)} disabled={page>=totalPages-1} style={{padding:"4px 10px",fontSize:11,border:"1px solid #d1d5db",borderRadius:6,background:"#fff",cursor:page>=totalPages-1?"not-allowed":"pointer",color:page>=totalPages-1?"#9ca3af":"#374151"}}>Next →</button>
+              </div>
+            </div>}
+            </>);
+          })()}
         </div>
       }
 
