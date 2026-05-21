@@ -1417,6 +1417,9 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
   const [wiSales,   setWiSales]   = useState([]);
   const [wiPayments,setWiPayments]= useState([]);
   const [wiHistLoading,setWiHistLoading]=useState(false);
+  const [wiHistSearch, setWiHistSearch] = useState("");
+  const [wiHistPage,   setWiHistPage]   = useState(0);
+  const WI_HIST_PER_PAGE = 10;
 
   // Amendment
   const [amendSale, setAmendSale] = useState(null);   // sale being amended
@@ -1778,9 +1781,21 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
     if(!wiCust&&!initCust) return <div className="card" style={{padding:28,textAlign:"center",color:"#9ca3af"}}>Select a customer first to see their invoice history.</div>;
     if(wiSales.length===0) return <div className="card" style={{padding:32,textAlign:"center",color:"#9ca3af"}}><div style={{fontSize:28,marginBottom:6}}>📋</div><div>No invoices yet</div></div>;
 
+    const hq=wiHistSearch.toLowerCase();
+    const filtered=hq?wiSales.filter(s=>(s.id||"").toLowerCase().includes(hq)||(s.date||"").toLowerCase().includes(hq)):wiSales;
+    const totalPages=Math.ceil(filtered.length/WI_HIST_PER_PAGE);
+    const page=Math.min(wiHistPage,Math.max(0,totalPages-1));
+    const pageWiSales=filtered.slice(page*WI_HIST_PER_PAGE,(page+1)*WI_HIST_PER_PAGE);
+
     return(
       <div>
-        {wiSales.map(s=>{
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+          <div style={{fontSize:12,color:"#6b7280"}}>{filtered.length} invoice{filtered.length!==1?"s":""}</div>
+          <input value={wiHistSearch} onChange={e=>{setWiHistSearch(e.target.value);setWiHistPage(0);}}
+            placeholder="🔍 Search…"
+            style={{width:170,padding:"6px 10px",fontSize:12,border:"1.5px solid #e5e7eb",borderRadius:7,outline:"none",fontFamily:"'Inter',sans-serif"}}/>
+        </div>
+        {pageWiSales.map(s=>{
           const pmt = wiPayments.find(p=>p.sale_id===s.id);
           const isPaid = pmt?.status==="paid";
           const tRate = getTaxRate(customers.find(c=>c.id===s.cust_id));
@@ -1796,14 +1811,8 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
                     {s.amended_at&&<span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,background:"#ede9fe",color:"#5b21b6"}}>AMENDED</span>}
                   </div>
                   <div style={{fontSize:11,color:"#9ca3af"}}>{s.date} · {(s.items||[]).length} product{(s.items||[]).length!==1?"s":""}</div>
-                  {/* Items summary */}
                   <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
-                    {(s.items||[]).map(i=>{
-                      const p=products.find(x=>x.id===i.pid);
-                      return<span key={i.pid} style={{fontSize:10,background:"#f3f4f6",borderRadius:5,padding:"2px 7px",color:"#374151"}}>
-                        {p?.name||i.pid} ×{i.qty}
-                      </span>;
-                    })}
+                    {(s.items||[]).map(i=>{const p=products.find(x=>x.id===i.pid);return<span key={i.pid} style={{fontSize:10,background:"#f3f4f6",borderRadius:5,padding:"2px 7px",color:"#374151"}}>{p?.name||i.pid} ×{i.qty}</span>;})}
                   </div>
                 </div>
                 <div style={{textAlign:"right"}}>
@@ -1818,6 +1827,22 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
             </div>
           );
         })}
+        {totalPages>1&&<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 4px",marginTop:4,flexWrap:"wrap",gap:8}}>
+          <div style={{fontSize:11,color:"#9ca3af"}}>Showing {page*WI_HIST_PER_PAGE+1}–{Math.min((page+1)*WI_HIST_PER_PAGE,filtered.length)} of {filtered.length}</div>
+          <div style={{display:"flex",gap:5}}>
+            <button onClick={()=>setWiHistPage(p=>p-1)} disabled={page===0}
+              style={{padding:"5px 12px",fontSize:12,border:"1.5px solid #e5e7eb",borderRadius:7,background:"#fff",cursor:page===0?"not-allowed":"pointer",color:page===0?"#9ca3af":"#0a1628",fontWeight:600}}>← Prev</button>
+            {Array.from({length:totalPages},(_,i)=>i).filter(i=>i===0||i===totalPages-1||Math.abs(i-page)<=1).reduce((acc,i,idx,arr)=>{if(idx>0&&i-arr[idx-1]>1)acc.push("…");acc.push(i);return acc;},[]).map((i,k)=>
+              i==="…"?<span key={k} style={{padding:"5px 4px",fontSize:11,color:"#9ca3af",lineHeight:"28px"}}>…</span>:
+              <button key={k} onClick={()=>setWiHistPage(i)}
+                style={{padding:"5px 10px",fontSize:12,border:i===page?"none":"1.5px solid #e5e7eb",borderRadius:7,background:i===page?"#0a1628":"#fff",color:i===page?"#fff":"#0a1628",fontWeight:700,cursor:"pointer",minWidth:32}}>
+                {i+1}
+              </button>
+            )}
+            <button onClick={()=>setWiHistPage(p=>p+1)} disabled={page>=totalPages-1}
+              style={{padding:"5px 12px",fontSize:12,border:"1.5px solid #e5e7eb",borderRadius:7,background:"#fff",cursor:page>=totalPages-1?"not-allowed":"pointer",color:page>=totalPages-1?"#9ca3af":"#0a1628",fontWeight:600}}>Next →</button>
+          </div>
+        </div>}
       </div>
     );
   };
@@ -1935,6 +1960,8 @@ function DriverExpensesTab({driverData, supabase}){
   const [expenses, setExpenses] = useState([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [expPage, setExpPage] = useState(0);
+  const EXP_PER_PAGE = 10;
   const uid = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
   const cats = [{k:"gas",e:"⛽",l:"Gas / Fuel"},{k:"maintenance",e:"🔧",l:"Maintenance"},{k:"food",e:"🍔",l:"Food & Meals"},{k:"accommodation",e:"🏨",l:"Accommodation"},{k:"other",e:"📋",l:"Other"}];
 
@@ -1986,21 +2013,41 @@ function DriverExpensesTab({driverData, supabase}){
         </button>
       </div>
 
-      <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>Recent Expenses</div>
-      {expenses.length===0?<div className="card" style={{padding:20,textAlign:"center",color:"#9ca3af",fontSize:12}}>No expenses recorded yet</div>:
-        expenses.map(e=>{
-          const cat=cats.find(c=>c.k===e.category);
-          return(
-            <div key={e.id} className="card" style={{padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
-              <div style={{fontSize:24,flexShrink:0}}>{cat?.e||"📋"}</div>
-              <div style={{flex:1}}>
-                <div style={{fontWeight:600,fontSize:13}}>{cat?.l||e.category}</div>
-                <div style={{fontSize:11,color:"#9ca3af"}}>{e.date} {e.description&&`· ${e.description}`}</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div style={{fontWeight:700,fontSize:13}}>Recent Expenses</div>
+        {expenses.length>EXP_PER_PAGE&&<div style={{fontSize:11,color:"#9ca3af"}}>{expenses.length} total</div>}
+      </div>
+      {expenses.length===0
+        ?<div className="card" style={{padding:20,textAlign:"center",color:"#9ca3af",fontSize:12}}>No expenses recorded yet</div>
+        :(()=>{
+          const totalExpPages=Math.ceil(expenses.length/EXP_PER_PAGE);
+          const ep=Math.min(expPage,Math.max(0,totalExpPages-1));
+          const pageExps=expenses.slice(ep*EXP_PER_PAGE,(ep+1)*EXP_PER_PAGE);
+          return(<>
+            {pageExps.map(e=>{
+              const cat=cats.find(c=>c.k===e.category);
+              return(
+                <div key={e.id} className="card" style={{padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{fontSize:24,flexShrink:0}}>{cat?.e||"📋"}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:600,fontSize:13}}>{cat?.l||e.category}</div>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>{e.date} {e.description&&`· ${e.description}`}</div>
+                  </div>
+                  <div style={{fontWeight:800,fontSize:16,color:"#dc2626"}}>${e.amount.toFixed(2)}</div>
+                </div>
+              );
+            })}
+            {totalExpPages>1&&<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 4px",marginTop:4,flexWrap:"wrap",gap:8}}>
+              <div style={{fontSize:11,color:"#9ca3af"}}>Showing {ep*EXP_PER_PAGE+1}–{Math.min((ep+1)*EXP_PER_PAGE,expenses.length)} of {expenses.length}</div>
+              <div style={{display:"flex",gap:5}}>
+                <button onClick={()=>setExpPage(p=>p-1)} disabled={ep===0}
+                  style={{padding:"5px 12px",fontSize:12,border:"1.5px solid #e5e7eb",borderRadius:7,background:"#fff",cursor:ep===0?"not-allowed":"pointer",color:ep===0?"#9ca3af":"#0a1628",fontWeight:600}}>← Prev</button>
+                <button onClick={()=>setExpPage(p=>p+1)} disabled={ep>=totalExpPages-1}
+                  style={{padding:"5px 12px",fontSize:12,border:"1.5px solid #e5e7eb",borderRadius:7,background:"#fff",cursor:ep>=totalExpPages-1?"not-allowed":"pointer",color:ep>=totalExpPages-1?"#9ca3af":"#0a1628",fontWeight:600}}>Next →</button>
               </div>
-              <div style={{fontWeight:800,fontSize:16,color:"#dc2626"}}>${e.amount.toFixed(2)}</div>
-            </div>
-          );
-        })
+            </div>}
+          </>);
+        })()
       }
     </div>
   );
@@ -2065,6 +2112,9 @@ export default function OrderPortal() {
   const [payForm, setPayForm] = useState({method:"cash",checkNum:"",zelleRef:"",bankName:"",notes:""});
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [histSearch, setHistSearch] = useState("");
+  const [histPage, setHistPage] = useState(0);
+  const HIST_PER_PAGE = 10;
 
   // -- INVOICE LINK HANDLER (from WhatsApp) ------------------------------------
   const [invoiceLink, setInvoiceLink] = useState(()=>{
@@ -3479,65 +3529,89 @@ export default function OrderPortal() {
 
               {/* ── HISTORY TAB ── */}
               {driverTab==="history"&&<div>
-                <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:12}}>📄 Invoice History</div>
-                {driverData.sales.length===0
-                  ?<div className="card" style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No invoices yet</div>
-                  :driverData.sales.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(s=>{
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+                  <div style={{fontWeight:700,fontSize:14,color:"#0a1628"}}>📄 Invoice History</div>
+                  <input
+                    value={histSearch}
+                    onChange={e=>{setHistSearch(e.target.value);setHistPage(0);}}
+                    placeholder="🔍 Search invoices…"
+                    style={{width:190,padding:"7px 11px",fontSize:12,border:"1.5px solid #e5e7eb",borderRadius:8,outline:"none",fontFamily:"'Inter',sans-serif"}}
+                  />
+                </div>
+                {(()=>{
+                  const sorted=[...driverData.sales].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+                  const hq=histSearch.toLowerCase();
+                  const filtered=hq?sorted.filter(s=>{
                     const cust=driverData.customers.find(c=>c.id===s.cust_id);
-                    const isPaid=s._paid||false;
-                    const isRC=(s.check_penalty_applied||0)>0;
-                    // Determine who created this invoice
-                    const createdBy=s.truck_id===driverData.truck?.id?"🚚 You"
-                      :s.truck_id?`🚚 Driver`
-                      :s.id?.startsWith("INV-")&&!s.truck_id?"🏪 Walk-in"
-                      :"📱 Customer Portal";
-                    const saleTax=(()=>{
-                      const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));
-                      const rate=st?.exempt?0:parseFloat(st?.rate||0);
-                      if(!rate)return 0;
-                      const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
-                      return parseFloat((taxable*rate/100).toFixed(2));
-                    })();
-                    const prevBal=parseFloat(s.previous_balance||0);
-                    const gt=parseFloat((s.total+saleTax+prevBal).toFixed(2));
-                    return(
-                      <div key={s.id} className="card" style={{padding:"14px 16px",marginBottom:10,borderLeft:`4px solid ${isPaid?"#059669":s.email_sent?"#0ea5e9":"#e5e7eb"}`}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                          <div>
-                            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                              <span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setDriverViewInv(s)}>{s.id}</span>
-                              {isPaid
-                                ?<span style={{background:"#dcfce7",color:"#166534",padding:"2px 8px",borderRadius:4,fontSize:10,fontWeight:700}}>✓ PAID</span>
-                                :<span style={{background:"#fef9c3",color:"#854d0e",padding:"2px 8px",borderRadius:4,fontSize:10,fontWeight:700}}>⏳ UNPAID</span>
-                              }
+                    return (s.id||"").toLowerCase().includes(hq)||(cust?.name||"").toLowerCase().includes(hq)||(s.date||"").toLowerCase().includes(hq);
+                  }):sorted;
+                  const totalPages=Math.ceil(filtered.length/HIST_PER_PAGE);
+                  const page=Math.min(histPage,Math.max(0,totalPages-1));
+                  const pageItems=filtered.slice(page*HIST_PER_PAGE,(page+1)*HIST_PER_PAGE);
+                  if(filtered.length===0) return <div className="card" style={{padding:24,textAlign:"center",color:"#9ca3af"}}>No invoices found</div>;
+                  return(<>
+                    {pageItems.map(s=>{
+                      const cust=driverData.customers.find(c=>c.id===s.cust_id);
+                      const isPaid=s._paid||false;
+                      const createdBy=s.truck_id===driverData.truck?.id?"🚚 You":s.truck_id?"🚚 Driver":!s.truck_id?"🏪 Walk-in":"📱 Portal";
+                      const saleTax=(()=>{
+                        const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));
+                        const rate=st?.exempt?0:parseFloat(st?.rate||0);
+                        if(!rate)return 0;
+                        const taxable=(s.items||[]).reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?a+(p?.price||0)*i.qty:a;},0);
+                        return parseFloat((taxable*rate/100).toFixed(2));
+                      })();
+                      const prevBal=parseFloat(s.previous_balance||0);
+                      const gt=parseFloat((s.total+saleTax+prevBal).toFixed(2));
+                      return(
+                        <div key={s.id} className="card" style={{padding:"14px 16px",marginBottom:10,borderLeft:`4px solid ${isPaid?"#059669":s.email_sent?"#0ea5e9":"#e5e7eb"}`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                            <div>
+                              <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                                <span style={{background:"#f5f3ff",color:"#7c3aed",padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setDriverViewInv(s)}>{s.id}</span>
+                                {isPaid
+                                  ?<span style={{background:"#dcfce7",color:"#166534",padding:"2px 8px",borderRadius:4,fontSize:10,fontWeight:700}}>✓ PAID</span>
+                                  :<span style={{background:"#fef9c3",color:"#854d0e",padding:"2px 8px",borderRadius:4,fontSize:10,fontWeight:700}}>⏳ UNPAID</span>
+                                }
+                              </div>
+                              <div style={{fontWeight:600,fontSize:13,marginTop:4}}>{cust?.name||"Unknown"}</div>
+                              <div style={{fontSize:11,color:"#9ca3af"}}>{s.date} · <span style={{color:"#6b7280"}}>{createdBy}</span></div>
                             </div>
-                            <div style={{fontWeight:600,fontSize:13,marginTop:4}}>{cust?.name||"Unknown"}</div>
-                            <div style={{fontSize:11,color:"#9ca3af"}}>{s.date} · <span style={{color:"#6b7280"}}>{createdBy}</span></div>
+                            <div style={{textAlign:"right"}}>
+                              <div style={{fontWeight:800,fontSize:18,color:isPaid?"#059669":"#7c3aed"}}>${gt.toFixed(2)}</div>
+                              {saleTax>0&&<div style={{fontSize:10,color:"#9ca3af"}}>incl. ${saleTax.toFixed(2)} tax</div>}
+                              {prevBal>0&&<div style={{fontSize:10,color:"#dc2626",fontWeight:600}}>{s.check_penalty_applied>0?"🚨 Returned Check Penalty":`incl. $${prevBal.toFixed(2)} prev. balance`}</div>}
+                              {s.email_sent&&<div style={{fontSize:10,color:"#0ea5e9"}}>✓ Email sent</div>}
+                            </div>
                           </div>
-                          <div style={{textAlign:"right"}}>
-                            <div style={{fontWeight:800,fontSize:18,color:isPaid?"#059669":"#7c3aed"}}>${gt.toFixed(2)}</div>
-                            {saleTax>0&&<div style={{fontSize:10,color:"#9ca3af"}}>incl. ${saleTax.toFixed(2)} tax</div>}
-                            {prevBal>0&&<div style={{fontSize:10,color:"#dc2626",fontWeight:600}}>{s.check_penalty_applied>0?"🚨 Returned Check Penalty":`incl. $${prevBal.toFixed(2)} prev. balance`}</div>}
-                            {s.email_sent&&<div style={{fontSize:10,color:"#0ea5e9"}}>✓ Email sent</div>}
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                            <button onClick={()=>setDriverViewInv(s)} style={{flex:1,padding:"8px",background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:7,fontSize:12,fontWeight:600,color:"#7c3aed",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>👁 View</button>
+                            {!isPaid&&<button onClick={()=>{setCreatedSaleForHistory(s);setShowHistoryPayment(true);}} style={{flex:1,padding:"8px",background:"#059669",border:"none",borderRadius:7,fontSize:12,fontWeight:600,color:"#fff",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>💰 Collect</button>}
+                            {cust?.email&&!s.email_sent&&<button onClick={()=>sendInvoiceEmail(s,cust)} style={{flex:1,padding:"8px",background:"#0ea5e9",border:"none",borderRadius:7,fontSize:12,fontWeight:600,color:"#fff",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>📧 Email</button>}
+                            {isPaid&&<div style={{flex:1,padding:"8px",background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,fontSize:12,color:"#059669",textAlign:"center",fontWeight:600}}>✓ Paid</div>}
                           </div>
                         </div>
-                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                          <button onClick={()=>setDriverViewInv(s)} style={{flex:1,padding:"8px",background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:7,fontSize:12,fontWeight:600,color:"#7c3aed",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-                            👁 View
+                      );
+                    })}
+                    {/* Pagination */}
+                    {totalPages>1&&<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 4px",marginTop:4,flexWrap:"wrap",gap:8}}>
+                      <div style={{fontSize:11,color:"#9ca3af"}}>Showing {page*HIST_PER_PAGE+1}–{Math.min((page+1)*HIST_PER_PAGE,filtered.length)} of {filtered.length}</div>
+                      <div style={{display:"flex",gap:5}}>
+                        <button onClick={()=>setHistPage(p=>p-1)} disabled={page===0}
+                          style={{padding:"5px 12px",fontSize:12,border:"1.5px solid #e5e7eb",borderRadius:7,background:"#fff",cursor:page===0?"not-allowed":"pointer",color:page===0?"#9ca3af":"#0a1628",fontWeight:600}}>← Prev</button>
+                        {Array.from({length:totalPages},(_,i)=>i).filter(i=>i===0||i===totalPages-1||Math.abs(i-page)<=1).reduce((acc,i,idx,arr)=>{if(idx>0&&i-arr[idx-1]>1)acc.push("…");acc.push(i);return acc;},[]).map((i,k)=>
+                          i==="…"?<span key={k} style={{padding:"5px 4px",fontSize:11,color:"#9ca3af",lineHeight:"28px"}}>…</span>:
+                          <button key={k} onClick={()=>setHistPage(i)}
+                            style={{padding:"5px 10px",fontSize:12,border:i===page?"none":"1.5px solid #e5e7eb",borderRadius:7,background:i===page?"#0a1628":"#fff",color:i===page?"#fff":"#0a1628",fontWeight:700,cursor:"pointer",minWidth:32}}>
+                            {i+1}
                           </button>
-                          {!isPaid&&<button onClick={()=>{setCreatedSaleForHistory(s);setShowHistoryPayment(true);}}
-                            style={{flex:1,padding:"8px",background:"#059669",border:"none",borderRadius:7,fontSize:12,fontWeight:600,color:"#fff",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-                            💰 Collect
-                          </button>}
-                          {cust?.email&&!s.email_sent&&<button onClick={()=>sendInvoiceEmail(s,cust)} style={{flex:1,padding:"8px",background:"#0ea5e9",border:"none",borderRadius:7,fontSize:12,fontWeight:600,color:"#fff",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-                            📧 Email
-                          </button>}
-                          {isPaid&&<div style={{flex:1,padding:"8px",background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:7,fontSize:12,color:"#059669",textAlign:"center",fontWeight:600}}>✓ Paid</div>}
-                        </div>
+                        )}
+                        <button onClick={()=>setHistPage(p=>p+1)} disabled={page>=totalPages-1}
+                          style={{padding:"5px 12px",fontSize:12,border:"1.5px solid #e5e7eb",borderRadius:7,background:"#fff",cursor:page>=totalPages-1?"not-allowed":"pointer",color:page>=totalPages-1?"#9ca3af":"#0a1628",fontWeight:600}}>Next →</button>
                       </div>
-                    );
-                  })
-                }
+                    </div>}
+                  </>);
+                })()}
               </div>}
 
               {/* Invoice viewer modal */}
