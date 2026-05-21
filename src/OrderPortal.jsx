@@ -2073,23 +2073,22 @@ export default function OrderPortal() {
   const removeDraft=id=>saveDrafts(draftQueue.filter(d=>d._draftId!==id));
   const [isWalkIn,       setIsWalkIn]       = useState(false);
   const [isCustPortal,   setIsCustPortal]   = useState(false);
-  const [custPortalUser, setCustPortalUser] = useState(null); // logged-in customer
+  const [custPortalUser, setCustPortalUser] = useState(null);
   const [custPortalLoading,setCustPortalLoading]=useState(false);
   const [custPortalError,  setCustPortalError  ]=useState("");
   const [custPortalPhone,  setCustPortalPhone  ]=useState("");
   const [custPortalName,   setCustPortalName   ]=useState("");
-  const [custPortalData,   setCustPortalData   ]=useState(null); // {invoices, payments}
+  const [custPortalData,   setCustPortalData   ]=useState(null);
   const [walkInVerified, setWalkInVerified] = useState(false);
   const [walkInCust,     setWalkInCust]     = useState(null);
   const [walkInSearch,   setWalkInSearch]   = useState("");
   const [walkInPhone,    setWalkInPhone]    = useState("");
   const [walkInError,    setWalkInError]    = useState("");
   const [walkInLoading,  setWalkInLoading]  = useState(false);
-  const [walkInMode,     setWalkInMode]     = useState("customer"); // "customer" | "staff" | "register"
+  const [walkInMode,     setWalkInMode]     = useState("customer");
   const [walkInEmail,    setWalkInEmail]    = useState("");
   const [walkInPw,       setWalkInPw]       = useState("");
-  const [walkInUser,     setWalkInUser]     = useState(null); // verified driver/admin/staff user
-  // Staff registration form
+  const [walkInUser,     setWalkInUser]     = useState(null);
   const [wiReg, setWiReg] = useState({name:"",email:"",phone:"",role:"staff",note:""});
   const [wiRegSaving, setWiRegSaving] = useState(false);
   const [wiRegMsg, setWiRegMsg] = useState(null);
@@ -2102,6 +2101,27 @@ export default function OrderPortal() {
   const [newCustSaving,setNewCustSaving]=useState(false);
   const [driverError, setDriverError] = useState("");
   const [driverLoading, setDriverLoading] = useState(false);
+
+  // -- WhatsApp OTP states (shared across all user types) ---------------------
+  const [otpPhone,    setOtpPhone]    = useState("");
+  const [otpCode,     setOtpCode]     = useState("");
+  const [otpSent,     setOtpSent]     = useState(false);
+  const [otpLoading,  setOtpLoading]  = useState(false);
+  const [otpError,    setOtpError]    = useState("");
+  const [otpCooldown, setOtpCooldown] = useState(0); // seconds until resend allowed
+  // Driver OTP
+  const [driverOtpPhone,   setDriverOtpPhone]   = useState("");
+  const [driverOtpCode,    setDriverOtpCode]    = useState("");
+  const [driverOtpSent,    setDriverOtpSent]    = useState(false);
+  const [driverOtpLoading, setDriverOtpLoading] = useState(false);
+  const [driverOtpError,   setDriverOtpError]   = useState("");
+  const [driverOtpCooldown,setDriverOtpCooldown]= useState(0);
+  // Walk-in OTP
+  const [wiOtpPhone,   setWiOtpPhone]   = useState("");
+  const [wiOtpCode,    setWiOtpCode]    = useState("");
+  const [wiOtpSent,    setWiOtpSent]    = useState(false);
+  const [wiOtpLoading, setWiOtpLoading] = useState(false);
+  const [wiOtpError,   setWiOtpError]   = useState("");
   const [driverTab,   setDriverTab]   = useState("dashboard");
   const [driverSaleCust, setDriverSaleCust] = useState(null);
   const [driverViewInv, setDriverViewInv] = useState(null);
@@ -2156,7 +2176,134 @@ export default function OrderPortal() {
     setInvoiceLinkLoading(false);
   };
 
-  const collectPayment = async (sale, method) => {
+  // -- WhatsApp OTP helpers ---------------------------------------------------
+  const genOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+  const startCooldown = (setter, secs=60) => {
+    setter(secs);
+    const t = setInterval(()=>setter(p=>{if(p<=1){clearInterval(t);return 0;}return p-1;}),1000);
+  };
+
+  const sendOtp = async (phone, context="Login") => {
+    // Normalize phone
+    const clean = phone.replace(/\D/g,"");
+    if(clean.length < 10) return {ok:false, err:"Enter a valid 10-digit phone number"};
+    const to = clean.length===10 ? "1"+clean : clean;
+    const code = genOtp();
+    const expiresAt = new Date(Date.now() + 10*60*1000).toISOString();
+
+    // Save OTP to Supabase
+    await supabase.from("otp_codes").insert({phone:to, code, expires_at:expiresAt, used:false});
+
+    // Send via WhatsApp using existing Meta credentials
+    const {data:coData} = await supabase.from("company").select("meta_phone_id,meta_token,meta_template,name").maybeSingle();
+    if(!coData?.meta_phone_id || !coData?.meta_token) return {ok:false, err:"WhatsApp not configured. Contact admin."};
+
+    const {error} = await supabase.functions.invoke("send-whatsapp",{body:{
+      to,
+      phone_number_id: coData.meta_phone_id,
+      access_token: coData.meta_token,
+      template_name: "otp_verification",
+      params: [code, "10"], // {{1}} = code, {{2}} = expiry minutes
+    }});
+    if(error) return {ok:false, err:"Failed to send WhatsApp. Try again."};
+    return {ok:true, to};
+  };
+
+  const verifyOtp = async (phone, code) => {
+    const clean = phone.replace(/\D/g,"");
+    const to = clean.length===10 ? "1"+clean : clean;
+    const {data:row} = await supabase.from("otp_codes")
+      .select("*").eq("phone",to).eq("code",code).eq("used",false)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at",{ascending:false}).limit(1).maybeSingle();
+    if(!row) return {ok:false, err:"Invalid or expired code. Request a new one."};
+    await supabase.from("otp_codes").update({used:true}).eq("id",row.id);
+    return {ok:true};
+  };
+
+  // Driver: send OTP
+  const sendDriverOtp = async () => {
+    setDriverOtpLoading(true); setDriverOtpError("");
+    // Find driver by phone in trucks table
+    const clean = driverOtpPhone.replace(/\D/g,"");
+    const {data:trucks2} = await supabase.from("trucks").select("*");
+    const truck = (trucks2||[]).find(t=>{
+      const tp=(t.phone||"").replace(/\D/g,"");
+      return tp.length>=10 && (tp===clean||tp.slice(-10)===clean.slice(-10));
+    });
+    if(!truck) { setDriverOtpError("No driver found with this phone number. Contact admin."); setDriverOtpLoading(false); return; }
+    const res = await sendOtp(driverOtpPhone, "Driver Login");
+    if(!res.ok) { setDriverOtpError(res.err); setDriverOtpLoading(false); return; }
+    setDriverOtpSent(true);
+    startCooldown(setDriverOtpCooldown);
+    setDriverOtpLoading(false);
+  };
+
+  // Driver: verify OTP
+  const verifyDriverOtp = async () => {
+    setDriverOtpLoading(true); setDriverOtpError("");
+    const res = await verifyOtp(driverOtpPhone, driverOtpCode);
+    if(!res.ok) { setDriverOtpError(res.err); setDriverOtpLoading(false); return; }
+    // Load driver data by phone
+    const clean = driverOtpPhone.replace(/\D/g,"");
+    const {data:trucks2} = await supabase.from("trucks").select("*");
+    const truck = (trucks2||[]).find(t=>{const tp=(t.phone||"").replace(/\D/g,"");return tp.slice(-10)===clean.slice(-10);});
+    setDriverUser({phone:driverOtpPhone, driver:truck?.driver, truck_id:truck?.id});
+    await loadDriverData(truck);
+    setDriverOtpLoading(false);
+  };
+
+  // Customer: send OTP
+  const sendCustOtp = async () => {
+    setOtpLoading(true); setOtpError("");
+    const clean = otpPhone.replace(/\D/g,"");
+    const match = customers.find(c=>{const cp=(c.phone||"").replace(/\D/g,"");return cp.length>=10&&cp.slice(-10)===clean.slice(-10);});
+    if(!match) { setOtpError("No account found with this phone number."); setOtpLoading(false); return; }
+    const res = await sendOtp(otpPhone, "Customer Login");
+    if(!res.ok) { setOtpError(res.err); setOtpLoading(false); return; }
+    setOtpSent(true);
+    startCooldown(setOtpCooldown);
+    setOtpLoading(false);
+  };
+
+  // Customer: verify OTP
+  const verifyCustOtp = async () => {
+    setOtpLoading(true); setOtpError("");
+    const res = await verifyOtp(otpPhone, otpCode);
+    if(!res.ok) { setOtpError(res.err); setOtpLoading(false); return; }
+    const clean = otpPhone.replace(/\D/g,"");
+    const match = customers.find(c=>{const cp=(c.phone||"").replace(/\D/g,"");return cp.slice(-10)===clean.slice(-10);});
+    setWalkInCust(match); setWalkInVerified(true);
+    setOtpLoading(false);
+  };
+
+  // Walk-in staff: send OTP
+  const sendWiOtp = async () => {
+    setWiOtpLoading(true); setWiOtpError("");
+    const clean = wiOtpPhone.replace(/\D/g,"");
+    // Find in walkin_registrations (approved) or profiles
+    const {data:regs} = await supabase.from("walkin_registrations").select("*").eq("status","approved");
+    const match = (regs||[]).find(r=>{const rp=(r.phone||"").replace(/\D/g,"");return rp.slice(-10)===clean.slice(-10);});
+    if(!match) { setWiOtpError("No approved account found with this phone. Contact admin."); setWiOtpLoading(false); return; }
+    const res = await sendOtp(wiOtpPhone, "Staff Login");
+    if(!res.ok) { setWiOtpError(res.err); setWiOtpLoading(false); return; }
+    setWiOtpSent(true);
+    setWiOtpLoading(false);
+  };
+
+  // Walk-in staff: verify OTP
+  const verifyWiOtp = async () => {
+    setWiOtpLoading(true); setWiOtpError("");
+    const res = await verifyOtp(wiOtpPhone, wiOtpCode);
+    if(!res.ok) { setWiOtpError(res.err); setWiOtpLoading(false); return; }
+    const clean = wiOtpPhone.replace(/\D/g,"");
+    const {data:regs} = await supabase.from("walkin_registrations").select("*").eq("status","approved");
+    const match = (regs||[]).find(r=>{const rp=(r.phone||"").replace(/\D/g,"");return rp.slice(-10)===clean.slice(-10);});
+    setWalkInUser({phone:wiOtpPhone, role:match?.role||"staff", displayName:match?.name||"Staff"});
+    setWalkInCust(null); setWalkInVerified(true);
+    setWiOtpLoading(false);
+  };
     setPaymentSaving(true);
     try{
       const st = driverData?.stateTaxes?.find(s=>s.id===(sale.state||""));
@@ -3047,30 +3194,58 @@ export default function OrderPortal() {
         {isDriver&&<div className="fu">
           {!driverUser?(
             <div style={{maxWidth:420,margin:"0 auto"}}>
-              <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:6,textAlign:"center"}}>Driver Login</div>
-              <div style={{fontSize:13,color:"#6b7280",textAlign:"center",marginBottom:24}}>Sign in with your VitalWaveOne driver credentials</div>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:6,textAlign:"center"}}>🚚 Driver Login</div>
+              <div style={{fontSize:13,color:"#6b7280",textAlign:"center",marginBottom:24}}>We'll send a 6-digit code to your WhatsApp</div>
               <div className="card" style={{padding:28}}>
-                <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                  <div className="field">
-                    <label>Email Address</label>
-                    <input type="email" placeholder="your@email.com" value={driverEmail} onChange={e=>setDriverEmail(e.target.value)}
-                      onFocus={e=>e.target.style.borderColor="#0ea5e9"} onBlur={e=>e.target.style.borderColor="#d1d5db"}/>
+                {driverOtpError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626",marginBottom:14}}>⚠️ {driverOtpError}</div>}
+                {!driverOtpSent?(
+                  <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                    <div className="field">
+                      <label>Your Phone Number (registered with admin)</label>
+                      <input type="tel" placeholder="e.g. 5551234567" value={driverOtpPhone}
+                        onChange={e=>setDriverOtpPhone(e.target.value)}
+                        onKeyDown={e=>e.key==="Enter"&&sendDriverOtp()}
+                        style={{fontSize:16,letterSpacing:2,textAlign:"center"}}/>
+                    </div>
+                    <button onClick={sendDriverOtp} disabled={driverOtpLoading||driverOtpPhone.length<10}
+                      style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                      {driverOtpLoading?<><span className="sp">⟳</span>Sending…</>:<>💬 Send WhatsApp Code</>}
+                    </button>
+                    <div style={{textAlign:"center",fontSize:12,color:"#9ca3af"}}>Need help? Contact your admin</div>
+                    <div style={{borderTop:"1px solid #e5e7eb",paddingTop:14,marginTop:4}}>
+                      <div style={{fontSize:12,color:"#6b7280",textAlign:"center",marginBottom:8}}>New driver joining the team?</div>
+                      <button onClick={()=>{setIsDriver(false);setIsWalkIn(true);setWalkInMode("register");setWiReg(r=>({...r,role:"driver"}));}}
+                        style={{width:"100%",padding:"11px",background:"none",border:"1.5px solid #0ea5e9",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"'Inter',sans-serif",color:"#0ea5e9",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                        📝 Sign Up as New Driver →
+                      </button>
+                    </div>
                   </div>
-                  <div className="field">
-                    <label>Password</label>
-                    <input type="password" placeholder="••••••••" value={driverPw} onChange={e=>setDriverPw(e.target.value)}
-                      onKeyDown={e=>e.key==="Enter"&&handleDriverLogin()}
-                      onFocus={e=>e.target.style.borderColor="#0ea5e9"} onBlur={e=>e.target.style.borderColor="#d1d5db"}/>
+                ):(
+                  <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                    <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:8,padding:"12px 14px",fontSize:13,color:"#065f46",textAlign:"center"}}>
+                      ✅ Code sent to WhatsApp ending in {driverOtpPhone.slice(-4)}
+                    </div>
+                    <div className="field">
+                      <label>Enter 6-digit code</label>
+                      <input type="text" inputMode="numeric" maxLength={6} placeholder="• • • • • •"
+                        value={driverOtpCode} onChange={e=>setDriverOtpCode(e.target.value.replace(/\D/g,""))}
+                        onKeyDown={e=>e.key==="Enter"&&verifyDriverOtp()}
+                        style={{fontSize:28,letterSpacing:10,textAlign:"center",fontWeight:700}}/>
+                    </div>
+                    <button onClick={verifyDriverOtp} disabled={driverOtpLoading||driverOtpCode.length!==6}
+                      style={{background:"#0a1628",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                      {driverOtpLoading?<><span className="sp">⟳</span>Verifying…</>:<>✅ Verify & Sign In</>}
+                    </button>
+                    <button onClick={()=>{setDriverOtpSent(false);setDriverOtpCode("");setDriverOtpError("");}}
+                      style={{background:"none",border:"none",color:"#9ca3af",fontSize:12,cursor:"pointer",textAlign:"center"}}>
+                      ← Change phone number
+                    </button>
+                    {driverOtpCooldown===0
+                      ?<button onClick={sendDriverOtp} style={{background:"none",border:"none",color:"#0ea5e9",fontSize:12,cursor:"pointer",textAlign:"center",fontWeight:600}}>Resend code</button>
+                      :<div style={{textAlign:"center",fontSize:12,color:"#9ca3af"}}>Resend in {driverOtpCooldown}s</div>
+                    }
                   </div>
-                  {driverError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626"}}>⚠️ {driverError}</div>}
-                  <button onClick={handleDriverLogin} disabled={driverLoading}
-                    style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                    {driverLoading?<><span className="sp">⟳</span>Signing in…</>:<>🚚 Sign In as Driver</>}
-                  </button>
-                  <div style={{textAlign:"center",fontSize:12,color:"#9ca3af"}}>
-                    Need help? Contact your admin
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           ):(
@@ -3699,7 +3874,7 @@ export default function OrderPortal() {
                 {/* Mode toggle */}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:22}}>
                   {[["customer","👤 Customer"],["staff","🔑 Staff / Driver"]].map(([m,l])=>(
-                    <button key={m} onClick={()=>{setWalkInMode(m);setWalkInError("");}}
+                    <button key={m} onClick={()=>{setWalkInMode(m);setWalkInError("");setWiOtpSent(false);setWiOtpCode("");setWiOtpError("");}}
                       style={{padding:"9px 8px",borderRadius:8,border:`1.5px solid ${walkInMode===m?"#7c3aed":"#e5e7eb"}`,background:walkInMode===m?"#7c3aed":"#fff",color:walkInMode===m?"#fff":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
                       {l}
                     </button>
@@ -3711,69 +3886,97 @@ export default function OrderPortal() {
                     <div style={{textAlign:"center",marginBottom:18}}>
                       <div style={{fontSize:36,marginBottom:6}}>💎</div>
                       <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,color:"#0a1628",marginBottom:3}}>Customer Access</div>
-                      <div style={{fontSize:12,color:"#6b7280"}}>Enter your registered business name and phone</div>
+                      <div style={{fontSize:12,color:"#6b7280"}}>Enter your registered phone — we'll send a WhatsApp code</div>
                     </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                      <div className="field">
-                        <label>Business / Shop Name *</label>
-                        <input placeholder="e.g. Speedy Gas & Mart" value={walkInSearch}
-                          onChange={e=>setWalkInSearch(e.target.value)}
-                          onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}
-                          onKeyDown={e=>e.key==="Enter"&&verifyWalkIn()}/>
+                    {walkInError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626",marginBottom:12}}>⚠️ {walkInError}</div>}
+                    {!otpSent?(
+                      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                        <div className="field">
+                          <label>Phone Number *</label>
+                          <input type="tel" placeholder="e.g. 7135550100" value={otpPhone}
+                            onChange={e=>setOtpPhone(e.target.value)}
+                            onKeyDown={e=>e.key==="Enter"&&sendCustOtp()}
+                            style={{fontSize:16,letterSpacing:2,textAlign:"center"}}/>
+                        </div>
+                        {otpError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#dc2626"}}>⚠️ {otpError}</div>}
+                        <button onClick={sendCustOtp} disabled={otpLoading||otpPhone.length<10}
+                          style={{width:"100%",padding:"13px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginTop:4}}>
+                          {otpLoading?<><span className="sp">⟳</span>Sending…</>:<>💬 Send WhatsApp Code</>}
+                        </button>
                       </div>
-                      <div className="field">
-                        <label>Phone Number *</label>
-                        <input placeholder="e.g. (713) 555-0100" value={walkInPhone}
-                          onChange={e=>setWalkInPhone(e.target.value)}
-                          onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}
-                          onKeyDown={e=>e.key==="Enter"&&verifyWalkIn()}/>
+                    ):(
+                      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                        <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:8,padding:"10px",fontSize:12,color:"#065f46",textAlign:"center"}}>✅ Code sent to WhatsApp ending in {otpPhone.slice(-4)}</div>
+                        <div className="field">
+                          <label>Enter 6-digit code</label>
+                          <input type="text" inputMode="numeric" maxLength={6} placeholder="• • • • • •"
+                            value={otpCode} onChange={e=>setOtpCode(e.target.value.replace(/\D/g,""))}
+                            onKeyDown={e=>e.key==="Enter"&&verifyCustOtp()}
+                            style={{fontSize:26,letterSpacing:10,textAlign:"center",fontWeight:700}}/>
+                        </div>
+                        {otpError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#dc2626"}}>⚠️ {otpError}</div>}
+                        <button onClick={verifyCustOtp} disabled={otpLoading||otpCode.length!==6}
+                          style={{width:"100%",padding:"13px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                          {otpLoading?<><span className="sp">⟳</span>Verifying…</>:<>✅ Verify & Continue</>}
+                        </button>
+                        {otpCooldown===0
+                          ?<button onClick={sendCustOtp} style={{background:"none",border:"none",color:"#7c3aed",fontSize:12,cursor:"pointer",textAlign:"center",fontWeight:600}}>Resend code</button>
+                          :<div style={{textAlign:"center",fontSize:12,color:"#9ca3af"}}>Resend in {otpCooldown}s</div>}
+                        <button onClick={()=>{setOtpSent(false);setOtpCode("");setOtpError("");}} style={{background:"none",border:"none",color:"#9ca3af",fontSize:11,cursor:"pointer",textAlign:"center"}}>← Change number</button>
                       </div>
-                    </div>
+                    )}
                   </>
                 ):(
                   <>
                     <div style={{textAlign:"center",marginBottom:18}}>
                       <div style={{fontSize:36,marginBottom:6}}>🔑</div>
-                      <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,color:"#0a1628",marginBottom:3}}>Staff / Driver / Admin</div>
-                      <div style={{fontSize:12,color:"#6b7280"}}>Sign in with your VitalWaveOne account</div>
+                      <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,color:"#0a1628",marginBottom:3}}>Staff / Driver Access</div>
+                      <div style={{fontSize:12,color:"#6b7280"}}>Enter your registered phone — we'll send a WhatsApp code</div>
                     </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                      <div className="field">
-                        <label>Email *</label>
-                        <input type="email" placeholder="you@vitalwaveone.com" value={walkInEmail}
-                          onChange={e=>setWalkInEmail(e.target.value)}
-                          onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}
-                          onKeyDown={e=>e.key==="Enter"&&verifyWalkIn()}/>
+                    {!wiOtpSent?(
+                      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                        <div className="field">
+                          <label>Phone Number *</label>
+                          <input type="tel" placeholder="e.g. 7135550100" value={wiOtpPhone}
+                            onChange={e=>setWiOtpPhone(e.target.value)}
+                            onKeyDown={e=>e.key==="Enter"&&sendWiOtp()}
+                            style={{fontSize:16,letterSpacing:2,textAlign:"center"}}/>
+                        </div>
+                        {wiOtpError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#dc2626"}}>⚠️ {wiOtpError}</div>}
+                        <button onClick={sendWiOtp} disabled={wiOtpLoading||wiOtpPhone.length<10}
+                          style={{width:"100%",padding:"13px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginTop:4}}>
+                          {wiOtpLoading?<><span className="sp">⟳</span>Sending…</>:<>💬 Send WhatsApp Code</>}
+                        </button>
                       </div>
-                      <div className="field">
-                        <label>Password *</label>
-                        <input type="password" placeholder="••••••••" value={walkInPw}
-                          onChange={e=>setWalkInPw(e.target.value)}
-                          onFocus={e=>e.target.style.borderColor="#7c3aed"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}
-                          onKeyDown={e=>e.key==="Enter"&&verifyWalkIn()}/>
+                    ):(
+                      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                        <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:8,padding:"10px",fontSize:12,color:"#065f46",textAlign:"center"}}>✅ Code sent to WhatsApp ending in {wiOtpPhone.slice(-4)}</div>
+                        <div className="field">
+                          <label>Enter 6-digit code</label>
+                          <input type="text" inputMode="numeric" maxLength={6} placeholder="• • • • • •"
+                            value={wiOtpCode} onChange={e=>setWiOtpCode(e.target.value.replace(/\D/g,""))}
+                            onKeyDown={e=>e.key==="Enter"&&verifyWiOtp()}
+                            style={{fontSize:26,letterSpacing:10,textAlign:"center",fontWeight:700}}/>
+                        </div>
+                        {wiOtpError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#dc2626"}}>⚠️ {wiOtpError}</div>}
+                        <button onClick={verifyWiOtp} disabled={wiOtpLoading||wiOtpCode.length!==6}
+                          style={{width:"100%",padding:"13px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                          {wiOtpLoading?<><span className="sp">⟳</span>Verifying…</>:<>✅ Verify & Continue</>}
+                        </button>
+                        <button onClick={()=>{setWiOtpSent(false);setWiOtpCode("");setWiOtpError("");}} style={{background:"none",border:"none",color:"#9ca3af",fontSize:11,cursor:"pointer",textAlign:"center"}}>← Change number</button>
                       </div>
+                    )}
+                    {/* Registration link for staff */}
+                    <div style={{marginTop:16,padding:"12px 14px",background:"#f5f3ff",borderRadius:8,border:"1px solid #ddd6fe"}}>
+                      <div style={{fontSize:12,color:"#6b7280",marginBottom:4}}><strong style={{color:"#5b21b6"}}>New staff or receptionist?</strong></div>
+                      <div style={{fontSize:11,color:"#9ca3af",marginBottom:8}}>Request access — an admin will review and approve your account.</div>
+                      <button onClick={()=>{setWalkInMode("register");setWalkInError("");}}
+                        style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+                        Request Walk-in Access →
+                      </button>
                     </div>
                   </>
                 )}
-
-                {walkInError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626",marginTop:12}}>⚠️ {walkInError}</div>}
-
-                <button onClick={verifyWalkIn} disabled={walkInLoading}
-                  style={{width:"100%",padding:"13px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:walkInLoading?"not-allowed":"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginTop:16,opacity:walkInLoading?0.7:1}}>
-                  {walkInLoading?<><span className="sp">⟳</span> Verifying…</>:"Verify & Continue →"}
-                </button>
-
-                {/* Registration link for staff */}
-                <div style={{marginTop:16,padding:"12px 14px",background:"#f5f3ff",borderRadius:8,border:"1px solid #ddd6fe"}}>
-                  <div style={{fontSize:12,color:"#6b7280",marginBottom:4}}>
-                    <strong style={{color:"#5b21b6"}}>New staff or receptionist?</strong>
-                  </div>
-                  <div style={{fontSize:11,color:"#9ca3af",marginBottom:8}}>Request access — an admin will review and approve your account.</div>
-                  <button onClick={()=>{setWalkInMode("register");setWalkInError("");}}
-                    style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-                    Request Walk-in Access →
-                  </button>
-                </div>
               </div>
             </div>
           )}
@@ -3810,10 +4013,14 @@ export default function OrderPortal() {
                     <label>Role</label>
                     <select value={wiReg.role} onChange={e=>setWiReg(r=>({...r,role:e.target.value}))}
                       style={{background:"#fff",border:"1.5px solid #e5e7eb",borderRadius:9,padding:"11px 14px",fontSize:14,color:"#111",width:"100%"}}>
+                      <option value="driver">🚚 Driver</option>
                       <option value="staff">Receptionist / In-House Staff</option>
                       <option value="manager">Manager</option>
                     </select>
                   </div>
+                  {wiReg.role==="driver"&&<div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#0369a1"}}>
+                    📋 As a driver, your request will be reviewed by the admin. Once approved, your phone number will be added to the system and you can log in via WhatsApp OTP.
+                  </div>}
                   <div className="field">
                     <label>Note (optional)</label>
                     <input placeholder="e.g. Front desk receptionist" value={wiReg.note}
@@ -3875,42 +4082,54 @@ export default function OrderPortal() {
         </div>}
 
         {isExisting&&<div className="fu">
-          <div style={{maxWidth:460,margin:"0 auto"}}>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:6,textAlign:"center"}}>Access Your Account</div>
-            <div style={{fontSize:13,color:"#6b7280",textAlign:"center",marginBottom:24}}>Enter your shop name and phone number to continue</div>
+          <div style={{maxWidth:420,margin:"0 auto"}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,color:"#0a1628",marginBottom:6,textAlign:"center"}}>👤 Customer Login</div>
+            <div style={{fontSize:13,color:"#6b7280",textAlign:"center",marginBottom:24}}>We'll send a 6-digit code to your WhatsApp</div>
             <div className="card" style={{padding:28}}>
-              <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                <div className="field">
-                  <label>Business / Shop Name *</label>
-                  <input
-                    placeholder="e.g. Speedy Gas & Mart"
-                    value={custSearch}
-                    onChange={e=>setCustSearch(e.target.value)}
-                    onFocus={e=>e.target.style.borderColor="#0a1628"}
-                    onBlur={e=>e.target.style.borderColor="#d1d5db"}
-                  />
+              {otpError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626",marginBottom:14}}>⚠️ {otpError}</div>}
+              {!otpSent?(
+                <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  <div className="field">
+                    <label>Your Phone Number (on your account)</label>
+                    <input type="tel" placeholder="e.g. 7135550100" value={otpPhone}
+                      onChange={e=>setOtpPhone(e.target.value)}
+                      onKeyDown={e=>e.key==="Enter"&&sendCustOtp()}
+                      style={{fontSize:16,letterSpacing:2,textAlign:"center"}}/>
+                  </div>
+                  <button onClick={sendCustOtp} disabled={otpLoading||otpPhone.length<10}
+                    style={{background:"#0a1628",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                    {otpLoading?<><span className="sp">⟳</span>Sending…</>:<>💬 Send WhatsApp Code</>}
+                  </button>
+                  <div style={{textAlign:"center",fontSize:12,color:"#9ca3af"}}>
+                    Not registered? <span style={{color:"#0a1628",fontWeight:600,cursor:"pointer"}} onClick={()=>{setIsExisting(false);setIsNew(true);}}>Register here →</span>
+                  </div>
                 </div>
-                <div className="field">
-                  <label>Phone Number *</label>
-                  <input
-                    placeholder="e.g. (713) 555-0100"
-                    value={custPhone}
-                    onChange={e=>setCustPhone(e.target.value)}
-                    onFocus={e=>e.target.style.borderColor="#0a1628"}
-                    onBlur={e=>e.target.style.borderColor="#d1d5db"}
-                    onKeyDown={e=>e.key==="Enter"&&verifyCustomer()}
-                  />
+              ):(
+                <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  <div style={{background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:8,padding:"12px 14px",fontSize:13,color:"#065f46",textAlign:"center"}}>
+                    ✅ Code sent to WhatsApp ending in {otpPhone.slice(-4)}
+                  </div>
+                  <div className="field">
+                    <label>Enter 6-digit code</label>
+                    <input type="text" inputMode="numeric" maxLength={6} placeholder="• • • • • •"
+                      value={otpCode} onChange={e=>setOtpCode(e.target.value.replace(/\D/g,""))}
+                      onKeyDown={e=>e.key==="Enter"&&verifyCustOtp()}
+                      style={{fontSize:28,letterSpacing:10,textAlign:"center",fontWeight:700}}/>
+                  </div>
+                  <button onClick={verifyCustOtp} disabled={otpLoading||otpCode.length!==6}
+                    style={{background:"#0a1628",color:"#fff",border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                    {otpLoading?<><span className="sp">⟳</span>Verifying…</>:<>✅ Verify & Access Account</>}
+                  </button>
+                  <button onClick={()=>{setOtpSent(false);setOtpCode("");setOtpError("");}}
+                    style={{background:"none",border:"none",color:"#9ca3af",fontSize:12,cursor:"pointer",textAlign:"center"}}>
+                    ← Change phone number
+                  </button>
+                  {otpCooldown===0
+                    ?<button onClick={sendCustOtp} style={{background:"none",border:"none",color:"#0ea5e9",fontSize:12,cursor:"pointer",textAlign:"center",fontWeight:600}}>Resend code</button>
+                    :<div style={{textAlign:"center",fontSize:12,color:"#9ca3af"}}>Resend in {otpCooldown}s</div>
+                  }
                 </div>
-                {verifyError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#dc2626"}}>
-                  ⚠️ {verifyError}
-                </div>}
-                <button className="btn-primary" style={{width:"100%",justifyContent:"center",padding:"13px",marginTop:4}} onClick={verifyCustomer} disabled={submitting}>
-                  {submitting?<><span className="sp">⟳</span> Verifying…</>:<>Access My Account →</>}
-                </button>
-                <div style={{textAlign:"center",fontSize:12,color:"#9ca3af"}}>
-                  Not registered yet? <span style={{color:"#0a1628",fontWeight:600,cursor:"pointer"}} onClick={()=>{setIsExisting(false);setIsNew(true);}}>Register here →</span>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </div>}

@@ -3227,7 +3227,7 @@ export default function App(){
   const[truckResets,setTruckResets]=useState([]); // pending/approved/rejected inventory reset requests
   // Truck Management tab state
   const[tmTab,setTmTab]=useState("overview");
-  const[driverForm,setDriverForm]=useState({driver:"",plate:"",route:"",email:""});
+  const[driverForm,setDriverForm]=useState({driver:"",plate:"",route:"",email:"",phone:""});
   const[driverSaving,setDriverSaving]=useState(false);
   const[assignCid,setAssignCid]=useState("");
   const[assignTid,setAssignTid]=useState("");
@@ -5080,6 +5080,7 @@ export default function App(){
                             <div><label>Driver</label><EI val={editTruck.driver} onChange={v=>setEditTruck(x=>({...x,driver:v}))}/></div>
                             <div><label>Plate</label><EI val={editTruck.plate} onChange={v=>setEditTruck(x=>({...x,plate:v}))}/></div>
                             <div><label>Route</label><EI val={editTruck.route} onChange={v=>setEditTruck(x=>({...x,route:v}))}/></div>
+                            <div><label>📱 WhatsApp Phone</label><EI val={editTruck.phone||""} onChange={v=>setEditTruck(x=>({...x,phone:v}))} placeholder="e.g. 7135550100"/></div>
                             <div style={{display:"flex",gap:6,marginTop:16}}><button className="btn bg" onClick={saveEditTruck} disabled={saving}>{ic.save} Save</button><button className="btn bgh" onClick={()=>setEditingTid(null)}>{ic.X}</button></div>
                           </div>
                         ):(
@@ -6247,7 +6248,7 @@ export default function App(){
               if(!driverForm.driver.trim()||!driverForm.plate.trim()) return showToast("Driver name and plate required","error");
               setDriverSaving(true);
               try {
-                const rec = {id:"T"+uid(), driver:driverForm.driver.trim(), plate:driverForm.plate.trim(), route:driverForm.route.trim()};
+                const rec = {id:"T"+uid(), driver:driverForm.driver.trim(), plate:driverForm.plate.trim(), route:driverForm.route.trim(), phone:driverForm.phone.trim()};
                 const {error} = await supabase.from("trucks").insert(rec);
                 if(error) throw error;
                 setTrucks(prev=>[...prev,rec]);
@@ -6260,7 +6261,7 @@ export default function App(){
             const saveTruckEdit = async () => {
               if(!editTruck||!editTruck.id) return;
               if(!editTruck.driver?.trim()||!editTruck.plate?.trim()) return showToast("Driver name and plate required","error");
-              const {error} = await supabase.from("trucks").update({driver:editTruck.driver.trim(),plate:editTruck.plate.trim(),route:editTruck.route?.trim()||""}).eq("id",editTruck.id);
+              const {error} = await supabase.from("trucks").update({driver:editTruck.driver.trim(),plate:editTruck.plate.trim(),route:editTruck.route?.trim()||"",phone:editTruck.phone?.trim()||""}).eq("id",editTruck.id);
               if(error) return showToast(error.message,"error");
               setTrucks(prev=>prev.map(t=>t.id===editTruck.id?{...t,driver:editTruck.driver.trim(),plate:editTruck.plate.trim(),route:editTruck.route?.trim()||""}:t));
               setEditTruck(null);
@@ -6399,10 +6400,11 @@ export default function App(){
                 <div className="card" style={{padding:20,marginBottom:16,borderTop:"3px solid #0a1628"}}>
                   <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,marginBottom:12}}>➕ Add New Driver / Truck</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                    {[["Driver Name *","driver","e.g. John Smith"],["License Plate *","plate","e.g. TX-1234"],["Route / Area","route","e.g. North Dallas"]].map(([l,k,p])=>(
-                      <div key={k} className="field" style={{gridColumn:k==="route"?"1/-1":"auto"}}>
-                        <label>{l}</label>
-                        <input placeholder={p} value={driverForm[k]||""} onChange={e=>setDriverForm(prev=>({...prev,[k]:e.target.value}))}/>
+                    {[["Driver Name *","driver","e.g. John Smith"],["License Plate *","plate","e.g. TX-1234"],["Route / Area","route","e.g. North Dallas"],["WhatsApp Phone *","phone","e.g. 7135550100"]].map(([l,k,p])=>(
+                      <div key={k} className="field" style={{gridColumn:k==="route"||k==="phone"?"auto":"auto"}}>
+                        <label>{l}{k==="phone"&&<span style={{fontSize:10,color:"#7c3aed",marginLeft:4,fontWeight:400}}>used for OTP login</span>}</label>
+                        <input placeholder={p} value={driverForm[k]||""} onChange={e=>setDriverForm(prev=>({...prev,[k]:e.target.value}))}
+                          type={k==="phone"?"tel":"text"}/>
                       </div>
                     ))}
                   </div>
@@ -6413,7 +6415,7 @@ export default function App(){
 
                 <div className="card" style={{overflow:"hidden"}}>
                   <table>
-                    <thead><tr>{["Driver","Plate","Route","Customers","Status","Auth Profile","Actions"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+                    <thead><tr>{["Driver","Plate","Route","📱 WhatsApp","Customers","Status","Actions"].map(h=><th key={h}>{h}</th>)}</tr></thead>
                     <tbody>
                       {trucks.map(t=>{
                         const tCusts=customers.filter(c=>c.truck_id===t.id);
@@ -6424,16 +6426,20 @@ export default function App(){
                             <td><div style={{fontWeight:700}}>{t.driver}</div><div style={{fontSize:10,color:"#9ca3af"}}>{t.id}</div></td>
                             <td style={{fontFamily:"monospace",fontWeight:600}}>{t.plate}</td>
                             <td style={{color:"#6b7280"}}>{t.route||"—"}</td>
+                            <td>
+                              {t.phone
+                                ?<span style={{fontFamily:"monospace",fontSize:11,color:"#059669",fontWeight:700}}>✅ {t.phone}</span>
+                                :<span style={{fontSize:10,color:"#f59e0b",fontWeight:700}}>⚠️ No phone</span>}
+                            </td>
                             <td><span style={{fontWeight:700,color:"#7c3aed"}}>{tCusts.length}</span></td>
                             <td>
                               <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,background:t.locked?"#fef2f2":isOnline?"#dcfce7":"#f3f4f6",color:t.locked?"#dc2626":isOnline?"#065f46":"#9ca3af"}}>
                                 {t.locked?"🔒 LOCKED":isOnline?"🟢 ONLINE":"⚫ OFFLINE"}
                               </span>
                             </td>
-                            <td style={{fontSize:11,color:"#6b7280"}}>{dProfile?.email||<span style={{color:"#f59e0b",fontSize:10}}>No profile linked</span>}</td>
                             <td>
                               <div style={{display:"flex",gap:4}}>
-                                <button className="btn bb" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>setEditTruck({...t})}>✏️</button>
+                                <button className="btn bb" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>setEditTruck({...t})}>✏️ Edit</button>
                                 {t.locked
                                   ?<button className="btn bg" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>unlockTruck(t.id)}>🔓</button>
                                   :<button className="btn ba" style={{fontSize:10,padding:"3px 8px"}} onClick={()=>lockTruck(t.id)}>🔒</button>}
@@ -6446,6 +6452,26 @@ export default function App(){
                     </tbody>
                   </table>
                 </div>
+
+                {/* Inline edit modal for truck */}
+                {editTruck&&<div style={{position:"fixed",inset:0,background:"#00000060",display:"flex",alignItems:"center",justifyContent:"center",zIndex:500,padding:16}}>
+                  <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:480,width:"100%",boxShadow:"0 8px 40px #00000020"}}>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:17,marginBottom:18}}>✏️ Edit Driver — {editTruck.driver}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+                      {[["Driver Name","driver",""],["License Plate","plate",""],["Route / Area","route",""],["WhatsApp Phone","phone","e.g. 7135550100"]].map(([l,k,ph])=>(
+                        <div key={k} className="field">
+                          <label>{l}{k==="phone"&&<span style={{fontSize:10,color:"#7c3aed",marginLeft:4}}>for OTP login</span>}</label>
+                          <input type={k==="phone"?"tel":"text"} placeholder={ph||l} value={editTruck[k]||""}
+                            onChange={e=>setEditTruck(x=>({...x,[k]:e.target.value}))}/>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button className="btn bg" style={{flex:1}} onClick={saveTruckEdit}>{ic.save} Save Changes</button>
+                      <button className="btn bgh" onClick={()=>setEditTruck(null)}>{ic.X} Cancel</button>
+                    </div>
+                  </div>
+                </div>}
 
                 {/* Auth assignment */}
                 <div className="card" style={{padding:20,marginTop:16}}>
@@ -6814,17 +6840,23 @@ export default function App(){
             };
 
             const renderRegCard=(r)=>(
-              <div key={r.id} className="card" style={{padding:"16px 18px",marginBottom:10,borderLeft:`4px solid ${r.status==="approved"?"#059669":r.status==="rejected"?"#dc2626":"#7c3aed"}`}}>
+              <div key={r.id} className="card" style={{padding:"16px 18px",marginBottom:10,borderLeft:`4px solid ${r.role==="driver"?"#0ea5e9":r.status==="approved"?"#059669":r.status==="rejected"?"#dc2626":"#7c3aed"}`}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
                   <div>
-                    <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:3}}>{r.name}</div>
-                    <div style={{fontSize:12,color:"#6b7280",marginBottom:2}}>📧 {r.email} · 📞 {r.phone}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                      <div style={{fontWeight:700,fontSize:14,color:"#0a1628"}}>{r.name}</div>
+                      {r.role==="driver"&&<span style={{background:"#f0f9ff",color:"#0369a1",border:"1px solid #bae6fd",borderRadius:5,fontSize:10,fontWeight:700,padding:"1px 7px"}}>🚚 DRIVER</span>}
+                    </div>
+                    <div style={{fontSize:12,color:"#6b7280",marginBottom:2}}>📞 {r.phone}{r.email&&` · 📧 ${r.email}`}</div>
                     <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginTop:4}}>
                       <span className="bdg" style={{background:"#f5f3ff",color:"#5b21b6",border:"1px solid #ddd6fe",textTransform:"capitalize"}}>{r.role}</span>
                       <span className="bdg" style={{background:r.status==="approved"?"#ecfdf5":r.status==="rejected"?"#fef2f2":"#fef9c3",color:r.status==="approved"?"#065f46":r.status==="rejected"?"#991b1b":"#92400e",border:`1px solid ${r.status==="approved"?"#a7f3d0":r.status==="rejected"?"#fecaca":"#fde68a"}`}}>{r.status}</span>
                       {r.note&&<span style={{fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>"{r.note}"</span>}
                     </div>
                     <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>{new Date(r.created_at).toLocaleString()}</div>
+                    {r.role==="driver"&&r.status==="approved"&&<div style={{marginTop:8,background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:7,padding:"8px 12px",fontSize:11,color:"#0369a1"}}>
+                      ℹ️ Go to <strong>Truck Management → Drivers</strong> → Add this driver with phone <strong>{r.phone}</strong> so they can log in via WhatsApp OTP.
+                    </div>}
                   </div>
                   <div style={{display:"flex",gap:8,flexShrink:0}}>
                     {r.status==="pending"&&<><button className="btn bg" onClick={()=>updateReg(r.id,"approved")}>✅ Approve</button><button className="btn br" onClick={()=>updateReg(r.id,"rejected")}>❌ Reject</button></>}
@@ -6839,7 +6871,7 @@ export default function App(){
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:10}}>
                 <div>
                   <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#212121"}}>👥 New Users Approval</div>
-                  <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Walk-in access requests from staff, receptionists, and managers</div>
+                  <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Access requests from new drivers, staff, receptionists, and managers</div>
                 </div>
                 <button className="btn bb" onClick={()=>loadAll()}>↻ Refresh</button>
               </div>
