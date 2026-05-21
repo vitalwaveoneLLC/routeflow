@@ -3814,7 +3814,7 @@ export default function OrderPortal() {
                       });
                       setDriverData(prev=>({...prev,sales:prev.sales.map(s=>bulkPaySel.has(s.id)?{...s,_paid:true}:s)}));
                       setBulkPaySel(new Set());setBulkPayCheck("");setBulkPayNote("");
-                      setMsg({t:"success",m:`✅ ${ids.length} invoices paid — ${fmt2(selTotal)}`});
+                      setMsg({t:"success",m:`✅ ${ids.length} invoices paid — ${fmt(selTotal)}`});
                       setTimeout(()=>setMsg(null),3000);
                     }catch(e){setMsg({t:"error",m:e.message});}
                     setBulkPaySaving(false);
@@ -3829,7 +3829,7 @@ export default function OrderPortal() {
                         <input type="checkbox" checked={allSel} onChange={()=>{if(allSel)setBulkPaySel(new Set());else setBulkPaySel(new Set(custUnpaid.map(s=>s.id)));}} style={{width:18,height:18}}/>
                         {allSel?"Deselect All":`Select All (${custUnpaid.length})`}
                       </label>
-                      {bulkPaySel.size>0&&<div style={{fontSize:13,fontWeight:700,color:"#059669"}}>{bulkPaySel.size} selected · {fmt2(selTotal)}</div>}
+                      {bulkPaySel.size>0&&<div style={{fontSize:13,fontWeight:700,color:"#059669"}}>{bulkPaySel.size} selected · {fmt(selTotal)}</div>}
                     </div>
 
                     {/* Invoice rows */}
@@ -3849,7 +3849,7 @@ export default function OrderPortal() {
                               <div style={{fontSize:11,color:"#9ca3af"}}>{fmtDate(s)}</div>
                             </div>
                           </div>
-                          <div style={{fontWeight:800,fontSize:16,color:sel?"#059669":"#0a1628"}}>{fmt2(gt)}</div>
+                          <div style={{fontWeight:800,fontSize:16,color:sel?"#059669":"#0a1628"}}>{fmt(gt)}</div>
                         </div>
                       );
                     })}
@@ -3859,7 +3859,7 @@ export default function OrderPortal() {
                         style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",marginBottom:10}}/>
                       <button onClick={doBulkPay} disabled={bulkPaySaving}
                         style={{width:"100%",padding:"14px",background:"#059669",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:15,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                        {bulkPaySaving?<><span className="sp">⟳</span>Saving…</>:`✅ Pay ${bulkPaySel.size} Invoices — ${fmt2(selTotal)}`}
+                        {bulkPaySaving?<><span className="sp">⟳</span>Saving…</>:`✅ Pay ${bulkPaySel.size} Invoices — ${fmt(selTotal)}`}
                       </button>
                     </>}
                   </>);
