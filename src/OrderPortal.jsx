@@ -2304,6 +2304,8 @@ export default function OrderPortal() {
     setWalkInCust(null); setWalkInVerified(true);
     setWiOtpLoading(false);
   };
+
+  const collectPayment = async (sale, method) => {
     setPaymentSaving(true);
     try{
       const st = driverData?.stateTaxes?.find(s=>s.id===(sale.state||""));
