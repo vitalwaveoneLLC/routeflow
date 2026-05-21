@@ -890,6 +890,9 @@ function CreditMemosTab({creditMemos,setCreditMemos,customers,sales,calcSaleGran
   const uid4=()=>Math.random().toString(36).slice(2,8).toUpperCase();
   const[cmForm,setCmForm]=useState({cust_id:"",invoice_id:"",reason:"Return",amount:"",notes:""});
   const[cmSaving,setCmSaving]=useState(false);
+  const[cmSrch,setCmSrch]=useState("");
+  const[cmPg,setCmPg]=useState(0);
+  const CM_PER_PAGE=25;
   const openBalance=cid=>creditMemos.filter(m=>m.cust_id===cid&&m.status==="open").reduce((a,m)=>a+parseFloat(m.amount||0),0);
   const saveMemo=async()=>{
     if(!cmForm.cust_id||!cmForm.amount||parseFloat(cmForm.amount)<=0)return showToast("Customer and amount required","error");
@@ -970,6 +973,17 @@ function CreditMemosTab({creditMemos,setCreditMemos,customers,sales,calcSaleGran
                 <div style={{fontSize:12}}>Issue your first credit memo using the form</div>
               </div>
             :<div className="card" style={{overflow:"hidden"}}>
+              <div style={{padding:"10px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div style={{fontSize:12,color:"#6b7280"}}>{creditMemos.length} memo{creditMemos.length!==1?"s":""}</div>
+                <input value={cmSrch} onChange={e=>{setCmSrch(e.target.value);setCmPg(0);}} placeholder="🔍 Search memos…" style={{width:180,padding:"6px 10px",fontSize:12,border:"1px solid #d1d5db",borderRadius:7,outline:"none"}}/>
+              </div>
+              {(()=>{
+                const cq=cmSrch.toLowerCase();
+                const cmFilt=cq?creditMemos.filter(m=>(m.id||"").toLowerCase().includes(cq)||(customers.find(c=>c.id===m.cust_id)?.name||"").toLowerCase().includes(cq)||(m.reason||"").toLowerCase().includes(cq)):creditMemos;
+                const cmTotalPages=Math.ceil(cmFilt.length/CM_PER_PAGE);
+                const cmPage=Math.min(cmPg,Math.max(0,cmTotalPages-1));
+                const cmRows=cmFilt.slice(cmPage*CM_PER_PAGE,(cmPage+1)*CM_PER_PAGE);
+                return(<>
               <div style={{overflowX:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse"}}>
                   <thead><tr style={{background:"#0a1628",color:"#fff"}}>
@@ -978,7 +992,7 @@ function CreditMemosTab({creditMemos,setCreditMemos,customers,sales,calcSaleGran
                     ))}
                   </tr></thead>
                   <tbody>
-                    {creditMemos.map(m=>{
+                    {cmRows.map(m=>{
                       const cust=customers.find(c=>c.id===m.cust_id);
                       return(
                         <tr key={m.id} style={{borderBottom:"1px solid #f3f4f6",background:m.status==="voided"?"#fafafa":"#fff"}}>
@@ -1002,6 +1016,8 @@ function CreditMemosTab({creditMemos,setCreditMemos,customers,sales,calcSaleGran
                   </tbody>
                 </table>
               </div>
+              <PaginationBar page={cmPage} totalPages={cmTotalPages} total={cmFilt.length} perPage={CM_PER_PAGE} setPage={setCmPg} label="memos"/>
+              </>);})()}
             </div>
           }
         </div>
@@ -3259,6 +3275,10 @@ export default function App(){
   const[pmUnpaidPage,setPmUnpaidPage]=useState(0);
   const[auditSearch,setAuditSearch]=useState("");
   const[auditPage,setAuditPage]=useState(0);
+  const[taxInvSearch,setTaxInvSearch]=useState("");
+  const[taxInvPage,setTaxInvPage]=useState(0);
+  const[cmSearch,setCmSearch]=useState("");
+  const[cmPage,setCmPage]=useState(0);
   const INV_PER_PAGE=25;
   const CUST_PER_PAGE=24;
   const ROWS_PER_PAGE=25;
@@ -5435,32 +5455,35 @@ export default function App(){
 
               {/* INVOICES TABLE with its own date filter */}
               <div className="card">
-                <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
                   <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:14,color:"#212121"}}>
                     🧾 INVOICES — {invSales.length} TOTAL
                   </div>
-                  <button className="btn bpr" onClick={()=>{
-                    const rows=[["Invoice","Date","Customer","State","Created By","Subtotal","Tax (Tobacco)","Grand Total","Status"]];
-                    invSales.forEach(s=>{
-                      const cust=getC(s.cust_id);
-                      const st=cust?.state||"TX";
-                      const stData=stateTaxes.find(x=>x.id===st);
-                      rows.push([s.id,s.date,cust?.name,st,getT(s.truck_id)?.driver,s.total.toFixed(2),calcSaleTax(s).toFixed(2),calcSaleGrandTotal(s).toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);
-                    });
-                    downloadCSV(rows,`tax-invoices-${selState}.csv`);
-                  }}>{ic.dl} Export</button>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <input value={taxInvSearch} onChange={e=>{setTaxInvSearch(e.target.value);setTaxInvPage(0);}} placeholder="🔍 Search…" style={{width:160,padding:"6px 10px",fontSize:12,border:"1px solid #d1d5db",borderRadius:7,outline:"none"}}/>
+                    <button className="btn bpr" onClick={()=>{
+                      const rows=[["Invoice","Date","Customer","State","Created By","Subtotal","Tax (Tobacco)","Grand Total","Status"]];
+                      invSales.forEach(s=>{const cust=getC(s.cust_id);const st=cust?.state||"TX";rows.push([s.id,s.date,cust?.name,st,getT(s.truck_id)?.driver,s.total.toFixed(2),calcSaleTax(s).toFixed(2),calcSaleGrandTotal(s).toFixed(2),pmtFor(s.id)?.status==="paid"?"Paid":"Unpaid"]);});
+                      downloadCSV(rows,`tax-invoices-${selState}.csv`);
+                    }}>{ic.dl} Export</button>
+                  </div>
                 </div>
                 <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
                   <DateFilter f={invFilter} setF={setInvFilter} label="Filter Invoices"/>
                 </div>
-                <div className="tw">
-                  <table>
+                {(()=>{
+                  const tq=taxInvSearch.toLowerCase();
+                  const tFilt=tq?invSales.filter(s=>(s.id||"").toLowerCase().includes(tq)||(getC(s.cust_id)?.name||"").toLowerCase().includes(tq)||(s.date||"").includes(tq)):invSales;
+                  const tTotalPages=Math.ceil(tFilt.length/ROWS_PER_PAGE);
+                  const tPage=Math.min(taxInvPage,Math.max(0,tTotalPages-1));
+                  const tRows=tFilt.slice(tPage*ROWS_PER_PAGE,(tPage+1)*ROWS_PER_PAGE);
+                  return(<>
+                  <div className="tw"><table>
                     <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>State</th><th>Created By</th><th>Subtotal</th><th>Tax (Tobacco)</th><th>Grand Total</th><th>Status</th></tr></thead>
                     <tbody>
-                      {invSales.map(s=>{
+                      {tRows.map(s=>{
                         const cust=getC(s.cust_id);
                         const st=cust?.state||"TX";
-                        const stData=stateTaxes.find(x=>x.id===st);
                         const tax=calcSaleTax(s);
                         const gt=calcSaleGrandTotal(s);
                         const pmt=pmtFor(s.id);
@@ -5470,26 +5493,21 @@ export default function App(){
                           <tr key={s.id} style={{background:isRC?"#fff5f5":""}}>
                             <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
                             <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
-                            <td style={{fontWeight:600,color:"#212121"}}>
-                              {cust?.name}
-                              {isRC&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}
-                            </td>
+                            <td style={{fontWeight:600,color:"#212121"}}>{cust?.name}{isRC&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}</td>
                             <td><span className="tag" style={{background:"#ede9fe",color:"#7c3aed"}}>{st}</span></td>
                             <td style={{color:"#6b7280"}}>{getCreatedBy(s)}</td>
                             <td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} {s.check_penalty_applied>0?"penalty":"prev"}</span>}</td>
                             <td style={{color:"#059669",fontWeight:600}}>{fmt(tax)}</td>
                             <td style={{fontWeight:700,color:"#7c3aed"}}>{fmt(gt)}</td>
-                            <td>
-                              <span className={`bdg ${paid?"bg2":isRC?"br2":"ba2"}`}>
-                                {paid?"✅ PAID":isRC?"🔴 RETURNED CHECK":"⏳ UNPAID"}
-                              </span>
-                            </td>
+                            <td><span className={`bdg ${paid?"bg2":isRC?"br2":"ba2"}`}>{paid?"✅ PAID":isRC?"🔴 RETURNED CHECK":"⏳ UNPAID"}</span></td>
                           </tr>
                         );
                       })}
                     </tbody>
-                  </table>
-                </div>
+                  </table></div>
+                  <PaginationBar page={tPage} totalPages={tTotalPages} total={tFilt.length} perPage={ROWS_PER_PAGE} setPage={setTaxInvPage} label="invoices"/>
+                  </>);
+                })()}
               </div>
             </div>
             );
