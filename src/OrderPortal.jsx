@@ -2185,41 +2185,37 @@ export default function OrderPortal() {
   };
 
   const sendOtp = async (phone, context="Login") => {
-    // Normalize phone
     const clean = phone.replace(/\D/g,"");
     if(clean.length < 10) return {ok:false, err:"Enter a valid 10-digit phone number"};
     const to = clean.length===10 ? "1"+clean : clean;
     const code = genOtp();
     const expiresAt = new Date(Date.now() + 10*60*1000).toISOString();
 
-    // Save OTP to Supabase
-    await supabase.from("otp_codes").insert({phone:to, code, expires_at:expiresAt, used:false});
-
-    // Send via WhatsApp using existing Meta credentials
-    const {data:coData} = await supabase.from("company").select("meta_phone_id,meta_token,meta_template,name").maybeSingle();
-    if(!coData?.meta_phone_id || !coData?.meta_token) return {ok:false, err:"WhatsApp not configured. Contact admin."};
-
-    const {error} = await supabase.functions.invoke("send-whatsapp",{body:{
-      to,
-      phone_number_id: coData.meta_phone_id,
-      access_token: coData.meta_token,
-      template_name: "otp_verification",
-      params: [code, "10"], // {{1}} = code, {{2}} = expiry minutes
-    }});
-    if(error) return {ok:false, err:"Failed to send WhatsApp. Try again."};
+    // Call edge function — it uses service role to insert OTP + sends WhatsApp
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+    const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-otp`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${SUPABASE_ANON_KEY}`},
+      body: JSON.stringify({to, code, expires_at:expiresAt, context})
+    });
+    if(!res.ok) return {ok:false, err:"Failed to send WhatsApp code. Try again."};
     return {ok:true, to};
   };
 
   const verifyOtp = async (phone, code) => {
     const clean = phone.replace(/\D/g,"");
     const to = clean.length===10 ? "1"+clean : clean;
-    const {data:row} = await supabase.from("otp_codes")
-      .select("*").eq("phone",to).eq("code",code).eq("used",false)
-      .gt("expires_at", new Date().toISOString())
-      .order("created_at",{ascending:false}).limit(1).maybeSingle();
-    if(!row) return {ok:false, err:"Invalid or expired code. Request a new one."};
-    await supabase.from("otp_codes").update({used:true}).eq("id",row.id);
-    return {ok:true};
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+    const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-otp`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${SUPABASE_ANON_KEY}`},
+      body: JSON.stringify({action:"verify", to, code})
+    });
+    if(!res.ok) return {ok:false, err:"Invalid or expired code. Request a new one."};
+    const data = await res.json().catch(()=>({}));
+    return data.ok ? {ok:true} : {ok:false, err:data.err||"Invalid or expired code."};
   };
 
   // Driver: send OTP
