@@ -2241,12 +2241,55 @@ export default function OrderPortal() {
     setDriverOtpLoading(true); setDriverOtpError("");
     const res = await verifyOtp(driverOtpPhone, driverOtpCode);
     if(!res.ok) { setDriverOtpError(res.err); setDriverOtpLoading(false); return; }
-    // Load driver data by phone
-    const clean = driverOtpPhone.replace(/\D/g,"");
-    const {data:trucks2} = await supabase.from("trucks").select("*");
-    const truck = (trucks2||[]).find(t=>{const tp=(t.phone||"").replace(/\D/g,"");return tp.slice(-10)===clean.slice(-10);});
-    setDriverUser({phone:driverOtpPhone, driver:truck?.driver, truck_id:truck?.id});
-    await loadDriverData(truck);
+
+    try {
+      // Find truck by phone
+      const clean = driverOtpPhone.replace(/\D/g,"");
+      const {data:trucks2} = await supabase.from("trucks").select("*");
+      const truck = (trucks2||[]).find(t=>{const tp=(t.phone||"").replace(/\D/g,"");return tp.length>=10&&tp.slice(-10)===clean.slice(-10);});
+      if(!truck) throw new Error("Driver not found. Contact admin.");
+
+      const truckId = truck.id;
+      const [custsR, loadsR, taxesR, pmtsR, coR] = await Promise.all([
+        supabase.from("customers").select("id,name,address,phone,email,state,truck_id,notes").eq("truck_id",truckId),
+        supabase.from("loads").select("*").eq("truck_id",truckId).eq("status","out").order("created_at",{ascending:false}),
+        supabase.from("state_taxes").select("*"),
+        supabase.from("payments").select("sale_id,status,method,amount").eq("status","paid"),
+        supabase.from("company").select("*").single(),
+      ]);
+
+      const custIds=(custsR.data||[]).map(c=>c.id);
+      let salesData=[];
+      if(custIds.length>0){
+        const{data:allCustSales}=await supabase.from("sales").select("*").in("cust_id",custIds).order("created_at",{ascending:false});
+        salesData=allCustSales||[];
+      }
+
+      const paidSaleIds=new Set((pmtsR.data||[]).map(p=>p.sale_id));
+      const salesWithPaid=salesData.map(s=>({...s,_paid:paidSaleIds.has(s.id)}));
+
+      const allLoads=loadsR.data||[];
+      let mergedLoad=null;
+      if(allLoads.length>0){
+        const itemMap={};
+        allLoads.forEach(load=>(load.items||[]).forEach(item=>{itemMap[item.pid]=(itemMap[item.pid]||0)+item.qty;}));
+        mergedLoad={...allLoads[0],items:Object.entries(itemMap).map(([pid,qty])=>({pid,qty})),_allLoadIds:allLoads.map(l=>l.id)};
+      }
+
+      setDriverUser({phone:driverOtpPhone,driver:truck.driver,truck_id:truckId});
+      setDriverData({
+        profile:{truck_id:truckId},
+        truck,
+        customers:custsR.data||[],
+        activeLoad:mergedLoad,
+        sales:salesWithPaid,
+        stateTaxes:taxesR.data||[],
+        co:coR.data||null,
+        userId:null,
+      });
+    } catch(e) {
+      setDriverOtpError(e.message);
+    }
     setDriverOtpLoading(false);
   };
 
