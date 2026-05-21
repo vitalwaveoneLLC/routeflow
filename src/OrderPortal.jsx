@@ -2105,6 +2105,8 @@ export default function OrderPortal() {
     }
     setInvoiceLinkLoading(false);
   };
+
+  const collectPayment = async (sale, method) => {
     setPaymentSaving(true);
     try{
       const st = driverData?.stateTaxes?.find(s=>s.id===(sale.state||""));
@@ -2818,7 +2820,6 @@ export default function OrderPortal() {
                     const p=iProds.find(x=>x.id===item.pid);
                     const price=sub/(sale.items||[]).reduce((a,it)=>a+it.qty,0)||p?.price||0;
                     // Use stored item amount if available, otherwise calculate
-                    const lineAmt=item.amount||(item.price?item.price*item.qty:p?(sub/((sale.items||[]).reduce((a2,it2)=>a2+(p2=>p2?it2.qty:0)(iProds.find(x=>x.id===it2.pid)),0)||1)*item.qty:0));
                     const unitP=item.price||(p?.price||0);
                     return(
                       <tr key={i} style={{borderBottom:"1px solid #f3f4f6"}}>
