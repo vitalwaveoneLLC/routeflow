@@ -115,6 +115,11 @@ const fmt=n=>`$${Number(n||0).toFixed(2)}`;
 const uid=()=>Math.random().toString(36).slice(2,8).toUpperCase();
 const nowStr=()=>new Date().toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"});
 const dateLabel=()=>new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+const fmtDate=s=>{
+  // Show created_at time if available, otherwise fall back to date field
+  if(s?.created_at){const d=new Date(s.created_at);if(!isNaN(d))return d.toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"});}
+  return s?.date||"—";
+};
 const downloadCSV=(rows,fn)=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([rows.map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(",")).join("\n")],{type:"text/csv"}));a.download=fn;a.click();};
 
 const Divider=()=><div style={{height:1,background:"#e5e7eb",margin:"12px 0"}}/>;
@@ -541,7 +546,7 @@ const InvoiceDoc=({sale,products,customers,trucks,co,paid,stateTaxes})=>{
         </div>
         <div>
           <div style={{fontSize:9,fontWeight:700,color:"#9ca3af",letterSpacing:".1em",marginBottom:4,textTransform:"uppercase"}}>Invoice Date</div>
-          <div style={{fontWeight:700,fontSize:14,color:"#111"}}>{sale.date}</div>
+          <div style={{fontWeight:700,fontSize:14,color:"#111"}}>{fmtDate(sale)}</div>
           <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>State: {stateId} {stData?.exempt?"(Tax Exempt)":""}</div>
           <div style={{marginTop:8}}><span style={{background:paid?"#dcfce7":"#fef9c3",color:paid?"#166534":"#854d0e",padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700}}>{paid?"✓ PAID":"⏳ BALANCE DUE"}</span></div>
         </div>
@@ -1468,7 +1473,7 @@ function RecurringOrdersTab({recurringOrders,setRecurringOrders,customers,produc
         customer_name:cust?.name||r.cust_name,
         customer_address:cust?.address||"",
         customer_phone:cust?.phone||"",
-        date:new Date().toLocaleDateString(),
+        date:nowStr(),
         items:r.items,
         subtotal:total,
         tax:0,
@@ -3375,12 +3380,7 @@ export default function App(){
             customer_name:cust?.name||r.cust_name,
             customer_address:cust?.address||"",
             customer_phone:cust?.phone||"",
-            date:new Date().toLocaleDateString(),
-            items:r.items,
-            subtotal:total,
-            tax:0,
-            total,
-            notes:`Auto-generated from recurring order ${r.id}${r.notes?` — ${r.notes}`:""}`,
+            date:nowStr(),
             status:"approved",
             payment_method:"delivery",
             truck_id:r.truck_id||null,
@@ -3743,7 +3743,7 @@ export default function App(){
     return`<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;color:#212121">
       <div style="background:#0a1628;padding:20px;border-radius:8px 8px 0 0;text-align:center">
         <div style="color:#fff;font-size:22px;font-weight:700">${co?.name||"Your Supplier"}</div>
-        <div style="color:#94a3b8;font-size:12px;margin-top:4px">Invoice ${sale.id} · ${sale.date}</div>
+        <div style="color:#94a3b8;font-size:12px;margin-top:4px">Invoice ${sale.id} · ${fmtDate(sale)}</div>
       </div>
       <div style="border:1px solid #e5e7eb;border-top:none;padding:20px;border-radius:0 0 8px 8px">
         <p>Hi <strong>${cust?.name||"Customer"}</strong>,</p>
@@ -4940,7 +4940,7 @@ export default function App(){
                     <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
                     <td style={{color:"#212121"}}>{getC(s.cust_id)?.name}</td>
                     <td style={{color:"#6b7280",fontSize:11}}>{getCreatedBy(s)}</td>
-                    <td style={{color:"#6b7280",fontSize:11}}>{s.date}</td>
+                    <td style={{color:"#6b7280",fontSize:11}}>{fmtDate(s)}</td>
                     <td>{fmt(s.total)}{s.previous_balance>0&&<span style={{fontSize:9,color:"#dc2626",marginLeft:4}}>+{fmt(s.previous_balance)} {s.check_penalty_applied>0?"penalty":"prev"}</span>}</td>
                     <td style={{color:"#7c3aed"}}>{fmt(calcSaleTax(s))}</td>
                     <td><span className="bdg bb2">{fmt(calcSaleGrandTotal(s))}</span></td>
@@ -5219,7 +5219,7 @@ export default function App(){
                           <div style={{fontWeight:700,fontSize:15,color:"#212121"}}>{o.customer_name}</div>
                           {o.customer_address&&<div style={{fontSize:11,color:"#6b7280",marginTop:2}}>📍 {o.customer_address}</div>}
                           {o.customer_phone&&<div style={{fontSize:11,color:"#6b7280"}}>📞 {o.customer_phone}</div>}
-                          <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>{o.date} · {(o.items||[]).length} item{(o.items||[]).length!==1?"s":""}</div>
+                          <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>``{fmtDate(o)} · {(o.items||[]).length} item{(o.items||[]).length!==1?"s":""}</div>
                         </div>
                         <div style={{textAlign:"right"}}>
                           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:22,color:"#7c3aed"}}>{fmt(o.total)}</div>
@@ -5280,7 +5280,7 @@ export default function App(){
                   return(
                   <tr key={s.id} style={{background:isReturnedCheck?"#fff5f5":""}}>
                     <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
-                    <td style={{color:"#6b7280",fontSize:11}}>{s.date}</td>
+                    <td style={{color:"#6b7280",fontSize:11}}>{fmtDate(s)}</td>
                     <td style={{color:"#212121",fontWeight:isReturnedCheck?700:400}}>
                       {getC(s.cust_id)?.name}
                       {isReturnedCheck&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}
@@ -5493,7 +5493,7 @@ export default function App(){
                         return(
                           <tr key={s.id} style={{background:isRC?"#fff5f5":""}}>
                             <td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
-                            <td style={{fontSize:11,color:"#6b7280"}}>{s.date}</td>
+                            <td style={{fontSize:11,color:"#6b7280"}}>{fmtDate(s)}</td>
                             <td style={{fontWeight:600,color:"#212121"}}>{cust?.name}{isRC&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}</td>
                             <td><span className="tag" style={{background:"#ede9fe",color:"#7c3aed"}}>{st}</span></td>
                             <td style={{color:"#6b7280"}}>{getCreatedBy(s)}</td>
@@ -5614,7 +5614,7 @@ export default function App(){
                 return filtered.length===0?<Empty icon="🔍" msg="NO RECORDS MATCH"/>:(<>
                   <div className="tw"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th>Age</th><th>Driver</th><th>Grand Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr></thead>
                   <tbody>{arRows.map(s=>{const gt=calcSaleGrandTotal(s),pmt=pmtFor(s.id),paid=pmt?.status==="paid"?gt:0,due=gt-paid,days=ageDays(s);return(
-                    <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{s.date}</td><td>{pmt?.status==="paid"?<span className="bdg bg2">Paid</span>:ageBadge(days)}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
+                    <tr key={s.id}><td><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed"}}>{s.id}</span></td><td style={{color:"#212121",fontWeight:600}}>{getC(s.cust_id)?.name}</td><td style={{color:"#6b7280",fontSize:11}}>{fmtDate(s)}</td><td>{pmt?.status==="paid"?<span className="bdg bg2">Paid</span>:ageBadge(days)}</td><td style={{color:"#6b7280"}}>{getT(s.truck_id)?.driver}</td><td style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(gt)}</td><td style={{color:"#059669",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>{fmt(paid)}</td><td><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,color:due>0?"#dc2626":"#059669"}}>{fmt(due)}</span></td><td><span className={`bdg ${pmt?.status==="paid"?"bg2":"br2"}`}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
                     <td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{pmt?.status!=="paid"?<button className="btn bg" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markPaid(s.id)}>{ic.chk} Pay</button>:<button className="btn bgh" style={{fontSize:10,padding:"4px 8px"}} onClick={()=>markUnpaid(s.id)}>Undo</button>}{pmt?.status!=="paid"&&isAdmin&&(()=>{const cust=getC(s.cust_id);const alreadyFlagged=hasReturnedCheck(cust);return<button className="btn br" style={{fontSize:10,padding:"4px 8px",whiteSpace:"nowrap"}} title={alreadyFlagged?"Customer already flagged":"Flag as returned check"} onClick={async()=>{if(alreadyFlagged)return showToast("Customer already flagged for returned check","error");showConfirm(`Flag ${cust?.name} for a returned check on invoice ${s.id}?\n\nThis will:\n• Add $${RETURNED_CHECK_FEE} penalty to their last unpaid invoice\n• Add RETURNED CHECK warning to all platforms`,async()=>{
                       // 1. Flag the customer
                       await markCheckReturned(s.cust_id);
@@ -5693,7 +5693,7 @@ export default function App(){
                       return(
                         <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6",background:isRC?"#fff5f5":"#fff"}}>
                           <td style={{padding:"9px 13px"}}><span className="tag" style={{background:"#f5f3ff",color:"#7c3aed",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setViewSale(s);setModal("invoice");}}>{s.id}</span></td>
-                          <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{s.date}</td>
+                          <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{fmtDate(s)}</td>
                           <td style={{padding:"9px 13px",fontWeight:600}}>
                             {cust?.name}
                             {isRC&&<div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>🚨 RETURNED CHECK</div>}
@@ -5857,7 +5857,7 @@ export default function App(){
                             style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,border:`1.5px solid ${isSelected?"#7c3aed":"#e5e7eb"}`,background:isSelected?"#f5f3ff":"#fff",cursor:"pointer",transition:"all .15s"}}>
                             <div>
                               <div style={{fontWeight:600,fontSize:13,color:isSelected?"#7c3aed":"#111"}}>{s.id}</div>
-                              <div style={{fontSize:11,color:"#6b7280"}}>{s.date}</div>
+                              <div style={{fontSize:11,color:"#6b7280"}}>{fmtDate(s)}</div>
                             </div>
                             <div style={{display:"flex",alignItems:"center",gap:10}}>
                               <span style={{fontWeight:700,color:"#dc2626"}}>${gt.toFixed(2)}</span>
@@ -7747,7 +7747,7 @@ export default function App(){
           <Modal title={`✏️ Amend Invoice ${amendSale.id}`} onClose={()=>{setModal(null);setAmendSale(null);setAmendItems({});}}>
             <div style={{marginBottom:10,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
               <span className="bdg bb2">{amendSale.id}</span>
-              <span style={{fontSize:12,color:"#6b7280"}}>{cust?.name} · {amendSale.date}</span>
+              <span style={{fontSize:12,color:"#6b7280"}}>{cust?.name} · {fmtDate(amendSale)}</span>
               {amendSale.amended_at&&<span className="bdg bp2">PREVIOUSLY AMENDED</span>}
             </div>
             <div style={{fontSize:11,color:"#9ca3af",marginBottom:16}}>Adjust quantities only — prices remain fixed at invoice rates</div>

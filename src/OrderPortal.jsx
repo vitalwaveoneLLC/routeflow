@@ -65,6 +65,10 @@ const GS = () => (
 const fmt = n => `$${Number(n||0).toFixed(2)}`;
 const uid = () => Math.random().toString(36).slice(2,9).toUpperCase();
 const nowStr = () => new Date().toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"});
+const fmtDate = s => {
+  if(s?.created_at){const d=new Date(s.created_at);if(!isNaN(d))return d.toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"});}
+  return s?.date||"—";
+};
 const CAT_COLORS = {Beverage:"#0ea5e9",Tobacco:"#8b5cf6",Snack:"#f59e0b",Health:"#10b981",Misc:"#6b7280",Other:"#64748b"};
 const catC = c => CAT_COLORS[c]||"#64748b";
 
@@ -209,7 +213,7 @@ function DriverInvoiceView({sale, customers, products, co, driver, stateTaxes}){
       </div>
       <div style={{background:"#f9fafb",padding:"12px 20px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,borderBottom:"1px solid #e5e7eb"}}>
         <div><div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".1em",marginBottom:3}}>BILL TO</div><div style={{fontWeight:700}}>{cust?.name}</div>{cust?.address&&<div style={{fontSize:11,color:"#6b7280"}}>{cust.address}</div>}{cust?.phone&&<div style={{fontSize:11,color:"#6b7280"}}>{cust.phone}</div>}</div>
-        <div><div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".1em",marginBottom:3}}>DETAILS</div><div style={{fontWeight:700}}>{sale.date}</div><div style={{fontSize:11,color:"#6b7280"}}>Driver: {driver}</div></div>
+        <div><div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".1em",marginBottom:3}}>DETAILS</div><div style={{fontWeight:700}}>{fmtDate(sale)}</div><div style={{fontSize:11,color:"#6b7280"}}>Driver: {driver}</div></div>
       </div>
       <div style={{padding:"12px 20px"}}>
         <table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}>
@@ -291,7 +295,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[]}){
           </div>
           <div style={{textAlign:"right"}}>
             <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,letterSpacing:".1em",marginBottom:3}}>DATE</div>
-            <div style={{fontWeight:700,fontSize:13}}>{viewInv.date}</div>
+            <div style={{fontWeight:700,fontSize:13}}>{fmtDate(viewInv)}</div>
             <div style={{marginTop:8}}>
               <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:6,background:paid?"#f0fdf4":"#fef2f2",color:paid?"#065f46":"#dc2626"}}>
                 {paid?"✓ PAID":"⏳ UNPAID"}
@@ -419,7 +423,7 @@ function CustomerAccountView({selCust,supabase,co,setStep,products=[]}){
                       onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                       onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
                       <td style={{padding:"10px 14px",fontWeight:700,color:"#7c3aed",fontSize:12,textDecoration:"underline"}}>{s.id}</td>
-                      <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{s.date}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{fmtDate(s)}</td>
                       <td style={{padding:"10px 14px",fontSize:12,color:"#6b7280"}}>{(s.items||[]).length} item{(s.items||[]).length!==1?"s":""}</td>
                       <td style={{padding:"10px 14px",fontWeight:700,color:"#059669",fontSize:13}}>{fmt(parseFloat(s.total||0)+parseFloat(s.previous_balance||0))}</td>
                       <td style={{padding:"10px 14px"}}>
@@ -916,11 +920,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
         truck_id:driverData.truck?.id,
         cust_id:selCust,
         state:freshCustState||selCustObj?.state||driverData.truck?.state||"",
-        date:new Date().toLocaleDateString(),
-        items:saleItems,
-        total:sub,
-        profit,
-        previous_balance:custUnpaidBalance>0?custUnpaidBalance:0,
+        date:nowStr(),
         previous_invoice_ids:custUnpaidBalance>0?custUnpaidInvs.map(s=>s.id).join(","):"",
         check_penalty_applied: 0,
         created_at:new Date().toISOString()
@@ -1251,7 +1251,7 @@ function DriverSellTab({driverData, setDriverData, products, supabase, co, initC
           <div style={{fontWeight:700,fontSize:12,color:"#854d0e",marginBottom:4}}>⚠️ Outstanding Balance</div>
           {custUnpaidInvs.map(s=>(
             <div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#92400e",marginBottom:2}}>
-              <span>{s.id} · {s.date}</span>
+              <span>{s.id} · {fmtDate(s)}</span>
               <span style={{fontWeight:700}}>${s.total.toFixed(2)}</span>
             </div>
           ))}
@@ -1526,7 +1526,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
       const {data:seq}=await supabase.rpc("next_invoice_number");
       const invId="INV-"+String(seq||1).padStart(4,"0");
       const profit=saleItems.reduce((a,i)=>{const p=products.find(x=>x.id===i.pid);return a+(getEffP(wiCust,i.pid)-(p?.cost||0))*i.qty;},0);
-      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:new Date().toLocaleDateString(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:0,created_at:new Date().toISOString()};
+      const ns={id:invId,truck_id:null,cust_id:wiCust,state:wiCustObj?.state||"",date:nowStr(),items:saleItems,total:sub,profit,previous_balance:wiPrevBal||0,previous_invoice_ids:wiPrevInvs.map(s=>s.id).join(","),check_penalty_applied:0,created_at:new Date().toISOString()};
       await supabase.from("sales").insert(ns);
       await Promise.all(saleItems.map(i=>{const p=products.find(x=>x.id===i.pid);return p?supabase.from("products").update({shelf:Math.max(0,p.shelf-i.qty)}).eq("id",p.id):Promise.resolve();}));
       let wiRecUrl="";
@@ -1662,7 +1662,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
         </div>}
         {wiPrevBal>0&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"8px 12px",marginBottom:6}}>
           <div style={{fontWeight:700,fontSize:11,color:"#dc2626",marginBottom:4}}>⚠️ Outstanding Balance</div>
-          {wiPrevInvs.slice(0,3).map(s=><div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#dc2626",marginBottom:2}}><span>{s.id} · {s.date}</span></div>)}
+          {wiPrevInvs.slice(0,3).map(s=><div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#dc2626",marginBottom:2}}><span>{s.id} · {fmtDate(s)}</span></div>)}
           <div style={{display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#dc2626",borderTop:"1px solid #fecaca",marginTop:4,paddingTop:4}}><span>Total Owed</span><span>{fmt2(wiPrevBal)}</span></div>
         </div>}
       </div>
@@ -1810,7 +1810,7 @@ function DriverWalkInTab({driverData, setDriverData, products, supabase, initCus
                     <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,background:isPaid?"#dcfce7":"#fef9c3",color:isPaid?"#166534":"#92400e"}}>{isPaid?"PAID":"UNPAID"}</span>
                     {s.amended_at&&<span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,background:"#ede9fe",color:"#5b21b6"}}>AMENDED</span>}
                   </div>
-                  <div style={{fontSize:11,color:"#9ca3af"}}>{s.date} · {(s.items||[]).length} product{(s.items||[]).length!==1?"s":""}</div>
+                  <div style={{fontSize:11,color:"#9ca3af"}}>``{fmtDate(s)} · {(s.items||[]).length} product{(s.items||[]).length!==1?"s":""}</div>
                   <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
                     {(s.items||[]).map(i=>{const p=products.find(x=>x.id===i.pid);return<span key={i.pid} style={{fontSize:10,background:"#f3f4f6",borderRadius:5,padding:"2px 7px",color:"#374151"}}>{p?.name||i.pid} ×{i.qty}</span>;})}
                   </div>
@@ -2871,7 +2871,7 @@ export default function OrderPortal() {
           html: `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;color:#212121">
             <div style="background:#0a1628;padding:20px;border-radius:8px 8px 0 0;text-align:center">
               <div style="color:#fff;font-size:22px;font-weight:700">${co?.name||"Your Supplier"}</div>
-              <div style="color:#94a3b8;font-size:12px;margin-top:4px">Invoice ${sale.id} · ${sale.date}</div>
+              <div style="color:#94a3b8;font-size:12px;margin-top:4px">Invoice ${sale.id} · ${fmtDate(sale)}</div>
             </div>
             <div style="border:1px solid #e5e7eb;border-top:none;padding:20px;border-radius:0 0 8px 8px">
               <p>Hi <strong>${cust.name}</strong>,</p>
@@ -3001,7 +3001,7 @@ export default function OrderPortal() {
                   </div>
                   <div style={{textAlign:"right"}}>
                     <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#0a1628"}}>{sale.id}</div>
-                    <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{sale.date}</div>
+                    <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{fmtDate(sale)}</div>
                   </div>
                 </div>
                 <div style={{background:"#f8f5f0",borderRadius:8,padding:"12px 14px",marginBottom:16}}>
@@ -3752,7 +3752,7 @@ export default function OrderPortal() {
                                 }
                               </div>
                               <div style={{fontWeight:600,fontSize:13,marginTop:4}}>{cust?.name||"Unknown"}</div>
-                              <div style={{fontSize:11,color:"#9ca3af"}}>{s.date} · <span style={{color:"#6b7280"}}>{createdBy}</span></div>
+                              <div style={{fontSize:11,color:"#9ca3af"}}>{fmtDate(s)} · <span style={{color:"#6b7280"}}>{createdBy}</span></div>
                             </div>
                             <div style={{textAlign:"right"}}>
                               <div style={{fontWeight:800,fontSize:18,color:isPaid?"#059669":"#7c3aed"}}>${gt.toFixed(2)}</div>
@@ -4422,7 +4422,7 @@ export default function OrderPortal() {
                 <div style={{fontWeight:700,fontSize:12,color:"#fff",marginBottom:4}}>⚠️ Outstanding Balance</div>
                 {custPrevInvs.slice(0,3).map(s=>(
                   <div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#fecaca",marginBottom:2}}>
-                    <span>{s.id} · {s.date}</span><span>${s.total.toFixed(2)}</span>
+                    <span>{s.id} · {fmtDate(s)}</span><span>${s.total.toFixed(2)}</span>
                   </div>
                 ))}
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,color:"#fff",borderTop:"1px solid #ef4444",marginTop:4,paddingTop:4}}>
