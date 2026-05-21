@@ -628,22 +628,99 @@ const SettleDoc=({truck,d,co,customers,payments,products,stateTaxes})=>{
         <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:21,color:"#111"}}>DAILY SETTLEMENT REPORT</div><div style={{fontSize:11,color:"#6b7280",marginTop:2}}>{co?.name} · {dateLabel()}</div></div>
         <div style={{textAlign:"right"}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:16,color:"#111"}}>{truck?.driver}</div><div style={{fontSize:11,color:"#6b7280"}}>{truck?.plate} · {truck?.route}</div></div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:20}}>
+
+      {/* Cash Hand-In Box — most important */}
+      <div style={{background:"#0a1628",borderRadius:10,padding:"14px 18px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
         <div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>UNIT RECONCILIATION</div>
-          <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Item","Units"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#9ca3af",borderBottom:"1px solid #e5e7eb",background:"transparent"}}>{h}</th>)}</tr></thead>
-          <tbody>{[["Loaded",d.loadedUnits],["Sold",d.soldUnits],["Returned",d.retUnits],["Variance",d.loadedUnits-d.soldUnits-d.retUnits]].map(([l,v])=><tr key={l}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13}}>{l}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontWeight:700,fontSize:14,color:l==="Variance"&&v!==0?"#dc2626":"#111"}}>{v}</td></tr>)}</tbody></table>
+          <div style={{fontSize:10,color:"#4b6080",fontWeight:700,letterSpacing:".1em",marginBottom:2}}>CASH TO HAND IN TO OFFICE</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:900,fontSize:32,color:"#f59e0b"}}>{fmt(d.cashToHandIn||0)}</div>
+          <div style={{fontSize:10,color:"#4b6080",marginTop:2}}>Cash collections only — checks/cards kept separate</div>
         </div>
-        <div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>FINANCIAL SUMMARY</div>
-          <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Item","Amount"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#9ca3af",borderBottom:"1px solid #e5e7eb",background:"transparent"}}>{h}</th>)}</tr></thead>
-          <tbody>{[["Revenue",fmt(d.rev),false],["Tax",fmt(d.tax),false],["Grand Total",fmt(d.rev+d.tax),true],["COGS",fmt(d.cogs),false],["Gross Profit",fmt(d.prof),true],["Cash Collected",fmt(d.collected),false],["Outstanding",fmt(d.outstanding),false]].map(([l,v,b])=><tr key={l} style={{background:b?"#fffbeb":"transparent"}}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:b?600:400}}>{l}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontWeight:b?800:500,fontSize:b?15:13,color:l==="Outstanding"?"#dc2626":l.includes("Profit")?"#16a34a":"#111"}}>{v}</td></tr>)}</tbody></table>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:10,color:"#4b6080",marginBottom:4}}>SETTLEMENT STATUS</div>
+          {d.outstanding>0
+            ?<span style={{background:"#dc2626",color:"#fff",padding:"4px 12px",borderRadius:6,fontSize:11,fontWeight:700}}>⚠️ {fmt(d.outstanding)} OUTSTANDING</span>
+            :<span style={{background:"#059669",color:"#fff",padding:"4px 12px",borderRadius:6,fontSize:11,fontWeight:700}}>✅ FULLY COLLECTED</span>
+          }
         </div>
       </div>
-      {d.truckSales.length>0&&<><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>INVOICE DETAIL</div>
-      <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Invoice","Customer","Units","Subtotal","Tax","Total","Status"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#9ca3af",borderBottom:"1px solid #e5e7eb",background:"transparent"}}>{h}</th>)}</tr></thead>
-      <tbody>{d.truckSales.map(s=>{const cust=customers.find(c=>c.id===s.cust_id);const pmt=payments.find(p=>p.sale_id===s.id);return(<tr key={s.id}><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,fontWeight:700,color:"#2563eb"}}>{s.id}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{cust?.name}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{fmt(s.total)}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,color:"#7c3aed"}}>{fmt(calcSettleTax(s,products,stateTaxes))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:700}}>{fmt(s.total+calcSettleTax(s,products,stateTaxes)+parseFloat(s.previous_balance||0))}</td><td style={{padding:"8px",borderBottom:"1px solid #f9fafb"}}><span style={{background:pmt?.status==="paid"?"#dcfce7":"#fef9c3",color:pmt?.status==="paid"?"#166534":"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:700}}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td></tr>);})}</tbody></table></>}
-      <div style={{marginTop:20,paddingTop:10,borderTop:"1px solid #e5e7eb",fontSize:10,color:"#9ca3af",textAlign:"center"}}>{co?.name} · {co?.phone} · {dateLabel()}</div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,marginBottom:16}}>
+        {/* Unit Reconciliation */}
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>UNIT RECONCILIATION</div>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <tbody>{[["Loaded",d.loadedUnits],["Sold",d.soldUnits],["Returned",d.retUnits],["Variance",d.loadedUnits-d.soldUnits-d.retUnits]].map(([l,v])=>(
+              <tr key={l}><td style={{padding:"6px 8px",fontSize:12,borderBottom:"1px solid #f3f4f6"}}>{l}</td>
+              <td style={{padding:"6px 8px",fontWeight:700,fontSize:13,borderBottom:"1px solid #f3f4f6",color:l==="Variance"&&v!==0?"#dc2626":"#111"}}>{v}</td></tr>
+            ))}</tbody>
+          </table>
+        </div>
+        {/* Financial Summary */}
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>FINANCIAL SUMMARY</div>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <tbody>{[["Revenue",fmt(d.rev),false],["Tax",fmt(d.tax),false],["Grand Total",fmt(d.rev),true],["Gross Profit",fmt(d.prof),false],["Collected",fmt(d.collected),"green"],["Outstanding",fmt(d.outstanding),"red"]].map(([l,v,b])=>(
+              <tr key={l} style={{background:b===true?"#fffbeb":"transparent"}}>
+                <td style={{padding:"6px 8px",fontSize:12,borderBottom:"1px solid #f3f4f6",fontWeight:b?600:400}}>{l}</td>
+                <td style={{padding:"6px 8px",fontWeight:b?800:500,fontSize:b===true?14:12,borderBottom:"1px solid #f3f4f6",color:b==="green"?"#059669":b==="red"?"#dc2626":"#111"}}>{v}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+        {/* Payment Method Breakdown */}
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>COLLECTIONS BY METHOD</div>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <tbody>{[
+              ["💵 Cash",fmt(d.cashAmt||0),"#059669",true],
+              ["🏦 Check",fmt(d.checkAmt||0),"#0ea5e9",false],
+              ["💳 Card",fmt(d.cardAmt||0),"#7c3aed",false],
+              ["📱 Zelle",fmt(d.zelleAmt||0),"#f59e0b",false],
+              ["TOTAL",fmt(d.collected),"#111",true],
+            ].map(([l,v,c,b])=>(
+              <tr key={l} style={{background:b&&l!=="TOTAL"?"#f0fdf4":l==="TOTAL"?"#f5f3ff":"transparent"}}>
+                <td style={{padding:"6px 8px",fontSize:12,borderBottom:"1px solid #f3f4f6",fontWeight:b?700:400}}>{l}</td>
+                <td style={{padding:"6px 8px",fontWeight:b?800:500,fontSize:b?14:12,borderBottom:"1px solid #f3f4f6",color:c}}>{v}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Invoice Detail */}
+      {d.truckSales.length>0&&<>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:800,color:"#6b7280",letterSpacing:".1em",marginBottom:8}}>INVOICE DETAIL</div>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Invoice","Customer","Units","Subtotal","Tax","Total","Method","Status"].map(h=>(
+            <th key={h} style={{textAlign:"left",padding:"7px 8px",fontSize:10,fontWeight:700,color:"#9ca3af",borderBottom:"1px solid #e5e7eb",background:"transparent"}}>{h}</th>
+          ))}</tr></thead>
+          <tbody>{d.truckSales.map(s=>{
+            const cust=customers.find(c=>c.id===s.cust_id);
+            const pmt=payments.find(p=>p.sale_id===s.id);
+            const tax=calcSettleTax(s,products,stateTaxes);
+            return(
+              <tr key={s.id}>
+                <td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,fontWeight:700,color:"#2563eb"}}>{s.id}</td>
+                <td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{cust?.name}</td>
+                <td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{(s.items||[]).reduce((a,i)=>a+i.qty,0)}</td>
+                <td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12}}>{fmt(s.total)}</td>
+                <td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:12,color:"#7c3aed"}}>{fmt(tax)}</td>
+                <td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:13,fontWeight:700}}>{fmt(s.total+tax+parseFloat(s.previous_balance||0))}</td>
+                <td style={{padding:"8px",borderBottom:"1px solid #f9fafb",fontSize:11,color:"#6b7280"}}>{pmt?.method?pmt.method.toUpperCase():"—"}</td>
+                <td style={{padding:"8px",borderBottom:"1px solid #f9fafb"}}><span style={{background:pmt?.status==="paid"?"#dcfce7":"#fef9c3",color:pmt?.status==="paid"?"#166534":"#854d0e",padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:700}}>{pmt?.status==="paid"?"PAID":"UNPAID"}</span></td>
+              </tr>
+            );
+          })}</tbody>
+        </table>
+      </>}
+
+      {/* Signature line */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:40,marginTop:28,paddingTop:16,borderTop:"1px solid #e5e7eb"}}>
+        <div><div style={{fontSize:10,color:"#9ca3af",marginBottom:24}}>DRIVER SIGNATURE</div><div style={{borderTop:"1px solid #212121",paddingTop:4,fontSize:10,color:"#9ca3af"}}>{truck?.driver}</div></div>
+        <div><div style={{fontSize:10,color:"#9ca3af",marginBottom:24}}>CASH RECEIVED BY</div><div style={{borderTop:"1px solid #212121",paddingTop:4,fontSize:10,color:"#9ca3af"}}>Date: {dateLabel()}</div></div>
+      </div>
+      <div style={{marginTop:12,fontSize:10,color:"#9ca3af",textAlign:"center"}}>{co?.name} · {co?.phone} · {dateLabel()}</div>
     </div>
   );
 };
@@ -3942,6 +4019,24 @@ export default function App(){
     const ts=sales.filter(s=>s.truck_id===tid),tr=returns.filter(r=>r.truck_id===tid),al=loads.filter(l=>l.truck_id===tid);
     const rev=ts.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
     const prof=ts.reduce((a,s)=>a+(s.profit||0),0);
+    const paidSales=ts.filter(s=>pmtFor(s.id)?.status==="paid");
+    const collected=paidSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+    // Payment method breakdown
+    const cashSales=paidSales.filter(s=>pmtFor(s.id)?.method==="cash");
+    const checkSales=paidSales.filter(s=>pmtFor(s.id)?.method==="check");
+    const cardSales=paidSales.filter(s=>pmtFor(s.id)?.method==="card"||pmtFor(s.id)?.method==="stripe");
+    const zelSales=paidSales.filter(s=>pmtFor(s.id)?.method==="zelle");
+    const cashAmt=cashSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+    const checkAmt=checkSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+    const cardAmt=cardSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+    const zelleAmt=zelSales.reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+    // Also check paymentsLog for multi-invoice payments
+    const truckCustIds=new Set(customers.filter(c=>c.truck_id===tid).map(c=>c.id));
+    const truckPmtLogs=paymentsLog.filter(p=>truckCustIds.has(p.cust_id));
+    const pmtLogCash=truckPmtLogs.filter(p=>p.method==="cash").reduce((a,p)=>a+parseFloat(p.amount||0),0);
+    const pmtLogCheck=truckPmtLogs.filter(p=>p.method==="check").reduce((a,p)=>a+parseFloat(p.amount||0),0);
+    const pmtLogCard=truckPmtLogs.filter(p=>p.method==="card"||p.method==="stripe").reduce((a,p)=>a+parseFloat(p.amount||0),0);
+    const pmtLogZelle=truckPmtLogs.filter(p=>p.method==="zelle").reduce((a,p)=>a+parseFloat(p.amount||0),0);
     return{
       truckSales:ts,
       loadedUnits:al.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+i.qty,0),0),
@@ -3949,10 +4044,15 @@ export default function App(){
       retUnits:tr.reduce((a,r)=>a+(r.items||[]).reduce((b,i)=>b+i.qty,0),0),
       rev,prof,cogs:ts.reduce((a,s)=>a+s.total,0)-prof,
       tax:ts.reduce((a,s)=>a+calcSaleTax(s),0),
-      collected:ts.filter(s=>pmtFor(s.id)?.status==="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),
+      collected,
       outstanding:ts.filter(s=>pmtFor(s.id)?.status!=="paid").reduce((a,s)=>a+calcSaleGrandTotal(s),0),
+      // Payment breakdown
+      cashAmt,checkAmt,cardAmt,zelleAmt,
+      pmtLogCash,pmtLogCheck,pmtLogCard,pmtLogZelle,
+      // Driver should hand in: cash only
+      cashToHandIn:cashAmt+pmtLogCash,
     };
-  },[sales,returns,loads,calcSaleGrandTotal,calcSaleTax,pmtFor]);
+  },[sales,returns,loads,customers,paymentsLog,calcSaleGrandTotal,calcSaleTax,pmtFor]);
 
   // -- CSV IMPORT -------------------------------------------------------------
   const[csvPreview,setCsvPreview]=useState([]);
@@ -3971,18 +4071,29 @@ export default function App(){
   };
 
   const parseCSV=text=>{
-    const lines=text.trim().split("\n");
-    const headers=lines[0].split(",").map(h=>h.trim().replace(/"/g,"").toLowerCase());
+    // Robust CSV parser — handles quoted fields with commas inside
+    const parseCSVLine=line=>{
+      const vals=[];let cur="";let inQ=false;
+      for(let i=0;i<line.length;i++){
+        const ch=line[i];
+        if(ch==='"'){if(inQ&&line[i+1]==='"'){cur+='"';i++;}else{inQ=!inQ;}}
+        else if(ch===','&&!inQ){vals.push(cur.trim());cur="";}
+        else cur+=ch;
+      }
+      vals.push(cur.trim());
+      return vals;
+    };
+    const lines=text.trim().split(/\r?\n/);
+    const headers=parseCSVLine(lines[0]).map(h=>h.replace(/"/g,"").toLowerCase().trim());
     const required=["name","sku","price","cost"];
     const missing=required.filter(r=>!headers.includes(r));
     if(missing.length>0){setCsvErrors([`Missing required columns: ${missing.join(", ")}`]);return[];}
-    const rows=[];
-    const errors=[];
+    const rows=[];const errors=[];
     for(let i=1;i<lines.length;i++){
       if(!lines[i].trim())continue;
-      const vals=lines[i].split(",").map(v=>v.trim().replace(/"/g,""));
+      const vals=parseCSVLine(lines[i]);
       const row={};
-      headers.forEach((h,j)=>row[h]=vals[j]||"");
+      headers.forEach((h,j)=>row[h]=vals[j]!==undefined?vals[j].replace(/"/g,"").trim():"");
       if(!row.name){errors.push(`Row ${i+1}: name is required`);continue;}
       if(!row.sku){errors.push(`Row ${i+1}: SKU is required`);continue;}
       if(isNaN(parseFloat(row.price))||parseFloat(row.price)<=0){errors.push(`Row ${i+1}: invalid price "${row.price}"`);continue;}
@@ -3993,9 +4104,11 @@ export default function App(){
         sku:row.sku,
         cat:row.cat||"general",
         unit:row.unit||"unit",
+        case_qty:parseInt(row.case_qty)||1,
         cost:parseFloat(row.cost),
         price:parseFloat(row.price),
         shelf:parseInt(row.shelf)||0,
+        reorder_point:parseInt(row.reorder_point)||5,
       });
     }
     setCsvErrors(errors);
@@ -4350,7 +4463,13 @@ export default function App(){
   // -- PAYMENT STATE ----------------------------------------------------------
   const[pmModal,setPmModal]=useState(false);
   const[pmForm,setPmForm]=useState({method:"cash",amount:"",check_number:"",bank_name:"",note:"",cust_id:"",truck_id:"",invoice_ids:[],receipt_url:""});
-  const[pmTab,setPmTab]=useState("log"); // "log" | "collect"
+  const[pmTab,setPmTab]=useState("log"); // "log" | "unpaid" | "bulk" | "reconcile"
+  const[bulkCust,setBulkCust]=useState("");
+  const[bulkSelected,setBulkSelected]=useState(new Set());
+  const[bulkMethod,setBulkMethod]=useState("cash");
+  const[bulkSaving,setBulkSaving]=useState(false);
+  const[bulkCheck,setBulkCheck]=useState("");
+  const[bulkNote,setBulkNote]=useState("");
 
   const markPaid=async(sid,method="cash",amount=0,checkNum="",note="",collectedBy="",receiptUrl="")=>{
     const ex=pmtFor(sid);
@@ -5656,8 +5775,8 @@ export default function App(){
               <button className="btn ba" onClick={()=>setPmModal(true)}>💳 Record Payment</button>
               <button className="btn bpr" onClick={exportPayments}>{ic.dl} Export CSV</button>
               <div style={{marginLeft:"auto",display:"flex",gap:6}}>
-                {["log","unpaid","reconcile"].map(t=>(
-                  <button key={t} className={`btn ${pmTab===t?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>setPmTab(t)}>{t==="log"?"All Payments":t==="unpaid"?"Unpaid Invoices":"🏦 Bank Reconcile"}</button>
+                {["log","unpaid","bulk","reconcile"].map(t=>(
+                  <button key={t} className={`btn ${pmTab===t?"ba":"bgh"}`} style={{padding:"6px 14px",textTransform:"capitalize"}} onClick={()=>setPmTab(t)}>{t==="log"?"All Payments":t==="unpaid"?"Unpaid Invoices":t==="bulk"?"💰 Bulk Pay":"🏦 Bank Reconcile"}</button>
                 ))}
               </div>
             </div>
@@ -5770,6 +5889,121 @@ export default function App(){
             </div>}
 
             {/* Bank Reconciliation Tab */}
+            {/* ── BULK PAYMENT ── */}
+            {pmTab==="bulk"&&<div className="card">
+              <div style={{padding:"14px 16px",borderBottom:"1px solid #e5e7eb"}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,color:"#212121",marginBottom:10}}>💰 Bulk Payment — Pay Multiple Invoices at Once</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:10,alignItems:"end"}}>
+                  <div className="field" style={{margin:0}}>
+                    <label>Select Customer</label>
+                    <select value={bulkCust} onChange={e=>{setBulkCust(e.target.value);setBulkSelected(new Set());}}>
+                      <option value="">— Choose customer —</option>
+                      {customers.filter(c=>visSales.some(s=>s.cust_id===c.id&&pmtFor(s.id)?.status!=="paid")).map(c=>(
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field" style={{margin:0}}>
+                    <label>Payment Method</label>
+                    <select value={bulkMethod} onChange={e=>setBulkMethod(e.target.value)}>
+                      {[["cash","💵 Cash"],["check","🏦 Check"],["card","💳 Card"],["zelle","📱 Zelle"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </div>
+                  {bulkMethod==="check"&&<div className="field" style={{margin:0}}>
+                    <label>Check #</label>
+                    <input placeholder="Check number" value={bulkCheck} onChange={e=>setBulkCheck(e.target.value)}/>
+                  </div>}
+                </div>
+              </div>
+
+              {bulkCust&&(()=>{
+                const custUnpaid=visSales.filter(s=>s.cust_id===bulkCust&&pmtFor(s.id)?.status!=="paid");
+                const selectedTotal=custUnpaid.filter(s=>bulkSelected.has(s.id)).reduce((a,s)=>a+calcSaleGrandTotal(s),0);
+                const allSelected=custUnpaid.length>0&&custUnpaid.every(s=>bulkSelected.has(s.id));
+
+                const toggleAll=()=>{
+                  if(allSelected) setBulkSelected(new Set());
+                  else setBulkSelected(new Set(custUnpaid.map(s=>s.id)));
+                };
+
+                const bulkPay=async()=>{
+                  if(bulkSelected.size===0) return showToast("Select at least one invoice","error");
+                  setBulkSaving(true);
+                  try{
+                    const invoiceIds=[...bulkSelected];
+                    const amount=selectedTotal;
+                    const pmtId="PMT-"+uid();
+                    const cust=getC(bulkCust);
+                    // Insert payment log entry
+                    const logRec={id:pmtId,cust_id:bulkCust,truck_id:null,method:bulkMethod,amount,check_number:bulkCheck||"",invoice_ids:invoiceIds,note:bulkNote||`Bulk payment — ${invoiceIds.length} invoices`,date:new Date().toLocaleDateString(),collected_at:new Date().toISOString()};
+                    await supabase.from("payments_log").insert(logRec);
+                    // Mark each invoice as paid
+                    await Promise.all(invoiceIds.map(async sid=>{
+                      const existing=payments.find(p=>p.sale_id===sid);
+                      if(existing){
+                        await supabase.from("payments").update({status:"paid",method:bulkMethod,check_number:bulkCheck||""}).eq("sale_id",sid);
+                      } else {
+                        await supabase.from("payments").insert({sale_id:sid,status:"paid",method:bulkMethod,amount:calcSaleGrandTotal(sales.find(s=>s.id===sid)||{}),check_number:bulkCheck||""});
+                      }
+                    }));
+                    setPayments(prev=>prev.map(p=>bulkSelected.has(p.sale_id)?{...p,status:"paid",method:bulkMethod}:p));
+                    setPaymentsLog(prev=>[logRec,...prev]);
+                    showToast(`✅ ${invoiceIds.length} invoices marked paid — ${fmt(amount)}`);
+                    setBulkSelected(new Set());setBulkCheck("");setBulkNote("");
+                    logAudit("PAY","BulkPayment",`${cust?.name} — ${invoiceIds.length} invoices — ${fmt(amount)} via ${bulkMethod}`);
+                  }catch(e){showToast(e.message,"error");}
+                  setBulkSaving(false);
+                };
+
+                return(<>
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#f9fafb"}}>
+                    <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontWeight:600,fontSize:13}}>
+                      <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{width:16,height:16}}/>
+                      {allSelected?"Deselect All":`Select All (${custUnpaid.length} unpaid)`}
+                    </label>
+                    {bulkSelected.size>0&&<div style={{display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{fontSize:13,color:"#6b7280"}}>{bulkSelected.size} selected · <span style={{fontWeight:700,color:"#059669"}}>{fmt(selectedTotal)}</span></div>
+                      <button className="btn bg" onClick={bulkPay} disabled={bulkSaving}>
+                        {bulkSaving?<><span className="sp">⟳</span> Saving…</>:`✅ Pay ${bulkSelected.size} Invoices — ${fmt(selectedTotal)}`}
+                      </button>
+                    </div>}
+                  </div>
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead><tr style={{background:"#0a1628",color:"#fff"}}>
+                        <th style={{padding:"9px 13px",width:40}}></th>
+                        {["Invoice","Date","Grand Total","Age"].map(h=><th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:700}}>{h}</th>)}
+                      </tr></thead>
+                      <tbody>{custUnpaid.map(s=>{
+                        const gt=calcSaleGrandTotal(s);
+                        const age=Math.floor((Date.now()-new Date(s.created_at||s.date))/(1000*60*60*24));
+                        return(
+                          <tr key={s.id} style={{borderBottom:"1px solid #f3f4f6",background:bulkSelected.has(s.id)?"#f0fdf4":"#fff",cursor:"pointer"}} onClick={()=>{const ns=new Set(bulkSelected);ns.has(s.id)?ns.delete(s.id):ns.add(s.id);setBulkSelected(ns);}}>
+                            <td style={{padding:"9px 13px"}}><input type="checkbox" checked={bulkSelected.has(s.id)} readOnly style={{width:16,height:16}}/></td>
+                            <td style={{padding:"9px 13px",fontWeight:700,color:"#7c3aed",fontSize:12}}>{s.id}</td>
+                            <td style={{padding:"9px 13px",fontSize:11,color:"#6b7280"}}>{fmtDate(s)}</td>
+                            <td style={{padding:"9px 13px",fontWeight:700,color:"#212121"}}>{fmt(gt)}</td>
+                            <td style={{padding:"9px 13px"}}><span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,background:age>30?"#fef2f2":age>7?"#fffbeb":"#f0fdf4",color:age>30?"#dc2626":age>7?"#92400e":"#065f46"}}>{age}d</span></td>
+                          </tr>
+                        );
+                      })}</tbody>
+                    </table>
+                  </div>
+                  {bulkSelected.size>0&&<div style={{padding:"12px 16px",borderTop:"1px solid #e5e7eb",display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                    <input placeholder="Note (optional)" value={bulkNote} onChange={e=>setBulkNote(e.target.value)} style={{flex:1,minWidth:180,padding:"8px 12px",border:"1px solid #d1d5db",borderRadius:7,fontSize:12,outline:"none"}}/>
+                    <button className="btn bg" style={{padding:"9px 20px"}} onClick={bulkPay} disabled={bulkSaving}>
+                      {bulkSaving?<><span className="sp">⟳</span> Saving…</>:`✅ Pay ${bulkSelected.size} Invoices — ${fmt(selectedTotal)}`}
+                    </button>
+                  </div>}
+                </>);
+              })()}
+              {!bulkCust&&<div style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+                <div style={{fontSize:32,marginBottom:8}}>💰</div>
+                <div style={{fontWeight:600,marginBottom:4}}>Select a customer to bulk pay their invoices</div>
+                <div style={{fontSize:12}}>Only customers with unpaid invoices are shown</div>
+              </div>}
+            </div>}
+
             {pmTab==="reconcile"&&<BankReconcile paymentsLog={paymentsLog} customers={customers} getC={getC} fmt={fmt}/>}
 
           </div>}

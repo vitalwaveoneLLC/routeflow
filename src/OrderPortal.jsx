@@ -2135,6 +2135,13 @@ export default function OrderPortal() {
   const [histSearch, setHistSearch] = useState("");
   const [histPage, setHistPage] = useState(0);
   const HIST_PER_PAGE = 10;
+  // Bulk pay states
+  const [bulkPayCust,   setBulkPayCust]   = useState("");
+  const [bulkPaySel,    setBulkPaySel]    = useState(new Set());
+  const [bulkPayMethod, setBulkPayMethod] = useState("cash");
+  const [bulkPayCheck,  setBulkPayCheck]  = useState("");
+  const [bulkPayNote,   setBulkPayNote]   = useState("");
+  const [bulkPaySaving, setBulkPaySaving] = useState(false);
 
   // -- INVOICE LINK HANDLER (from WhatsApp) ------------------------------------
   const [invoiceLink, setInvoiceLink] = useState(()=>{
@@ -3348,12 +3355,13 @@ export default function OrderPortal() {
               </div>
 
               {/* Tab navigation */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr 1fr 1fr",gap:6,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr",gap:6,marginBottom:16}}>
                 {[
                   {k:"dashboard",e:"🏠",l:"Home"},
                   {k:"route",e:"📅",l:"Route"},
                   {k:"load",e:"📦",l:"Load"},
                   {k:"sell",e:"💳",l:"Sell"},
+                  {k:"bulkpay",e:"💰",l:"Bulk Pay"},
                   {k:"expenses",e:"💸",l:"Expenses"},
                   {k:"performance",e:"📊",l:"Stats"},
                   {k:"history",e:"📄",l:"History"},
@@ -3742,6 +3750,124 @@ export default function OrderPortal() {
 
               {/* ── EXPENSES TAB ── */}
               {driverTab==="expenses"&&<DriverExpensesTab driverData={driverData} supabase={supabase}/>}
+
+              {/* ── BULK PAY TAB ── */}
+              {driverTab==="bulkpay"&&<div>
+                <div style={{fontWeight:700,fontSize:14,color:"#0a1628",marginBottom:12}}>💰 Bulk Payment — Pay Multiple Invoices</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                  <div>
+                    <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>SELECT CUSTOMER</label>
+                    <select value={bulkPayCust} onChange={e=>{setBulkPayCust(e.target.value);setBulkPaySel(new Set());}}
+                      style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}>
+                      <option value="">— Choose customer —</option>
+                      {driverData.customers.filter(c=>driverData.sales.some(s=>s.cust_id===c.id&&!s._paid)).map(c=>(
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>PAYMENT METHOD</label>
+                    <select value={bulkPayMethod} onChange={e=>setBulkPayMethod(e.target.value)}
+                      style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}>
+                      {[["cash","💵 Cash"],["check","🏦 Check"],["zelle","📱 Zelle"],["card","💳 Card"]].map(([v,l])=>(
+                        <option key={v} value={v}>{l}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                {bulkPayMethod==="check"&&<div style={{marginBottom:10}}>
+                  <label style={{fontSize:11,fontWeight:700,color:"#6b7280",display:"block",marginBottom:4}}>CHECK NUMBER</label>
+                  <input value={bulkPayCheck} onChange={e=>setBulkPayCheck(e.target.value)} placeholder="Check #"
+                    style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif"}}/>
+                </div>}
+
+                {bulkPayCust?(()=>{
+                  const custUnpaid=driverData.sales.filter(s=>s.cust_id===bulkPayCust&&!s._paid);
+                  const selTotal=custUnpaid.filter(s=>bulkPaySel.has(s.id)).reduce((a,s)=>{
+                    const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));
+                    const rate=st?.exempt?0:parseFloat(st?.rate||0);
+                    const tax=parseFloat(((s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0)*rate/100).toFixed(2));
+                    return a+s.total+tax+parseFloat(s.previous_balance||0);
+                  },0);
+                  const allSel=custUnpaid.length>0&&custUnpaid.every(s=>bulkPaySel.has(s.id));
+
+                  const doBulkPay=async()=>{
+                    if(bulkPaySel.size===0)return;
+                    setBulkPaySaving(true);
+                    try{
+                      const ids=[...bulkPaySel];
+                      await Promise.all(ids.map(sid=>{
+                        const ex=driverData.sales.find(s=>s.id===sid);
+                        return supabase.from("payments").upsert({sale_id:sid,status:"paid",method:bulkPayMethod,amount:selTotal/ids.length,check_number:bulkPayCheck||""},{onConflict:"sale_id"});
+                      }));
+                      // Log to payments_log
+                      await supabase.from("payments_log").insert({
+                        id:"PMT-"+Math.random().toString(36).slice(2,8).toUpperCase(),
+                        cust_id:bulkPayCust,truck_id:driverData.truck?.id,
+                        method:bulkPayMethod,amount:selTotal,
+                        check_number:bulkPayCheck||"",
+                        invoice_ids:ids,
+                        note:bulkPayNote||`Driver bulk payment — ${ids.length} invoices`,
+                        date:new Date().toLocaleDateString(),
+                        collected_at:new Date().toISOString(),
+                        collected_by:driverData.truck?.driver,
+                      });
+                      setDriverData(prev=>({...prev,sales:prev.sales.map(s=>bulkPaySel.has(s.id)?{...s,_paid:true}:s)}));
+                      setBulkPaySel(new Set());setBulkPayCheck("");setBulkPayNote("");
+                      setMsg({t:"success",m:`✅ ${ids.length} invoices paid — ${fmt2(selTotal)}`});
+                      setTimeout(()=>setMsg(null),3000);
+                    }catch(e){setMsg({t:"error",m:e.message});}
+                    setBulkPaySaving(false);
+                  };
+
+                  if(custUnpaid.length===0) return <div className="card" style={{padding:32,textAlign:"center",color:"#9ca3af"}}><div style={{fontSize:28,marginBottom:6}}>✅</div><div>All invoices paid for this customer</div></div>;
+
+                  return(<>
+                    {/* Select all bar */}
+                    <div style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:"12px 14px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                      <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontWeight:600,fontSize:13}}>
+                        <input type="checkbox" checked={allSel} onChange={()=>{if(allSel)setBulkPaySel(new Set());else setBulkPaySel(new Set(custUnpaid.map(s=>s.id)));}} style={{width:18,height:18}}/>
+                        {allSel?"Deselect All":`Select All (${custUnpaid.length})`}
+                      </label>
+                      {bulkPaySel.size>0&&<div style={{fontSize:13,fontWeight:700,color:"#059669"}}>{bulkPaySel.size} selected · {fmt2(selTotal)}</div>}
+                    </div>
+
+                    {/* Invoice rows */}
+                    {custUnpaid.map(s=>{
+                      const st=driverData.stateTaxes?.find(x=>x.id===(s.state||""));
+                      const rate=st?.exempt?0:parseFloat(st?.rate||0);
+                      const tax=parseFloat(((s.items||[]).reduce((b,i)=>{const p=products.find(x=>x.id===i.pid);return isTaxableProd(p)?b+(p?.price||0)*i.qty:b;},0)*rate/100).toFixed(2));
+                      const gt=s.total+tax+parseFloat(s.previous_balance||0);
+                      const sel=bulkPaySel.has(s.id);
+                      return(
+                        <div key={s.id} onClick={()=>{const ns=new Set(bulkPaySel);sel?ns.delete(s.id):ns.add(s.id);setBulkPaySel(ns);}}
+                          style={{background:sel?"#f0fdf4":"#fff",border:`1.5px solid ${sel?"#a7f3d0":"#e5e7eb"}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                          <div style={{display:"flex",alignItems:"center",gap:10}}>
+                            <input type="checkbox" checked={sel} readOnly style={{width:18,height:18}}/>
+                            <div>
+                              <div style={{fontWeight:700,fontSize:13,color:"#7c3aed"}}>{s.id}</div>
+                              <div style={{fontSize:11,color:"#9ca3af"}}>{fmtDate(s)}</div>
+                            </div>
+                          </div>
+                          <div style={{fontWeight:800,fontSize:16,color:sel?"#059669":"#0a1628"}}>{fmt2(gt)}</div>
+                        </div>
+                      );
+                    })}
+
+                    {bulkPaySel.size>0&&<>
+                      <input value={bulkPayNote} onChange={e=>setBulkPayNote(e.target.value)} placeholder="Note (optional)"
+                        style={{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Inter',sans-serif",marginBottom:10}}/>
+                      <button onClick={doBulkPay} disabled={bulkPaySaving}
+                        style={{width:"100%",padding:"14px",background:"#059669",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:15,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                        {bulkPaySaving?<><span className="sp">⟳</span>Saving…</>:`✅ Pay ${bulkPaySel.size} Invoices — ${fmt2(selTotal)}`}
+                      </button>
+                    </>}
+                  </>);
+                })():<div style={{background:"#f9fafb",border:"1.5px dashed #e5e7eb",borderRadius:10,padding:32,textAlign:"center",color:"#9ca3af"}}>
+                  <div style={{fontSize:32,marginBottom:8}}>💰</div>
+                  <div style={{fontWeight:600}}>Select a customer above to see their unpaid invoices</div>
+                </div>}
+              </div>}
 
               {/* ── HISTORY TAB ── */}
               {driverTab==="history"&&<div>
